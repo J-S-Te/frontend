@@ -1,5 +1,5 @@
 <script setup>
-import { loginUsername } from "@/modules/shared/loginUsername.mjs"
+import { useLoginUsername } from '@/modules/shared/composables/useLoginUsername.js'
 import { useDialogFocusTrap } from '@/modules/shared/composables/useDialogFocusTrap.js'
 import ShellPreferences from '@/modules/shared/components/ShellPreferences.vue'
 import { useSidebarNavigation } from '@/modules/shared/composables/useSidebarNavigation.js'
@@ -1421,13 +1421,7 @@ const activeNodeItems = computed(() => ({
   implementation: implementationItems.value,
 }[activeSection.value] || serviceItems.value))
 const completedProjectCount = computed(() => projects.value.filter((project) => project.status === projectStatusCompleted).length)
-const currentUserName = computed(() => {
-  const account = loginUsername(session.value)
-  // 部分部署的项目会话把平台内部主体 ID（platform-…）放在 username 上；
-  // 侧栏账号名只展示服务端 display_name，不把内部 ID 当成登录账号。
-  const displayName = String(session.value?.display_name || '').trim()
-  return displayName && /^(platform|user|subject)-/i.test(account) ? displayName : account
-})
+const currentUserName = useLoginUsername(session)
 // 与客户与商机系统的账号行保持一致：首字头像 + 账号名 + 角色名。
 // 角色名取服务端角色目录，目录未就绪或请求失败时退回角色码，不出现空白副标题。
 const currentUserInitial = computed(() => {

@@ -257,6 +257,7 @@ async function viewHarness(overrides = {}) {
   const script = component.match(/<script setup>([\s\S]*?)<\/script>/)[1].replace(/^import[\s\S]*?;\n/gm, '')
   const context = vm.createContext({
     ref: value => ({ value }), computed: getter => ({ get value() { return getter() } }), watch() {},
+    useLoginUsername: () => ({ value: '当前用户' }),
     useRoute: () => ({ params: { section: 'receipts' }, query: {} }), useRouter: () => ({ push() {}, replace() {} }),
     window: { setTimeout() {}, confirm: () => false }, formatSettlementError, ...bindings,
     createRequestScope, allowedSections, permissionCheck, canLoad, canLoadKey: canLoad,

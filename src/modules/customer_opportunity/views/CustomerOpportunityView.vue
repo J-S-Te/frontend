@@ -1,5 +1,5 @@
 <script setup>
-import { loginUsername } from "@/modules/shared/loginUsername.mjs"
+import { useLoginUsername } from '@/modules/shared/composables/useLoginUsername.js'
 import OperationToast from '@/modules/shared/components/OperationToast.vue'
 import ListState from '@/modules/shared/components/ListState.vue'
 import PaginationBar from '@/modules/shared/components/PaginationBar.vue'
@@ -576,7 +576,7 @@ const commercialRecordCommandScope = computed(() => JSON.stringify([
   crmSession.value?.tenant_id || '', crmSession.value?.user_id || '',
 ]))
 watch(commercialRecordCommandScope, () => commercialRecordCommands.clear(), { flush: 'sync' })
-const currentUserLabel = computed(() => loginUsername(crmSession.value))
+const currentUserLabel = useLoginUsername(crmSession)
 const currentUserInitial = computed(() => {
   const label = currentUserLabel.value
   return /^[\x00-\x7F]+$/.test(label) ? label.slice(0, 2).toUpperCase() : Array.from(label)[0] || '用'

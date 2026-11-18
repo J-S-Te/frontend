@@ -43,7 +43,7 @@ import { approvalNodeLabel, approvalNodesLabel, assignmentPurpose, expenseScopeD
   hasTenantAllCapability, reimbursementRoleLabel } from '../rolePresentation.js'
 import { formatBusinessDateTime, todayBusinessDate } from '../../shared/utils/businessTime.js'
 import { sourceSHA256 } from '../../shared/utils/sourceIntegrity.js'
-import { loginUsername } from '../../shared/loginUsername.mjs'
+import { useLoginUsername } from '../../shared/composables/useLoginUsername.js'
 import { createCommandRunner, createRequestID, formatMinor, toMinor, timeoutSignal, validateItems } from '../api/client.js'
 
 import { ensureReimbursementSession, logoutReimbursement, reimbursementAPI as api,
@@ -341,7 +341,7 @@ const navGroups = computed(() => {
   })).filter((group) => group.items.length)
 })
 // 原型角色卡：只显示当前真实会话的主体与授权范围，不提供 mock 角色切换。
-const currentUserName = computed(() => loginUsername(session.value))
+const currentUserName = useLoginUsername(session)
 const sessionInitials = computed(() => {
   const name = currentUserName.value
   if (name === '当前用户') return '用'

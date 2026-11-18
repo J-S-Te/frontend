@@ -19,7 +19,7 @@ function shellHarness(session, failure = null) {
     inject: () => null,
     useRoute: () => ({ params: { section: 'finance' }, query: {} }),
     useRouter: () => ({ replace: async () => {}, push: () => {} }),
-    useUrlFilterState: () => {}, loginUsername: () => 'test',
+    useUrlFilterState: () => {}, useLoginUsername: () => Vue.ref('test'),
     createEmbedSessionActivity: () => ({ reset: () => {}, destroy: () => {} }),
     subscribeRelatedDataChanges: () => () => {}, RELATED_DATA: {},
     getAuthMe: async () => session,

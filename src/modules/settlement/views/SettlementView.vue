@@ -1,5 +1,5 @@
 <script setup>
-import { loginUsername } from "@/modules/shared/loginUsername.mjs"
+import { useLoginUsername } from '@/modules/shared/composables/useLoginUsername.js'
 import { agingDisplayRows } from "../utils/agingDisplay.js";
 import { allowedSections, permissionCheck, canLoad as canLoadKey } from "../utils/capabilities.js";
 import SettlementRecognitionPanel from "../components/SettlementRecognitionPanel.vue";
@@ -107,7 +107,7 @@ const mobileMenuOpen = ref(false);
 const settlementSession = ref({});
 const recognitionAPI = createRecognitionAPI(request, downloadRecognitionEvidence);
 const nativeFinancialAPI = createNativeFinancialAPI(request);
-const sessionDisplayName = computed(() => loginUsername(settlementSession.value));
+const sessionDisplayName = useLoginUsername(settlementSession);
 const sessionAccount = computed(() => "当前登录账号");
 const sessionAvatar = computed(() => sessionDisplayName.value.slice(0, 1).toUpperCase() || "结");
 const sessionPermissions = computed(

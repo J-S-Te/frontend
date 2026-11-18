@@ -2,7 +2,7 @@
 import ShellPreferences from '@/modules/shared/components/ShellPreferences.vue'
 import { useSidebarNavigation } from '@/modules/shared/composables/useSidebarNavigation.js'
 import { readSidebarCollapsed } from '@/modules/shared/utils/shellPreferences.js'
-import { loginUsername } from "@/modules/shared/loginUsername.mjs"
+import { useLoginUsername } from '@/modules/shared/composables/useLoginUsername.js'
 // 数据看板统一外壳（对齐 project_management 模式）：
 // 深色侧栏导航 + 顶栏 + 页面头，按 route.params.section 切换分区；
 // 启用嵌入时总览、报告、财务看板经嵌入桥加载；合同、项目看板使用本地原生模型，避免空白 iframe。
@@ -166,10 +166,7 @@ watch(dashboardEmbedEnabled, (enabled) => {
 })
 
 const currentMeta = computed(() => pageMeta[section.value] || pageMeta.overview)
-const currentUserName = computed(() => {
-  const displayName = typeof me.value?.display_name === "string" ? me.value.display_name.trim() : ""
-  return displayName || loginUsername(me.value)
-})
+const currentUserName = useLoginUsername(me)
 const currentUserRole = computed(() => {
   const roles = (me.value?.roles || []).map((role) => ROLE_LABELS[role] || role)
   return roles.join(" / ") || "看板用户"

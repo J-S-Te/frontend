@@ -5,6 +5,7 @@ import { AuthError, logoutCurrentSession } from '@/modules/platform/auth/api/aut
 import { getUnreadCount, listInbox, markNotificationRead } from '@/modules/platform/notifications/api/notifications'
 import ConsoleIcon from '@/modules/platform/shared/components/ConsoleIcon.vue'
 import LoadingState from '@/modules/shared/components/LoadingState.vue'
+import { loginUsername } from '@/modules/shared/loginUsername.mjs'
 
 // 设置分区组件按需加载：控制台/审计首屏只带外壳与当前分区，审计页不再下载 11 个
 // 设置面板的 JS/CSS；某个分区的加载失败或大数据量也不会拖慢其他入口。
@@ -234,11 +235,7 @@ const pendingPersonnelChangeUserId = ref('')
 
 const { principal, refreshPrincipal } = useCurrentPrincipal()
 
-const currentAccountName = computed(() => {
-  const account = principal.value?.account
-  const user = principal.value?.user
-  return String(account?.name || account?.code || user?.name || '').trim() || '当前登录用户'
-})
+const currentAccountName = computed(() => loginUsername(principal.value))
 
 const currentRoleNames = computed(() => {
   const roles = Array.isArray(principal.value?.roles) ? principal.value.roles : []
