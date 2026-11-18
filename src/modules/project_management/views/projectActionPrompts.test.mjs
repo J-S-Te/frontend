@@ -3,6 +3,7 @@ import test from 'node:test'
 import { readFileSync } from 'node:fs'
 import vm from 'node:vm'
 import { ref } from 'vue'
+import { projectAllowsWorkflowNode } from '../workflowNode.js'
 
 const source = readFileSync(new URL('./ProjectManagementView.vue', import.meta.url), 'utf8')
 const operations = [
@@ -29,16 +30,20 @@ function harness(operation) {
     session: ref({ user_id: 'USER', tenant_id: 'TENANT' }),
     selectedServiceItemIDs: ref([item.id]), serviceItems: ref([item]),
     selectedServiceItem: ref(item), selectedServiceItems: ref([item]), pendingRollbackRequests: ref([request]),
+    detailItems: ref([item]), detailProject: ref({ status: '待分配' }),
     canRevokeTeam: ref(true), canRevokeExecution: ref(true), canManageDecomposition: ref(true),
     canRevokeImplementation: ref(true), canRequestRollback: ref(true), canApproveRollback: ref(true),
     askPrompt: (options) => { prompts.push(options); context.promptDialog.value = options; return new Promise((yes) => { resolve = yes }) },
     showToast: () => {}, formatUserError: () => '', loadWorkspace: async () => {}, refreshAfterWrite: async () => {},
     window: { prompt: () => { throw new Error('必须使用可等待的共享输入弹窗') } },
   }
+  context.projectAllowsNode = (_item, node) =>
+    projectAllowsWorkflowNode(context.detailProject.value.status, node)
   for (const name of ['revokeTeamAssignment', 'revokeExecutionAssignment', 'returnServiceItemToDecomposition', 'withdrawRollback', 'revokeImplementationPlan', 'revokePreparation', 'requestRollback', 'decideRollback']) {
     context[name] = async (...args) => writes.push([name, ...args])
   }
-  const names = ['captureReasonContext', 'reasonContextCurrent', 'askOperationReason', operation]
+  const names = ['detailAssignmentActionItems', 'captureReasonContext',
+    'reasonContextCurrent', 'askOperationReason', operation]
   const functions = names.map((name) => {
     const start = source.search(new RegExp(`(?:async )?function ${name}\\(`))
     if (start < 0 && name !== operation) return ''
@@ -47,6 +52,40 @@ function harness(operation) {
   })
   const run = vm.runInNewContext(`${functions.join('\n')}\n${operation}`, context)
   return { context, item, request, writes, prompts, run: (args) => run(...args.map((arg) => arg === 'REQUEST' ? request : arg)), finish: (value) => { context.promptDialog.value = null; resolve(value) } }
+}
+
+for (const [name, args] of [
+  ['revokeSelectedAssignment', ['team', 'SI-1']],
+  ['revokeSelectedAssignment', ['execution', 'SI-1']],
+  ['returnSelectedToDecomposition', ['SI-1']],
+]) {
+  test(`${name} ${args[0]}：完成分配项在项目详情仍可带原因纠错`, async () => {
+    const h = harness(name)
+    h.context.activeSection.value = 'project_detail'
+    h.context.selectedServiceItems.value = []
+    h.context.selectedServiceItemIDs.value = []
+    const pending = h.run(args)
+    assert.equal(h.prompts.length, 1)
+    h.finish('纠正错误分配')
+    await pending
+    assert.equal(h.writes.length, 1)
+    assert.equal(h.writes[0][1], 'SI-1')
+    assert.equal(h.writes[0][2].expected_version, 5)
+    assert.equal(h.writes[0][2].reason, '纠正错误分配')
+  })
+  test(`${name} ${args[0]}：详情切换项目或父阶段回退后停止纠错写入`, async () => {
+    for (const change of ['project', 'parent-stage']) {
+      const h = harness(name)
+      h.context.activeSection.value = 'project_detail'
+      const pending = h.run(args)
+      assert.equal(h.prompts.length, 1)
+      if (change === 'project') h.context.detailItems.value = []
+      else h.context.detailProject.value.status = '待拆解确认'
+      h.finish('纠正错误分配')
+      await pending
+      assert.equal(h.writes.length, 0, change)
+    }
+  })
 }
 
 for (const [name, args] of operations) {

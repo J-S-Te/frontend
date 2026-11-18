@@ -17,6 +17,34 @@ export function projectAllowsWorkflowNode(projectStatus, node) {
   return workflowProjectStatuses[node]?.has(String(projectStatus || '').trim()) || false
 }
 
+// 用途：根据真实责任链和能力校验结果展示分配子阶段，不改业务状态。
+// 参数：item 为当前已授权服务项快照。
+// 返回值：是否完成分配、阶段文案和进度；特殊方法复核独立处理。
+export function allocationState(item) {
+  if (!item?.team_lead_id) {
+    return { complete: false, label: '待分配团队负责人', progress: 0 }
+  }
+  if (!item.project_manager_id || !(item.engineer_ids || []).length) {
+    return { complete: false, label: '待分配执行团队', progress: 50 }
+  }
+  if (item.conflict_status === 'CONFLICT') {
+    return { complete: false, label: '能力冲突', progress: 75 }
+  }
+  if (item.conflict_status !== 'PASSED') {
+    return { complete: false, label: '待能力校验', progress: 75 }
+  }
+  return { complete: true, label: '已完成分配', progress: 100 }
+}
+
+// 用途：按当前权限筛出仍需办理的分配步骤，完成项自动退出队列。
+// 参数：item 为服务项，executionAllowed/teamAllowed 分别为执行及团队分配权限。
+// 返回值：当前账号仍能处理该项分配时为真；后续业务阶段一律为假。
+export function isAllocationPending(item, executionAllowed = true, teamAllowed = true) {
+  if (item?.status !== '待分配') return false
+  if (!item.team_lead_id) return teamAllowed
+  return executionAllowed && !allocationState(item).complete
+}
+
 // 与后端 CheckImplementationPlanPrecondition 保持同一业务门槛；团队负责人是形成
 // 完整责任链的必要前置，不能只凭“待分配”状态提前出现在实施计划。
 export function implementationPlanReady(item) {

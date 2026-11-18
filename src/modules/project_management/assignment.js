@@ -1,9 +1,14 @@
 import { formatUserError } from '../shared/utils/userError.js'
 
-/** 两个分别提交的命令绝不能复用指派前的版本。 */
+// 用途：按权威版本依次分配责任链，保留能力校验回执及部分成功事实。
+// 参数：item/人员编号为目标及人员；executionAllowed 决定是否分配执行团队；
+//   assignTeam/assignExecutionTeam 提交分配，listServiceItemsSnapshot 回读版本，
+//   onTeamAssigned 同步已确认的团队负责人。
+// 返回值：已保存步骤及可选能力校验结果；失败携带真实部分完成事实或未知标记。
 export async function assignServiceItemTeams({ item, teamLeadID, projectManagerID, engineerIDs, executionAllowed, assignTeam, assignExecutionTeam, listServiceItemsSnapshot, onTeamAssigned = () => {} }) {
   let current = item
   let teamAssigned = false
+  let capabilityCheck
   try {
     if (!item.team_lead_id) {
       await assignTeam(item.id, { team_lead_id: teamLeadID, expected_version: Number(item.version) || 0 })
@@ -24,9 +29,16 @@ export async function assignServiceItemTeams({ item, teamLeadID, projectManagerI
       }
     }
     if (executionAllowed) {
-      await assignExecutionTeam(item.id, { project_manager_id: projectManagerID, engineer_ids: engineerIDs, expected_version: Number(current.version) || 0 })
+      capabilityCheck = await assignExecutionTeam(item.id, { project_manager_id: projectManagerID, engineer_ids: engineerIDs, expected_version: Number(current.version) || 0 })
+      if (typeof capabilityCheck?.passed !== 'boolean') {
+        throw Object.assign(new Error('执行团队分配结果不完整，请刷新核对操作结果，勿重复提交。'), {
+          code: 'PM_INVALID_ASSIGNMENT_RESULT', requiresReload: true, outcomeUnknown: true,
+        })
+      }
     }
-    return { teamAssigned, executionAssigned: Boolean(executionAllowed) }
+    const result = { teamAssigned, executionAssigned: Boolean(executionAllowed) }
+    if (capabilityCheck) result.capabilityCheck = capabilityCheck
+    return result
   } catch (cause) {
     if (!teamAssigned) throw cause
     const message = `团队负责人已分配；后续执行团队分配未确认完成。${formatUserError(cause, { fallback: '请刷新后核对当前状态，再继续未完成的步骤。' })}`

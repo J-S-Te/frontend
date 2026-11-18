@@ -1,7 +1,7 @@
 <script setup>
 import { computed, ref } from 'vue'
 import ConsoleIcon from '@/modules/shared/components/ConsoleIcon.vue'
-import { serviceItemLabel } from '../projectDisplay.js'
+import { serviceItemLabel, statusTone } from '../projectDisplay.js'
 
 const props = defineProps({
   items: { type: Array, default: () => [] },
@@ -10,6 +10,7 @@ const props = defineProps({
   multiple: { type: Boolean, default: false },
   emptyText: { type: String, default: '暂无可选服务项' },
   hint: { type: String, default: '' },
+  statusLabel: { type: Function, default: null },
 })
 const emit = defineEmits(['select', 'toggle'])
 
@@ -21,6 +22,7 @@ const filteredItems = computed(() => {
   return props.items.filter((item) => [
     projectByID.value.get(item.project_id)?.name,
     item.id, item.site, item.category, item.batch, item.system, item.status,
+    props.statusLabel?.(item),
   ].join(' ').toLowerCase().includes(query))
 })
 // 用途：按稳定编号判断服务项是否被选中。
@@ -69,7 +71,10 @@ function choose(item) {
         </span>
         <span class="pm-picker-meta">
           <em v-if="item.batch" class="pm-picker-batch">{{ item.batch }}</em>
-          <span class="pm-badge normal">{{ item.status }}</span>
+          <span class="pm-badge"
+            :class="statusLabel ? statusTone(statusLabel(item)) : 'normal'">
+            {{ statusLabel ? statusLabel(item) : item.status }}
+          </span>
         </span>
       </button>
       <p v-if="!filteredItems.length" class="pm-picker-empty">{{ items.length ? '没有匹配的服务项' : emptyText }}</p>
