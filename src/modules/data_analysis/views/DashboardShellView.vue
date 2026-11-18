@@ -1,5 +1,5 @@
 <script setup>
-import { loginUsername } from "@/modules/shared/loginUsername.mjs"
+import { useLoginUsername } from '@/modules/shared/composables/useLoginUsername.js'
 // 数据看板统一外壳（对齐 project_management 模式）：
 // 深色侧栏导航 + 顶栏 + 页面头，按 route.params.section 切换分区；
 // 启用嵌入时总览、报告、财务看板经嵌入桥加载；合同、项目看板使用本地原生模型，避免空白 iframe。
@@ -59,17 +59,17 @@ const KNOWN_SECTIONS = [...DASHBOARD_SECTIONS, "alerts", "dictionary", "admin/so
 
 const navGroups = [
   { label: "", items: [
-    { key: "overview", label: "经营总览", icon: "dashboard", permission: DASHBOARD_PERMISSIONS.overview },
-    { key: "contract", label: "合同看板", icon: "account", permission: DASHBOARD_PERMISSIONS.contract },
-    { key: "project", label: "项目执行看板", icon: "organization", permission: DASHBOARD_PERMISSIONS.project },
-    { key: "report", label: "报告与质量看板", icon: "audit", permission: DASHBOARD_PERMISSIONS.report },
-    { key: "finance", label: "财务与经营看板", icon: "settings", permission: DASHBOARD_PERMISSIONS.finance },
-    { key: "dictionary", label: "指标字典", icon: "info", permission: "dictionary.view" },
-    { key: "alerts", label: "预警中心", icon: "bell", permission: "alert.view" },
+    { key: "overview", label: "经营总览", icon: "nav-overview", permission: DASHBOARD_PERMISSIONS.overview },
+    { key: "contract", label: "合同看板", icon: "nav-contract", permission: DASHBOARD_PERMISSIONS.contract },
+    { key: "project", label: "项目执行看板", icon: "nav-project", permission: DASHBOARD_PERMISSIONS.project },
+    { key: "report", label: "报告与质量看板", icon: "nav-report", permission: DASHBOARD_PERMISSIONS.report },
+    { key: "finance", label: "财务与经营看板", icon: "nav-finance", permission: DASHBOARD_PERMISSIONS.finance },
+    { key: "dictionary", label: "指标字典", icon: "nav-dictionary", permission: "dictionary.view" },
+    { key: "alerts", label: "预警中心", icon: "nav-exception", permission: "alert.view" },
   ] },
   { label: "系统配置", items: [
-    { key: "admin/sources", label: "数据源与同步", icon: "save", permission: "aggregation.manage" },
-    { key: "admin/rules", label: "预警规则配置", icon: "shield", permission: "alert.manage" },
+    { key: "admin/sources", label: "数据源与同步", icon: "nav-data-sync", permission: "aggregation.manage" },
+    { key: "admin/rules", label: "预警规则配置", icon: "nav-rules", permission: "alert.manage" },
   ] },
 ]
 
@@ -157,10 +157,7 @@ watch(dashboardEmbedEnabled, (enabled) => {
 })
 
 const currentMeta = computed(() => pageMeta[section.value] || pageMeta.overview)
-const currentUserName = computed(() => {
-  const displayName = typeof me.value?.display_name === "string" ? me.value.display_name.trim() : ""
-  return displayName || loginUsername(me.value)
-})
+const currentUserName = useLoginUsername(me)
 const currentUserRole = computed(() => {
   const roles = (me.value?.roles || []).map((role) => ROLE_LABELS[role] || role)
   return roles.join(" / ") || "看板用户"
@@ -580,7 +577,7 @@ onBeforeUnmount(() => {
           </button>
         </template>
         <div class="da-nav-divider"></div>
-        <button class="da-nav-item" type="button" data-first-run-anchor="subsystem-portal" @click="returnToUnifiedPortal"><ConsoleIcon name="dashboard" /><span>返回子系统门户</span></button>
+        <button class="da-nav-item" type="button" data-first-run-anchor="subsystem-portal" @click="returnToUnifiedPortal"><ConsoleIcon name="nav-portal" /><span>返回子系统门户</span></button>
       </nav>
       <div class="da-sidebar-foot">复用基础平台 · Metabase 嵌入<br />角色：{{ currentUserRole }}</div>
       <div class="da-sidebar-user subsystem-sidebar-user">

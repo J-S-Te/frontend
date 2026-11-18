@@ -1,5 +1,5 @@
 <script setup>
-import { loginUsername } from "@/modules/shared/loginUsername.mjs"
+import { useLoginUsername } from '@/modules/shared/composables/useLoginUsername.js'
 import OperationToast from '@/modules/shared/components/OperationToast.vue'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { formatUserError } from '../../shared/utils/userError.js'
@@ -303,15 +303,15 @@ const sectionMeta = {
 const adminNavGroupDefinitions = [
   {
     label: '工作概览',
-    items: [{ key: 'dashboard', label: '工作台', icon: 'dashboard' }],
+    items: [{ key: 'dashboard', label: '工作台', icon: 'nav-overview' }],
   },
   {
     label: '业务办理',
     items: [
-      { key: 'intakes', label: '签单关联核对', icon: 'audit' },
-      { key: 'contracts', label: '合同台账', icon: 'account' },
-      { key: 'imports', label: '合同批量导入', icon: 'save' },
-      { key: 'approvals', label: '审批中心', icon: 'audit' },
+      { key: 'intakes', label: '签单关联核对', icon: 'nav-intake' },
+      { key: 'contracts', label: '合同台账', icon: 'nav-contract' },
+      { key: 'imports', label: '合同批量导入', icon: 'nav-import' },
+      { key: 'approvals', label: '审批中心', icon: 'nav-approval' },
     ],
   },
   {
@@ -319,46 +319,46 @@ const adminNavGroupDefinitions = [
     items: [
       // 客户查询模块暂不上线（2026-11-07）：管理员侧栏入口已下线，保留代码便于日后恢复（见 .ai/qa/ 本任务记录）。
       // { key: 'customers', label: '客户查询', icon: 'user', badge: '建设中' },
-      { key: 'signing', label: '签署台账', icon: 'shield' },
+      { key: 'signing', label: '签署台账', icon: 'nav-signature' },
     ],
   },
   {
     label: '配置管理',
     items: [
-      { key: 'templates', label: '合同模板', icon: 'save' },
-      { key: 'rules', label: '审批规则', icon: 'organization' },
+      { key: 'templates', label: '合同模板', icon: 'nav-template' },
+      { key: 'rules', label: '审批规则', icon: 'nav-rules' },
     ],
   },
-  { label: '运维/集成', items: [{ key: 'outbox', label: '死信运维', icon: 'reset' }] },
-  { label: '统计查看', items: [{ key: 'reports', label: '统计报表', icon: 'dashboard' }] },
+  { label: '运维/集成', items: [{ key: 'outbox', label: '死信运维', icon: 'nav-recovery' }] },
+  { label: '统计查看', items: [{ key: 'reports', label: '统计报表', icon: 'nav-analytics' }] },
 ]
 
 const userNavGroupDefinitions = [
   {
     label: '工作概览',
-    items: [{ key: 'dashboard', label: '工作台', icon: 'dashboard' }],
+    items: [{ key: 'dashboard', label: '工作台', icon: 'nav-overview' }],
   },
   {
     label: '合同业务',
     items: [
-      { key: 'intakes', label: '签单关联核对', icon: 'audit' },
-      { key: 'contracts', label: '合同台账', icon: 'account' },
+      { key: 'intakes', label: '签单关联核对', icon: 'nav-intake' },
+      { key: 'contracts', label: '合同台账', icon: 'nav-contract' },
       // 客户查询模块暂不上线（2026-11-07）：非管理员侧栏入口已下线，保留代码便于日后恢复（见 .ai/qa/ 本任务记录）。
       // { key: 'customers', label: '客户查询', icon: 'user', badge: '建设中' },
-      { key: 'imports', label: '合同批量导入', icon: 'save' },
-      { key: 'templates', label: '合同模板', icon: 'save' },
-      { key: 'signing', label: '签署台账', icon: 'shield' },
+      { key: 'imports', label: '合同批量导入', icon: 'nav-import' },
+      { key: 'templates', label: '合同模板', icon: 'nav-template' },
+      { key: 'signing', label: '签署台账', icon: 'nav-signature' },
     ],
   },
   {
     label: '审批协同',
     items: [
-      { key: 'approvals', label: '审批中心', icon: 'audit' },
-      { key: 'rules', label: '审批规则', icon: 'organization' },
+      { key: 'approvals', label: '审批中心', icon: 'nav-approval' },
+      { key: 'rules', label: '审批规则', icon: 'nav-rules' },
     ],
   },
-  { label: '运维/集成', items: [{ key: 'outbox', label: '死信运维', icon: 'reset' }] },
-  { label: '数据分析', items: [{ key: 'reports', label: '统计报表', icon: 'dashboard' }] },
+  { label: '运维/集成', items: [{ key: 'outbox', label: '死信运维', icon: 'nav-recovery' }] },
+  { label: '数据分析', items: [{ key: 'reports', label: '统计报表', icon: 'nav-analytics' }] },
 ]
 
 const contracts = ref([])
@@ -544,7 +544,7 @@ const currentRoleLabel = computed(() => {
   const labels = [...new Set(roleCodes.map(roleLabel))]
   return labels.length ? labels.join('、') : session.value?.role?.name || '未分配角色'
 })
-const currentLoginUsername = computed(() => loginUsername(session.value))
+const currentLoginUsername = useLoginUsername(session)
 const currentUserInitial = computed(() => currentLoginUsername.value.slice(0, 1).toUpperCase())
 const userDirectory = computed(() => Array.isArray(session.value?.user_directory) ? session.value.user_directory : [])
 const approvalTargetUsers = computed(() => {
@@ -2858,7 +2858,7 @@ onBeforeUnmount(() => {
     <button v-if="mobileMenuOpen" class="contract-menu-mask" type="button" aria-label="关闭导航" @click="mobileMenuOpen = false"></button>
     <aside id="contract-sidebar" class="contract-sidebar" :class="{ open: mobileMenuOpen }">
       <div class="contract-brand">
-        <span class="contract-brand-mark"><ConsoleIcon name="logo" /></span>
+        <span class="contract-brand-mark"><ConsoleIcon name="nav-contract" /></span>
         <span><strong>机构合同管理</strong><small>CONTRACT HUB</small></span>
         <button class="contract-mobile-close" type="button" aria-label="关闭菜单" @click="mobileMenuOpen = false"><ConsoleIcon name="close" /></button>
       </div>
@@ -2871,8 +2871,8 @@ onBeforeUnmount(() => {
         </section>
         <section>
           <p>平台能力</p>
-          <button v-if="can('all')" type="button" @click="navigatePlatform('settings')"><ConsoleIcon name="settings" /><span>系统设置</span><em>平台</em></button>
-          <button type="button" data-first-run-anchor="subsystem-portal" @click="returnToUnifiedPortal"><ConsoleIcon name="dashboard" /><span>返回子系统门户</span></button>
+          <button v-if="can('all')" type="button" @click="navigatePlatform('settings')"><ConsoleIcon name="nav-settings" /><span>系统设置</span><em>平台</em></button>
+          <button type="button" data-first-run-anchor="subsystem-portal" @click="returnToUnifiedPortal"><ConsoleIcon name="nav-portal" /><span>返回子系统门户</span></button>
         </section>
       </nav>
       <div class="contract-sidebar-user subsystem-sidebar-user"><span class="contract-avatar">{{ currentUserInitial }}</span><span><strong :title="currentLoginUsername">{{ currentLoginUsername }}</strong><small :title="currentRoleLabel">{{ currentRoleLabel }}</small></span><button type="button" :disabled="isLoggingOut" aria-label="退出应用系统" @click="logoutSystem"><ConsoleIcon name="logout" /></button></div>

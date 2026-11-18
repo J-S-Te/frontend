@@ -19,7 +19,7 @@ function harness(loaders={}){
  const route=Vue.reactive({params:{section:'contract'},query:{}})
  const empty=async()=>({available:false,items:[],total:0,page:1,page_size:20})
  const context={...Vue,onMounted:(fn)=>{mounted=fn},onBeforeUnmount:(fn)=>{unmount=fn},inject:()=>null,
- useRoute:()=>route,useRouter:()=>({replace:async()=>{},push:()=>{}}),useUrlFilterState:()=>{},loginUsername:()=>'',
+ useRoute:()=>route,useRouter:()=>({replace:async()=>{},push:()=>{}}),useUrlFilterState:()=>{},useLoginUsername:()=>Vue.ref(''),
  createEmbedSessionActivity:()=>({reset:()=>{},destroy:()=>{}}),subscribeRelatedDataChanges:()=>()=>{},RELATED_DATA:{},
  getAuthMe:async()=>({tenant_id:'t',user_id:'u',permissions:['dashboard.contract.view','dashboard.project.view','dashboard.overview.view']}),
  isDashboardEmbedEnabled:()=>false,getContractDashboardSummary:empty,getContractRegions:async()=>({available:false,items:[],basis:''}),getProjectDashboardSummary:empty,getReportDashboardSummary:empty,getFinanceDashboardSummary:empty,

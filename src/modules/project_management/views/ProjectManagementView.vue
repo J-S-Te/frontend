@@ -1,5 +1,5 @@
 <script setup>
-import { loginUsername } from "@/modules/shared/loginUsername.mjs"
+import { useLoginUsername } from '@/modules/shared/composables/useLoginUsername.js'
 import OperationToast from '@/modules/shared/components/OperationToast.vue'
 import ListState from '@/modules/shared/components/ListState.vue'
 import LoadingState from '@/modules/shared/components/LoadingState.vue'
@@ -227,34 +227,34 @@ const configurationCenterSections = Object.freeze([
 
 const allNavGroups = [
   { label: '执行总览', items: [
-    { key: 'dashboard', label: '项目执行总览', icon: 'dashboard' },
-    { key: 'monitoring', label: '在途项目实时监控', icon: 'audit' },
-    { key: 'notifications', label: '个人通知中心', icon: 'bell' },
+    { key: 'dashboard', label: '项目执行总览', icon: 'nav-overview' },
+    { key: 'monitoring', label: '在途项目实时监控', icon: 'nav-monitoring' },
+    { key: 'notifications', label: '个人通知中心', icon: 'nav-notifications' },
   ] },
   { label: '项目管理', items: [
-    { key: 'projects', label: '项目列表', icon: 'account' },
-    { key: 'decomposition', label: '服务项拆解确认', icon: 'organization' },
+    { key: 'projects', label: '项目列表', icon: 'nav-project' },
+    { key: 'decomposition', label: '服务项拆解确认', icon: 'nav-decomposition' },
   ] },
   { label: '资源分配', items: [
-    { key: 'allocation', label: '任务分配', icon: 'user' },
-    { key: 'inbox', label: '我的分配待办', icon: 'bell' },
-    { key: 'planning', label: '实施计划', icon: 'audit' },
-    { key: 'preparation', label: '实施准备', icon: 'save' },
-    { key: 'qualifications', label: '资质与能力', icon: 'shield' },
-    { key: 'equipment', label: '设备能力', icon: 'settings' },
-    { key: 'resource-usage', label: '工时与设备用量', icon: 'audit' },
-    { key: 'assignments', label: '人员设备指派', icon: 'organization' },
-    { key: 'methods', label: '特殊方法复核', icon: 'info' },
+    { key: 'allocation', label: '任务分配', icon: 'nav-assignment' },
+    { key: 'inbox', label: '我的分配待办', icon: 'nav-inbox' },
+    { key: 'planning', label: '实施计划', icon: 'nav-calendar' },
+    { key: 'preparation', label: '实施准备', icon: 'nav-preparation' },
+    { key: 'qualifications', label: '资质与能力', icon: 'nav-qualification' },
+    { key: 'equipment', label: '设备能力', icon: 'nav-equipment' },
+    { key: 'resource-usage', label: '工时与设备用量', icon: 'nav-resource-usage' },
+    { key: 'assignments', label: '人员设备指派', icon: 'nav-collaboration' },
+    { key: 'methods', label: '特殊方法复核', icon: 'nav-review' },
   ] },
   { label: '现场实施', items: [
-    { key: 'implementation', label: '实施看板', icon: 'dashboard' },
-    { key: 'exceptions', label: '异常评审', icon: 'audit' },
-    { key: 'standards', label: '标准方法更新评估', icon: 'reset' },
-    { key: 'reports', label: '报告编制状态', icon: 'account' },
+    { key: 'implementation', label: '实施看板', icon: 'nav-implementation' },
+    { key: 'exceptions', label: '异常评审', icon: 'nav-exception' },
+    { key: 'standards', label: '标准方法更新评估', icon: 'nav-standard' },
+    { key: 'reports', label: '报告编制状态', icon: 'nav-report' },
   ] },
   { label: '系统配置', items: [
-    { key: 'split-rules', label: '合同拆解规则', icon: 'settings' },
-    { key: 'configuration-center', label: '规则配置中心', icon: 'shield', sectionKeys: configurationCenterSections },
+    { key: 'split-rules', label: '合同拆解规则', icon: 'nav-decomposition' },
+    { key: 'configuration-center', label: '规则配置中心', icon: 'nav-settings', sectionKeys: configurationCenterSections },
   ] },
 ]
 
@@ -1407,13 +1407,7 @@ const activeNodeItems = computed(() => ({
   implementation: implementationItems.value,
 }[activeSection.value] || serviceItems.value))
 const completedProjectCount = computed(() => projects.value.filter((project) => project.status === projectStatusCompleted).length)
-const currentUserName = computed(() => {
-  const account = loginUsername(session.value)
-  // 部分部署的项目会话把平台内部主体 ID（platform-…）放在 username 上；
-  // 侧栏账号名只展示服务端 display_name，不把内部 ID 当成登录账号。
-  const displayName = String(session.value?.display_name || '').trim()
-  return displayName && /^(platform|user|subject)-/i.test(account) ? displayName : account
-})
+const currentUserName = useLoginUsername(session)
 // 与客户与商机系统的账号行保持一致：首字头像 + 账号名 + 角色名。
 // 角色名取服务端角色目录，目录未就绪或请求失败时退回角色码，不出现空白副标题。
 const currentUserInitial = computed(() => {
@@ -3653,7 +3647,7 @@ onBeforeUnmount(() => {
         </div>
         <div class="pm-nav-group">
           <div class="pm-nav-label">平台能力</div>
-          <button class="pm-nav-item" type="button" data-first-run-anchor="subsystem-portal" @click="returnToUnifiedPortal"><ConsoleIcon name="dashboard" /><span>返回子系统门户</span></button>
+          <button class="pm-nav-item" type="button" data-first-run-anchor="subsystem-portal" @click="returnToUnifiedPortal"><ConsoleIcon name="nav-portal" /><span>返回子系统门户</span></button>
         </div>
       </nav>
       <div class="pm-sidebar-user subsystem-sidebar-user">

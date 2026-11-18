@@ -3,6 +3,9 @@
 export const navigationIcons = Object.freeze({
   'nav-portal': ['M3 3h7v7H3zM14 3h7v7h-7zM3 14h7v7H3zM14 14h7v7h-7z'],
   'nav-overview': ['M3 3h18v18H3z', 'M7 16v-4M12 16V7M17 16v-6'],
+  'nav-monitoring': ['M3 4h18v14H3zM8 22h8M12 18v4', 'M5 11h3l2-4 3 8 3-5h3'],
+  'nav-data-sync': ['M3 5a7 3 0 1 0 14 0 7 3 0 1 0-14 0ZM3 5v12c0 2 3 3 7 3M17 5v5',
+    'M3 11c3 3 9 3 14 0M14 16a4 4 0 0 1 7-2M21 11v3h-3M21 19a4 4 0 0 1-7 2M14 23v-3h3'],
   'nav-settings': ['M4 6h7M15 6h5M4 12h2M10 12h10M4 18h10M18 18h2',
     'M11 3v6M6 9v6M14 15v6'],
   'nav-license': ['M14 3H5v18h14v-8M14 3v5h5',

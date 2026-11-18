@@ -352,12 +352,12 @@ const authorizationRolesToRevoke = computed(() => {
 // 每个 panel 使用自身资源的 read/create/update/delete OR 集合决定是否显示，
 // 不再把 user:read 当成整个 IAM 的共同入口。readPermission 只控制列表读取和刷新。
 const panels = [
-  { key: 'organizations', groupKey: 'foundation', label: '组织单元', icon: 'organization', description: '只维护人员归属和组织层级，不承载日常应用授权' },
-  { key: 'positions', groupKey: 'foundation', label: '岗位', icon: 'organization', description: '定义人员职责；标准应用角色通过岗位授权模板统一配置' },
-  { key: 'users', groupKey: 'people', label: '用户', icon: 'user', description: '员工应通过“新增员工”一次完成用户、账号与任职；直接角色仅用于个人例外' },
-  { key: 'accounts', groupKey: 'people', label: '登录账号', icon: 'account', description: '只管理登录凭证、状态和有效期，不作为授权主体' },
-  { key: 'memberships', groupKey: 'people', label: '任职关系', icon: 'link', description: 'Membership 任职关系：主组织、兼岗、历史任职' },
-  { key: 'positionAuthorizationTemplates', groupKey: 'authorization', label: '岗位授权模板', icon: 'shield', description: '标准授权入口：岗位映射到各应用实际角色，由有效任职关系动态继承' },
+  { key: 'organizations', groupKey: 'foundation', label: '组织单元', icon: 'nav-organization', description: '只维护人员归属和组织层级，不承载日常应用授权' },
+  { key: 'positions', groupKey: 'foundation', label: '岗位', icon: 'nav-position', description: '定义人员职责；标准应用角色通过岗位授权模板统一配置' },
+  { key: 'users', groupKey: 'people', label: '用户', icon: 'nav-customers', description: '员工应通过“新增员工”一次完成用户、账号与任职；直接角色仅用于个人例外' },
+  { key: 'accounts', groupKey: 'people', label: '登录账号', icon: 'nav-account', description: '只管理登录凭证、状态和有效期，不作为授权主体' },
+  { key: 'memberships', groupKey: 'people', label: '任职关系', icon: 'nav-membership', description: 'Membership 任职关系：主组织、兼岗、历史任职' },
+  { key: 'positionAuthorizationTemplates', groupKey: 'authorization', label: '岗位授权模板', icon: 'nav-authorization', description: '标准授权入口：岗位映射到各应用实际角色，由有效任职关系动态继承' },
 ].map((item) => ({
   ...item,
   permissions: iamPanelPermissions(item.key),

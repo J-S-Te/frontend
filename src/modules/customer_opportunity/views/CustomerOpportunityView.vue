@@ -1,5 +1,5 @@
 <script setup>
-import { loginUsername } from "@/modules/shared/loginUsername.mjs"
+import { useLoginUsername } from '@/modules/shared/composables/useLoginUsername.js'
 import OperationToast from '@/modules/shared/components/OperationToast.vue'
 import ListState from '@/modules/shared/components/ListState.vue'
 import PaginationBar from '@/modules/shared/components/PaginationBar.vue'
@@ -574,7 +574,7 @@ const commercialRecordCommandScope = computed(() => JSON.stringify([
   crmSession.value?.tenant_id || '', crmSession.value?.user_id || '',
 ]))
 watch(commercialRecordCommandScope, () => commercialRecordCommands.clear(), { flush: 'sync' })
-const currentUserLabel = computed(() => loginUsername(crmSession.value))
+const currentUserLabel = useLoginUsername(crmSession)
 const currentUserInitial = computed(() => {
   const label = currentUserLabel.value
   return /^[\x00-\x7F]+$/.test(label) ? label.slice(0, 2).toUpperCase() : Array.from(label)[0] || '用'
@@ -774,11 +774,11 @@ const navGroups = computed(() => [
   {
     label: '业务中心',
     items: [
-      { key: 'customers', label: '客户管理', icon: 'user', active: activeSection.value === 'customers', visible: canReadCustomers.value },
-      { key: 'opportunities', label: '商机管理', icon: 'dashboard', active: activeSection.value === 'opportunities', visible: canReadOpportunities.value },
-      { key: 'presale', label: '售前技术支持', icon: 'organization', active: activeSection.value === 'presale', visible: canReadPresales.value },
-      { key: 'credit-approvals', label: '信用审批待办', icon: 'shield', active: activeSection.value === 'credit-approvals', visible: canApproveCredit.value },
-      { key: 'credit-rules', label: '信用规则管理', icon: 'settings', active: activeSection.value === 'credit-rules', visible: canManageCreditRules.value },
+      { key: 'customers', label: '客户管理', icon: 'nav-customers', active: activeSection.value === 'customers', visible: canReadCustomers.value },
+      { key: 'opportunities', label: '商机管理', icon: 'nav-opportunity', active: activeSection.value === 'opportunities', visible: canReadOpportunities.value },
+      { key: 'presale', label: '售前技术支持', icon: 'nav-support', active: activeSection.value === 'presale', visible: canReadPresales.value },
+      { key: 'credit-approvals', label: '信用审批待办', icon: 'nav-approval', active: activeSection.value === 'credit-approvals', visible: canApproveCredit.value },
+      { key: 'credit-rules', label: '信用规则管理', icon: 'nav-rules', active: activeSection.value === 'credit-rules', visible: canManageCreditRules.value },
     ],
   },
   {
@@ -787,7 +787,7 @@ const navGroups = computed(() => [
       {
         key: 'notifications',
         label: '个人通知',
-        icon: 'bell',
+        icon: 'nav-notifications',
         active: activeSection.value === 'notifications',
         visible: canReadNotifications.value,
         // 未读数沿用原来的口径：为 0 时不渲染角标，超过 99 显示 99+。
@@ -798,7 +798,7 @@ const navGroups = computed(() => [
   },
   {
     label: '平台能力',
-    items: [{ key: 'portal', label: '返回子系统门户', icon: 'dashboard', anchor: 'subsystem-portal' }],
+    items: [{ key: 'portal', label: '返回子系统门户', icon: 'nav-portal', anchor: 'subsystem-portal' }],
   },
 ])
 // handleNavigate 把共享外壳抛出的导航键映射到本页既有入口。
@@ -3476,6 +3476,7 @@ onMounted(async () => {
     sidebar-user-class="subsystem-sidebar-user"
     brand-name="客户与商机管理"
     brand-subtitle="CRM 协同工作台"
+    brand-icon="nav-customers"
     nav-label="客户与商机功能"
     :nav-groups="navGroups"
     :user-name="currentUserLabel"
