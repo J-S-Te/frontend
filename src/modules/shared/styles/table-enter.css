@@ -1,0 +1,30 @@
+/* 表格行入场：原型 B 的表格加载动效。
+   数据渲染后每行 opacity 0→1、translateY(8px)→0，240ms ease-out；
+   首行延迟 200ms，其后每行 +30ms；减少动态偏好下直接静态呈现。 */
+@keyframes ui-table-row-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+:root :is(.console-page, .contract-app, .pm-page, .crm-page, .da-shell, .settlement-page, .expense-canvas, .portal-page) table tbody tr {
+  animation: ui-table-row-in 240ms var(--ease-out) both;
+  animation-delay: 200ms;
+}
+
+:root :is(.console-page, .contract-app, .pm-page, .crm-page, .da-shell, .settlement-page, .expense-canvas, .portal-page) table tbody tr:nth-child(2) { animation-delay: 230ms; }
+:root :is(.console-page, .contract-app, .pm-page, .crm-page, .da-shell, .settlement-page, .expense-canvas, .portal-page) table tbody tr:nth-child(3) { animation-delay: 260ms; }
+:root :is(.console-page, .contract-app, .pm-page, .crm-page, .da-shell, .settlement-page, .expense-canvas, .portal-page) table tbody tr:nth-child(4) { animation-delay: 290ms; }
+:root :is(.console-page, .contract-app, .pm-page, .crm-page, .da-shell, .settlement-page, .expense-canvas, .portal-page) table tbody tr:nth-child(5) { animation-delay: 320ms; }
+:root :is(.console-page, .contract-app, .pm-page, .crm-page, .da-shell, .settlement-page, .expense-canvas, .portal-page) table tbody tr:nth-child(6) { animation-delay: 350ms; }
+:root :is(.console-page, .contract-app, .pm-page, .crm-page, .da-shell, .settlement-page, .expense-canvas, .portal-page) table tbody tr:nth-child(7) { animation-delay: 380ms; }
+:root :is(.console-page, .contract-app, .pm-page, .crm-page, .da-shell, .settlement-page, .expense-canvas, .portal-page) table tbody tr:nth-child(8) { animation-delay: 410ms; }
+:root :is(.console-page, .contract-app, .pm-page, .crm-page, .da-shell, .settlement-page, .expense-canvas, .portal-page) table tbody tr:nth-child(9) { animation-delay: 440ms; }
+:root :is(.console-page, .contract-app, .pm-page, .crm-page, .da-shell, .settlement-page, .expense-canvas, .portal-page) table tbody tr:nth-child(10) { animation-delay: 470ms; }
+
+@media (prefers-reduced-motion: reduce) {
+  :root :is(.console-page, .contract-app, .pm-page, .crm-page, .da-shell, .settlement-page, .expense-canvas, .portal-page) table tbody tr {
+    animation: none;
+    opacity: 1;
+    transform: none;
+  }
+}
