@@ -981,6 +981,7 @@
 .pm-table input[type="checkbox"] { accent-color: var(--pm-primary); }
 .pm-table small,
 .pm-cell-sub { display: block; margin-top: 3px; color: var(--pm-muted); font-size: var(--pm-fs-hint); overflow-wrap: anywhere; word-break: break-word; }
+.pm-service-code { display: block; margin-top: 3px; color: var(--pm-muted); font-size: var(--pm-fs-micro); overflow-wrap: anywhere; }
 .pm-table .num { text-align: right; font-variant-numeric: tabular-nums; }
 .pm-table-panel > footer { display: flex; justify-content: space-between; padding: var(--pm-sp-3) var(--pm-sp-4); border-top: 1px solid var(--pm-line-soft); background: var(--pm-sunken); color: var(--pm-muted); font-size: var(--pm-fs-hint); }
 .pm-table-footer { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: var(--pm-sp-3); min-width: 0; }
@@ -1359,8 +1360,9 @@
 .pm-picker-mark.checked { border-color: var(--pm-primary); background: var(--pm-primary); }
 .pm-picker-mark.checked i { width: 9px; height: 5px; border-left: 2px solid #fff; border-bottom: 2px solid #fff; transform: rotate(-45deg) translateY(-1px); }
 .pm-picker-body { flex: 1; display: grid; gap: 3px; min-width: 0; }
-.pm-picker-body b { color: var(--pm-ink); font-size: var(--pm-fs-ui); }
+.pm-picker-body b { color: var(--pm-ink); font-size: var(--pm-fs-ui); overflow-wrap: anywhere; }
 .pm-picker-body small { overflow: hidden; color: var(--pm-body); font-size: var(--pm-fs-hint); text-overflow: ellipsis; white-space: nowrap; }
+.pm-picker-body .pm-service-code { color: var(--pm-muted); font-size: var(--pm-fs-micro); }
 .pm-picker-meta { flex: 0 0 auto; display: flex; align-items: center; gap: var(--pm-sp-2); }
 .pm-picker-batch { padding: 2px var(--pm-sp-2); border-radius: var(--pm-r-full); background: var(--pm-content); color: var(--pm-muted); font-size: var(--pm-fs-micro); font-style: normal; }
 .pm-picker-empty { padding: var(--pm-sp-5) 0; color: var(--pm-muted); font-size: var(--pm-fs-label); text-align: center; }
@@ -1573,7 +1575,7 @@
 .pm-tree-panel > button.active { border-color: var(--pm-primary-border); background: var(--pm-primary-soft); }
 .pm-tree-panel button > span { width: var(--pm-h-control); height: var(--pm-h-control); display: grid; place-items: center; border-radius: var(--pm-r-sm); background: var(--pm-content); color: var(--pm-body); font-size: var(--pm-fs-micro); font-weight: var(--pm-fw-bold); }
 .pm-tree-panel button div { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
-.pm-tree-panel button b { color: var(--pm-ink); font-size: var(--pm-fs-sm); }
+.pm-tree-panel button b { color: var(--pm-ink); font-size: var(--pm-fs-sm); overflow-wrap: anywhere; }
 .pm-tree-panel button small { color: var(--pm-muted); font-size: var(--pm-fs-hint); }
 
 .pm-tree-note { margin: var(--pm-sp-3) var(--pm-sp-3) 0; padding: var(--pm-sp-3); border-radius: var(--pm-r-sm); background: var(--pm-green-soft); color: var(--pm-green-text); }
@@ -2635,6 +2637,10 @@
 .pm-operation-queue-head b { color: var(--pm-ink); font-size: var(--pm-fs-label); }
 .pm-operation-queue-head span { color: var(--pm-muted); font-size: var(--pm-fs-hint); }
 .pm-operation-queue .pm-picker-list { max-height: 560px; overflow: auto; }
+.pm-operation-queue .pm-picker-card { display: grid; grid-template-columns: max-content minmax(0, 1fr); row-gap: var(--pm-sp-2); }
+.pm-operation-queue .pm-picker-mark { grid-row: 1 / span 2; align-self: start; }
+.pm-operation-queue .pm-picker-meta { grid-column: 2; flex-wrap: wrap; }
+.pm-operation-queue .pm-service-code { white-space: normal; }
 .pm-operation-detail { display: grid; gap: var(--pm-sp-4); min-width: 0; }
 .pm-operation-summary {
   display: flex;
@@ -2648,7 +2654,7 @@
   background: var(--pm-card);
 }
 .pm-operation-summary-main { display: grid; gap: 4px; min-width: 0; }
-.pm-operation-summary-main b { color: var(--pm-ink); font-size: var(--pm-fs-card); }
+.pm-operation-summary-main b { color: var(--pm-ink); font-size: var(--pm-fs-card); overflow-wrap: anywhere; }
 .pm-operation-summary-main > span:last-child { color: var(--pm-muted); font-size: var(--pm-fs-hint); }
 .pm-operation-summary-meta { display: grid; grid-template-columns: repeat(4, minmax(96px, 1fr)); gap: var(--pm-sp-3) var(--pm-sp-4); margin: 0; min-width: min(100%, 520px); }
 .pm-operation-summary-meta div { display: grid; gap: 3px; }

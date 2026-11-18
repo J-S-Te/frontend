@@ -117,6 +117,7 @@ import {
   reportStatusLabel,
   reportTechReviewLabel,
   selectedIDs,
+  serviceItemLabel,
   slaDueLabel,
   specialMethodLabel,
   specialMethodOptions,
@@ -1713,6 +1714,17 @@ const operationRows = computed(() => ({
   standards: [],
   reports: reportItems.value.map((item) => { const project = projectByID.value.get(item.project_id); return { id: item.id, name: `${item.id} · ${item.site}`, detail: `${project?.customer || item.project_id} / 报告${reportStatusLabel[item.report_status] || item.report_status}`, owner: personLabel(item.project_manager_id, project?.manager || '待指派'), state: reportStatusLabel[item.report_status] || item.report_status, progress: (reportStatusRank[item.report_status] || 0) * 20, due: item.report_updated_at ? formatBusinessDate(item.report_updated_at) || '待排期' : formatBusinessDate(item.planned_end) || '待排期', report_status: item.report_status } }),
 }[activeSection.value] || []))
+
+// 用途：按真实服务项补充事项行的项目与系统展示，保留原事项身份。
+// 参数：row 为当前操作台已有的事项行，异常事项通过原事件关联服务项。
+// 返回值：主显示名称与次要服务项编号；非服务项事项沿用原名称。
+function operationRowIdentity(row) {
+  const deviation = activeSection.value === 'exceptions'
+    ? pendingDeviations.value.find(event => event.id === row.id) : null
+  const item = itemByID.value.get(deviation?.service_item_id || row.id)
+  if (!item) return { label: row.name, code: '' }
+  return { label: serviceItemLabel(item, projectByID.value.get(item.project_id)), code: item.id }
+}
 
 const rules = ref([])
 function applicationRoleLabel(roleCode) {
@@ -4126,7 +4138,8 @@ onBeforeUnmount(() => {
             <div class="pm-source-icon"><ConsoleIcon name="account" /></div>
             <div class="pm-source-content">
               <span>合同来源</span>
-              <h2>{{ decompositionProject.contract }} · {{ decompositionProject.customer }}</h2>
+              <h2>{{ decompositionProject.name?.trim() || '未提供项目名称' }}</h2>
+              <p>合同 {{ decompositionProject.contract || '—' }} · {{ decompositionProject.customer || '未提供客户名称' }}</p>
               <p>合同版本 {{ decompositionProject.contract_version || '—' }} · 自动生成于 {{ formatDateTime(decompositionProject.created_at) }}</p>
             </div>
             <div class="pm-source-actions">
@@ -4134,7 +4147,7 @@ onBeforeUnmount(() => {
                 <span class="pm-decomposition-switcher-label">当前拆解项目</span>
                 <span class="pm-decomposition-select-shell">
                   <select v-model="selectedDecompositionProjectID" aria-label="选择当前拆解项目">
-                    <option v-for="project in decompositionProjects" :key="project.id" :value="project.id">{{ project.id }} · {{ project.name || project.customer }}</option>
+                    <option v-for="project in decompositionProjects" :key="project.id" :value="project.id">{{ project.name?.trim() || '未提供项目名称' }} · {{ project.id }}</option>
                   </select>
                 </span>
               </label>
@@ -4142,8 +4155,38 @@ onBeforeUnmount(() => {
             </div>
           </section>
           <section v-if="!decompositionProject" class="pm-empty pm-decomposition-empty"><ConsoleIcon name="info" /><b>暂无待拆解合同</b><span>已审批合同生成待确认服务项后会显示在这里，无需手工创建拆解任务。</span></section>
-          <section v-else class="pm-decompose-grid"><article class="pm-panel pm-tree-panel"><header><div><p class="pm-panel-kicker">服务项树</p><h2>服务项树</h2></div><span>{{ currentDecompositionItems.length }} 项</span></header><button v-for="([batch, items], index) in decompositionBatches" :key="batch" type="button" :aria-pressed="activeDecompositionBatch === batch" :class="{ active: activeDecompositionBatch === batch }" @click="selectedDecompositionBatch = batch"><span>{{ String(index + 1).padStart(2, '0') }}</span><div><b>{{ batch }}</b><small>{{ items.length }} 个服务项</small></div></button><div class="pm-tree-note"><b>自动拆解校验</b><p>{{ currentDecompositionItems.filter((item) => item.test_mode === 'PENETRATION').length }} 项渗透测试需要专项计划；确认后的服务项进入资源分配。</p></div></article>
-            <article class="pm-table-panel"><div class="pm-table-scroll"><table class="pm-table"><thead><tr><th scope="col">纳入</th><th scope="col">服务项编号</th><th scope="col">场所 / 批次</th><th scope="col">检测类别</th><th scope="col">技术要求摘要</th><th scope="col">体系</th><th scope="col">特殊方法</th><th scope="col">状态</th></tr></thead><tbody><tr v-for="item in visibleDecompositionItems" :key="item.id"><td><input v-model="item.selected" type="checkbox" :aria-label="`纳入 ${item.id}`" /></td><td class="mono"><b>{{ item.id }}</b></td><td>{{ item.site }}<span class="pm-cell-sub">{{ item.batch }}</span></td><td>{{ item.category }}</td><td>{{ item.requirement }}</td><td>{{ item.system }}</td><td><span class="pm-badge" :class="item.special === '是' ? '待确认' : 'neutral'">{{ item.special }}</span></td><td><span class="pm-badge" :class="statusTone(item.status)">{{ item.status }}</span></td></tr></tbody></table></div></article>
+          <section v-else class="pm-decompose-grid">
+            <article class="pm-panel pm-tree-panel">
+              <header><div><p class="pm-panel-kicker">服务项树</p>
+                <h2>{{ decompositionProject.name?.trim() || '未提供项目名称' }}</h2>
+              </div><span>{{ currentDecompositionItems.length }} 项</span></header>
+              <button v-for="([batch, items], index) in decompositionBatches" :key="batch"
+                type="button" :aria-pressed="activeDecompositionBatch === batch"
+                :class="{ active: activeDecompositionBatch === batch }"
+                @click="selectedDecompositionBatch = batch">
+                <span>{{ String(index + 1).padStart(2, '0') }}</span>
+                <div><b>{{ [...new Set(items.map(item => item.system?.trim() || '未提供系统名称'))].join('、') }}</b>
+                  <small>{{ batch }} · {{ items.length }} 个服务项</small>
+                </div>
+              </button>
+              <div class="pm-tree-note"><b>自动拆解校验</b><p>{{ currentDecompositionItems.filter((item) => item.test_mode === 'PENETRATION').length }} 项渗透测试需要专项计划；确认后的服务项进入资源分配。</p></div>
+            </article>
+            <article class="pm-table-panel"><div class="pm-table-scroll"><table class="pm-table">
+              <thead><tr><th scope="col">纳入</th><th scope="col">项目 / 系统名称</th>
+                <th scope="col">场所 / 批次</th><th scope="col">检测类别</th>
+                <th scope="col">技术要求摘要</th><th scope="col">特殊方法</th><th scope="col">状态</th>
+              </tr></thead>
+              <tbody><tr v-for="item in visibleDecompositionItems" :key="item.id">
+                <td><input v-model="item.selected" type="checkbox" :aria-label="`纳入 ${item.id}`" /></td>
+                <td><b>{{ serviceItemLabel(item, decompositionProject) }}</b>
+                  <small class="pm-service-code mono">服务项编号：{{ item.id }}</small>
+                </td>
+                <td>{{ item.site }}<span class="pm-cell-sub">{{ item.batch }}</span></td>
+                <td>{{ item.category }}</td><td>{{ item.requirement }}</td>
+                <td><span class="pm-badge" :class="item.special === '是' ? '待确认' : 'neutral'">{{ item.special }}</span></td>
+                <td><span class="pm-badge" :class="statusTone(item.status)">{{ item.status }}</span></td>
+              </tr></tbody>
+            </table></div></article>
           </section>
         </template>
 
@@ -4161,7 +4204,7 @@ onBeforeUnmount(() => {
           <section class="pm-kanban"><article v-for="column in implementationKanbanColumns" :key="column.key"><header><div><i :class="column.color"></i><b>{{ column.key }}</b></div><span>{{ column.count }}</span></header><div class="pm-kanban-body"><button v-for="card in column.cards" :key="card.id" class="pm-kanban-card" :class="[column.color, { risk: card.risk }]" @click="openProject(card)"><b>{{ card.id }}</b><h3>{{ card.customer }}</h3><span class="pm-badge-stack"><span class="pm-badge" :class="statusTone(card.status)">{{ card.status }}</span><span v-if="projectReportStageLabel(card)" class="pm-badge" :class="statusTone(card.report_stage)">报告编制 · {{ projectReportStageLabel(card) }}</span></span><div class="pm-inline-progress"><i :style="{ width: `${card.progress}%` }"></i></div><footer><span>{{ card.progress }}%</span><time>{{ card.due || '待排期' }}</time></footer></button><div v-if="!column.cards.length" class="pm-empty-mini">暂无当前节点项目</div></div></article></section>
           <section class="pm-panel pm-operation-panel">
             <header><div><p class="pm-panel-kicker">现场实施</p><h2>现场测评与记录</h2></div><div class="pm-field-sync"><span class="pm-badge" :class="pendingFieldSyncCount ? '关注' : 'normal'">待同步 {{ pendingFieldSyncCount }}</span><button v-if="pendingFieldSyncCount" type="button" class="pm-link" :disabled="fieldSyncing" @click="flushFieldOperations(true)">{{ fieldSyncing ? '同步中…' : '立即重试' }}</button></div></header>
-            <ServiceItemPicker :items="implementationItems" :selected-ids="selectedServiceItem ? [selectedServiceItem.id] : []" empty-text="暂无处于现场实施节点的服务项" @select="selectServiceItem" />
+            <ServiceItemPicker :items="implementationItems" :projects="projects" :selected-ids="selectedServiceItem ? [selectedServiceItem.id] : []" empty-text="暂无处于现场实施节点的服务项" @select="selectServiceItem" />
             <PenetrationWorkPackageCard v-if="selectedServiceItem && isEmbeddedPenetrationItem(selectedServiceItem)" :item="selectedServiceItem" :session="session" :engineer-options="penetrationEngineerOptions" @updated="updatePenetrationPackage" @notify="notifyFromPenetration" />
             <button v-if="selectedServiceItem && selectedServiceItem.status === '实施准备中' && canExecuteField" class="pm-button primary" :disabled="saving" @click="runOperation('field-start')">进入实施中</button>
             <div v-if="selectedServiceItem && selectedServiceItem.status === '实施中' && canExecuteField" class="pm-field-workflow">
@@ -4336,21 +4379,21 @@ onBeforeUnmount(() => {
 
         <template v-else>
           <section class="pm-operational-stats"><article><span>{{ activeSection === 'allocation' ? '当前阶段服务项' : '待处理' }}</span><strong>{{ operationRows.length }}</strong><small>{{ activeSection === 'allocation' ? '含已分配、待补齐执行团队的服务项' : '来自当前工作区' }}</small></article><article><span>服务项总数</span><strong>{{ serviceItems.length }}</strong><small>以最新流程状态为准</small></article><article><span>已完成项目</span><strong>{{ completedProjectCount }}</strong><small>当前租户累计</small></article></section>
-          <section class="pm-filters"><label><ConsoleIcon name="search" /><input v-model="keyword" placeholder="搜索编号、项目或负责人"  maxlength="100"/></label><span>{{ operationRows.length }} 条结果</span></section>
           <section v-if="['allocation', 'inbox', 'planning', 'preparation', 'assignments', 'methods', 'exceptions', 'reports'].includes(activeSection)" class="pm-panel pm-operation-panel">
             <header><div><p class="pm-panel-kicker">现场操作</p><h2>服务项操作台</h2></div><span class="pm-operation-panel-hint">选择服务项后在右侧处理当前阶段</span></header>
             <div class="pm-operation-workspace">
               <aside class="pm-operation-queue" aria-label="服务项队列">
                 <div class="pm-operation-queue-head"><b>服务项队列</b><span>{{ activeSection === 'allocation' ? allocationItems.length : activeNodeItems.length }} 项</span></div>
-                <ServiceItemPicker v-if="activeSection === 'allocation'" :items="allocationItems" :selected-ids="selectedServiceItemIDs" multiple empty-text="暂无可分配服务项" hint="仅显示已完成拆解确认、当前处于待分配的项目；可多选批量分配。" @toggle="toggleServiceItem" />
-                <ServiceItemPicker v-else :items="activeNodeItems" :selected-ids="selectedServiceItem ? [selectedServiceItem.id] : []" empty-text="当前节点暂无可操作服务项" @select="selectServiceItem" />
+                <ServiceItemPicker v-if="activeSection === 'allocation'" :items="allocationItems" :projects="projects" :selected-ids="selectedServiceItemIDs" multiple empty-text="暂无可分配服务项" hint="仅显示已完成拆解确认、当前处于待分配的项目；可多选批量分配。" @toggle="toggleServiceItem" />
+                <ServiceItemPicker v-else :items="activeNodeItems" :projects="projects" :selected-ids="selectedServiceItem ? [selectedServiceItem.id] : []" empty-text="当前节点暂无可操作服务项" @select="selectServiceItem" />
               </aside>
               <div class="pm-operation-detail">
                 <div v-if="selectedServiceItem && activeSection !== 'allocation'" class="pm-operation-summary">
                   <div class="pm-operation-summary-main">
                     <span class="pm-panel-kicker">当前服务项</span>
-                    <b class="mono">{{ selectedServiceItem.id }}</b>
-                    <span>{{ selectedServiceProject?.name || selectedServiceItem.project_id }} · {{ selectedServiceItem.site || '未设置场所' }}</span>
+                    <b>{{ serviceItemLabel(selectedServiceItem, selectedServiceProject) }}</b>
+                    <small class="pm-service-code mono">服务项编号：{{ selectedServiceItem.id }}</small>
+                    <span>{{ selectedServiceItem.site || '未设置场所' }}</span>
                   </div>
                   <dl class="pm-operation-summary-meta">
                     <div><dt>客户</dt><dd>{{ selectedServiceProject?.customer || '—' }}</dd></div>
@@ -4498,7 +4541,7 @@ onBeforeUnmount(() => {
             <header><div><p class="pm-panel-kicker">复核历史</p><h2>复核历史</h2></div><span>{{ methodHistory.length }} 条复核记录</span></header>
             <div class="pm-table-scroll"><table class="pm-table"><thead><tr><th scope="col">服务项</th><th scope="col">结论</th><th scope="col">复核意见</th><th scope="col">复核人</th><th scope="col">复核时间</th></tr></thead><tbody><tr v-for="event in methodHistory" :key="event.id"><td class="mono"><b>{{ event.service_item_id }}</b></td><td><span class="pm-badge" :class="event.payload?.decision === 'APPROVED' ? 'normal' : '风险'">{{ event.payload?.decision === 'APPROVED' ? '通过复核' : '已驳回' }}</span></td><td>{{ event.payload?.comment || '—' }}</td><td>{{ personLabel(event.actor_user_id, '—') }}</td><td>{{ formatDateTime(event.created_at) }}</td></tr><tr v-if="!methodHistory.length"><td colspan="5" class="pm-empty-mini">暂无特殊方法复核记录</td></tr></tbody></table></div>
           </section>
-          <section class="pm-table-panel"><div class="pm-table-scroll"><table class="pm-table"><thead><tr><th scope="col">事项 / 项目</th><th scope="col">内容摘要</th><th scope="col">负责人 / 归属</th><th scope="col">状态</th><th scope="col">{{ activeSection === 'allocation' ? '分配进度' : '完成度' }}</th><th scope="col">时限</th><th scope="col"></th></tr></thead><tbody><tr v-for="row in operationRows" :key="row.name"><td><b>{{ row.name }}</b></td><td><template v-if="Array.isArray(row.detail)"><span v-if="!row.detail.length">—</span><span v-else class="pm-code-pills"><span v-for="code in row.detail" :key="code" class="pm-code-pill">{{ code }}</span></span></template><template v-else>{{ row.detail }}</template><span v-if="row.warning" class="pm-cell-warning">{{ row.warning }}</span></td><td>{{ row.owner }}</td><td><span class="pm-badge-stack"><StatusTag v-if="row.priorState" family="pm" tone="neutral" :label="row.priorState" /><StatusTag family="pm" :tone="statusTone(row.state)" :label="row.state" /></span></td><td><div class="pm-inline-progress"><i :style="{ width: `${row.progress}%` }"></i></div><small>{{ row.progress }}%</small></td><td>{{ row.due }}</td><td class="pm-col-actions"><button class="pm-link" @click="openOperationDetail(row)">查看详情</button></td></tr></tbody></table></div><div v-if="!operationRows.length" class="pm-empty"><ConsoleIcon name="info" /><b>暂无数据</b><span>当前页面尚无待处理事项</span></div></section>
+          <section class="pm-table-panel"><div class="pm-table-scroll"><table class="pm-table"><thead><tr><th scope="col">事项 / 项目</th><th scope="col">内容摘要</th><th scope="col">负责人 / 归属</th><th scope="col">状态</th><th scope="col">{{ activeSection === 'allocation' ? '分配进度' : '完成度' }}</th><th scope="col">时限</th><th scope="col"></th></tr></thead><tbody><tr v-for="row in operationRows" :key="row.id"><td><b>{{ operationRowIdentity(row).label }}</b><small v-if="operationRowIdentity(row).code" class="pm-service-code mono">服务项编号：{{ operationRowIdentity(row).code }}</small></td><td><template v-if="Array.isArray(row.detail)"><span v-if="!row.detail.length">—</span><span v-else class="pm-code-pills"><span v-for="code in row.detail" :key="code" class="pm-code-pill">{{ code }}</span></span></template><template v-else>{{ row.detail }}</template><span v-if="row.warning" class="pm-cell-warning">{{ row.warning }}</span></td><td>{{ row.owner }}</td><td><span class="pm-badge-stack"><StatusTag v-if="row.priorState" family="pm" tone="neutral" :label="row.priorState" /><StatusTag family="pm" :tone="statusTone(row.state)" :label="row.state" /></span></td><td><div class="pm-inline-progress"><i :style="{ width: `${row.progress}%` }"></i></div><small>{{ row.progress }}%</small></td><td>{{ row.due }}</td><td class="pm-col-actions"><button class="pm-link" @click="openOperationDetail(row)">查看详情</button></td></tr></tbody></table></div><div v-if="!operationRows.length" class="pm-empty"><ConsoleIcon name="info" /><b>暂无数据</b><span>当前页面尚无待处理事项</span></div></section>
         </template>
         <section
           v-if="session?.permissions?.includes('project.read') && workspaceReady && !loading && !loadError && ['planning', 'preparation', 'qualifications', 'equipment', 'implementation', 'reports'].includes(activeSection)"

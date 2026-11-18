@@ -1,9 +1,11 @@
 <script setup>
 import { computed, ref } from 'vue'
 import ConsoleIcon from '@/modules/shared/components/ConsoleIcon.vue'
+import { serviceItemLabel } from '../projectDisplay.js'
 
 const props = defineProps({
   items: { type: Array, default: () => [] },
+  projects: { type: Array, default: () => [] },
   selectedIds: { type: Array, default: () => [] },
   multiple: { type: Boolean, default: false },
   emptyText: { type: String, default: '暂无可选服务项' },
@@ -12,14 +14,24 @@ const props = defineProps({
 const emit = defineEmits(['select', 'toggle'])
 
 const keyword = ref('')
+const projectByID = computed(() => new Map(props.projects.map(project => [project.id, project])))
 const filteredItems = computed(() => {
   const query = keyword.value.trim().toLowerCase()
   if (!query) return props.items
-  return props.items.filter((item) => [item.id, item.site, item.category, item.batch, item.system, item.status].join(' ').toLowerCase().includes(query))
+  return props.items.filter((item) => [
+    projectByID.value.get(item.project_id)?.name,
+    item.id, item.site, item.category, item.batch, item.system, item.status,
+  ].join(' ').toLowerCase().includes(query))
 })
+// 用途：按稳定编号判断服务项是否被选中。
+// 参数：item 为当前卡片对应的服务项快照。
+// 返回值：服务项编号是否包含在当前选中集合中。
 function isSelected(item) {
   return props.selectedIds.includes(item.id)
 }
+// 用途：沿用单选或批量勾选事件，交由工作台处理当前服务项。
+// 参数：item 为用户选择的原始服务项快照。
+// 返回值：无。
 function choose(item) {
   if (props.multiple) emit('toggle', item)
   else emit('select', item)
@@ -31,7 +43,8 @@ function choose(item) {
     <div class="pm-picker-toolbar">
       <label class="pm-picker-search">
         <ConsoleIcon name="search" />
-        <input v-model="keyword" type="search" placeholder="搜索服务项编号 / 场所 / 检测类别"  maxlength="100"/>
+        <input v-model="keyword" type="search" placeholder="搜索项目 / 系统 / 服务项编号"
+          aria-label="搜索服务项队列" maxlength="100" />
       </label>
       <span class="pm-picker-count">{{ filteredItems.length }} / {{ items.length }} 项</span>
     </div>
@@ -50,7 +63,8 @@ function choose(item) {
           <i></i>
         </span>
         <span class="pm-picker-body">
-          <b class="mono">{{ item.id }}</b>
+          <b>{{ serviceItemLabel(item, projectByID.get(item.project_id)) }}</b>
+          <small class="pm-service-code mono">服务项编号：{{ item.id }}</small>
           <small>{{ item.site || '未设置场所' }}<template v-if="item.category"> · {{ item.category }}</template></small>
         </span>
         <span class="pm-picker-meta">
