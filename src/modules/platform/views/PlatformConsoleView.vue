@@ -7,6 +7,7 @@ import { openNotificationTarget } from '@/modules/shared/utils/notificationNavig
 import ConsoleIcon from '@/modules/platform/shared/components/ConsoleIcon.vue'
 import LoadingState from '@/modules/shared/components/LoadingState.vue'
 import { loginUsername } from '@/modules/shared/loginUsername.mjs'
+import { useAuthorizationRefresh } from '@/modules/shared/composables/useAuthorizationRefresh.js'
 
 // 设置分区组件按需加载：控制台/审计首屏只带外壳与当前分区，审计页不再下载 11 个
 // 设置面板的 JS/CSS；某个分区的加载失败或大数据量也不会拖慢其他入口。
@@ -236,6 +237,8 @@ const iamRefreshKey = ref(0)
 const pendingPersonnelChangeUserId = ref('')
 
 const { principal, refreshPrincipal } = useCurrentPrincipal()
+// 侧栏角色跟随平台当前主体：页面重新可见或定时重读，避免历史角色残留。
+if (typeof useAuthorizationRefresh === 'function') useAuthorizationRefresh(() => refreshPrincipal({ force: true }))
 
 const currentAccountName = computed(() => loginUsername(principal.value))
 

@@ -46,6 +46,8 @@ import { sourceSHA256 } from '../../shared/utils/sourceIntegrity.js'
 import { useLoginUsername } from '../../shared/composables/useLoginUsername.js'
 import { createCommandRunner, createRequestID, formatMinor, toMinor, timeoutSignal, validateItems } from '../api/client.js'
 
+import { getReimbursementSession } from '../api/reimbursement.js'
+import { useAuthorizationRefresh } from '@/modules/shared/composables/useAuthorizationRefresh.js'
 import { ensureReimbursementSession, logoutReimbursement, reimbursementAPI as api,
   startReimbursementLogin } from '../api/reimbursement.js'
 import { policyFields, policyFormFrom, policyPayload } from '../policy.js'
@@ -58,6 +60,10 @@ import '../reimbursement.css'
 const route = useRoute()
 const router = useRouter()
 const session = ref(null)
+// 侧栏与角色卡跟随服务端当前授权：页面重新可见或定时重读，避免历史角色残留。
+if (typeof useAuthorizationRefresh === 'function') useAuthorizationRefresh(async () => {
+  session.value = await getReimbursementSession({ force: true })
+})
 const menuOpen = ref(false)
 const loading = ref(false)
 // 只有首屏读取展示骨架；后续写后/筛选刷新保留已渲染内容，避免整页闪一下。

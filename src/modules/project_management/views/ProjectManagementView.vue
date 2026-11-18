@@ -36,6 +36,7 @@ import { useProjectEquipment } from '@/modules/project_management/composables/us
 import { useProjectPersonnelNames } from '@/modules/project_management/composables/useProjectPersonnelNames.js'
 import { useProjectMonitoring } from '@/modules/project_management/composables/useProjectMonitoring'
 import { useProjectNotifications } from '@/modules/project_management/composables/useProjectNotifications'
+import { useAuthorizationRefresh } from '@/modules/shared/composables/useAuthorizationRefresh.js'
 import { rectifyingProjectCount, useProjectKpiVisibility } from '@/modules/project_management/composables/useProjectKpiVisibility'
 // BIZ-PROJECT-06：缺项判定由服务端按服务项完整事件流给出，前端只消费结论；
 // 判定不可用（未拉取/失败/待同步）一律按"未知"处理并 fail-closed。
@@ -391,6 +392,12 @@ const {
   openTarget: openProjectNotificationTarget,
   openApprovalTask: (task) => openApprovalRequest(task?.id),
   getContext: () => sectionDataContext.value,
+})
+// 侧栏角色必须跟随服务端当前授权，而不是停留在登录时的快照。
+if (typeof useAuthorizationRefresh === 'function') useAuthorizationRefresh(async () => {
+  const next = await getProjectSession({ force: true })
+  if (authorizationScopeKey(session.value) !== authorizationScopeKey(next)) clearProjectAuthorizationData()
+  session.value = next
 })
 const toastMessage = ref('')
 const toastType = ref('success')

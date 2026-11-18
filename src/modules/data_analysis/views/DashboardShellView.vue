@@ -14,6 +14,7 @@ import ConsoleIcon from "@/modules/platform/shared/components/ConsoleIcon.vue"
 import ErrorState from "@/modules/platform/shared/components/ErrorState.vue"
 import LoadingState from "@/modules/platform/shared/components/LoadingState.vue"
 import { closeSubsystemTabOrFallback } from "@/modules/shared/utils/returnToPortal"
+import { useAuthorizationRefresh } from '@/modules/shared/composables/useAuthorizationRefresh.js'
 import { isDashboardEmbedEnabled, getAuthMe, getEmbedToken, getContractDashboardSummary, getContractRegions, getProjectDashboardSummary, getReportDashboardSummary, getFinanceDashboardSummary, getContractDetails, getProjectDetails, getDashboardTrend, getAlertSummary } from "../api/dataAnalysis"
 import AlertsCenterView from "./AlertsCenterView.vue"
 import DictionaryView from "./DictionaryView.vue"
@@ -95,6 +96,10 @@ const section = computed(() => {
 })
 
 const me = ref(null)
+// 侧栏角色跟随服务端当前授权：页面重新可见或定时重读，避免历史角色残留。
+if (typeof useAuthorizationRefresh === 'function') useAuthorizationRefresh(async () => {
+  me.value = await getAuthMe({ force: true })
+})
 const dashboardEmbedEnabled = computed(() => !!me.value && isDashboardEmbedEnabled(me.value))
 const loading = ref(true)
 const loadError = ref("")

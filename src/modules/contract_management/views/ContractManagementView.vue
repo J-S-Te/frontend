@@ -142,6 +142,7 @@ import ContractAuditOutboxPanel from '@/modules/contract_management/components/C
 import { useSigningLedger } from '@/modules/contract_management/composables/useSigningLedger'
 import { useApprovalDetail } from '@/modules/contract_management/composables/useApprovalDetail'
 import { useContractDraftEditor } from '@/modules/contract_management/composables/useContractDraftEditor'
+import { useAuthorizationRefresh } from '@/modules/shared/composables/useAuthorizationRefresh.js'
 import { useContractCRMPrefill } from '@/modules/contract_management/composables/useContractCRMPrefill'
 import { canEditContractDraft, saveContractDraft } from '@/modules/contract_management/utils/contractDraft'
 import { normalizePaymentTerms, paymentAmountMinor } from '@/modules/contract_management/utils/paymentTerms'
@@ -167,6 +168,10 @@ const loadContractImportPanel = () => import('../components/ContractImportPanel.
 const route = useRoute()
 const router = useRouter()
 const session = ref(null)
+// 侧栏角色跟随服务端当前授权：页面重新可见或定时重读，避免历史角色残留。
+if (typeof useAuthorizationRefresh === 'function') useAuthorizationRefresh(async () => {
+  session.value = await getContractSession({ force: true })
+})
 const sessionError = ref('')
 const businessDataErrors = ref({})
 const crmConnectionRequired = ref(false)
