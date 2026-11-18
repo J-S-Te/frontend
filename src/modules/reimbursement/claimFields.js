@@ -1,14 +1,15 @@
 import { toMinor } from './api/client.js'
 import { allocationInput } from './allocation.js'
 
-// 用途：仅保留已实际填报的行程白名单，不发送空对象或客户端评估结果。
+// 用途：仅提交已启用的行程白名单，不发送隐藏票面草稿或客户端评估结果。
 // 参数：value为用户表单，invoice表示票面行程而非本人声明。
 // 返回值：可写行程字段或undefined；具体业务日期及城市由服务器校验。
-export function travelInput(value,invoice=false) {
-  const keys=invoice?['kind','origin_city_code','destination_city_code','start_date','end_date']
-    :['origin_city_code','destination_city_code','departure_date','return_date']
-  const result=Object.fromEntries(keys.map(key=>[key,String(value?.[key] || '').trim()]))
-  return Object.values(result).some(Boolean)?result:undefined
+export function travelInput(value, invoice = false) {
+  const keys = invoice ? ['kind', 'origin_city_code', 'destination_city_code', 'start_date', 'end_date']
+    : ['origin_city_code', 'destination_city_code', 'departure_date', 'return_date']
+  const result = Object.fromEntries(keys.map(key => [key, String(value?.[key] || '').trim()]))
+  if (invoice && !result.kind) return undefined
+  return Object.values(result).some(Boolean) ? result : undefined
 }
 
 // 用途：判断引用能否被选入申请，不将历史尾款申请解释为资格已通过。

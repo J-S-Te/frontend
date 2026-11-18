@@ -1,6 +1,25 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 
+test('票面行程未选类别时省略请求字段，隐藏的草稿日期和城市不误提交', async () => {
+  const { travelInput } = await import('./claimFields.js')
+  const value = { kind: '', start_date: '2026-11-08', origin_city_code: '110100' }
+  assert.equal(travelInput(value, true), undefined)
+  assert.deepEqual(JSON.parse(JSON.stringify({ travel_facts: travelInput(value, true) })), {})
+  assert.equal(value.start_date, '2026-11-08')
+  assert.deepEqual(travelInput({ ...value, kind: ' RAIL ' }, true), {
+    kind: 'RAIL', origin_city_code: '110100', destination_city_code: '',
+    start_date: '2026-11-08', end_date: '',
+  })
+})
+
+test('本人差旅声明不依赖票面类别，已填写字段仍交给服务端校验', async () => {
+  const { travelInput } = await import('./claimFields.js')
+  assert.deepEqual(travelInput({ origin_city_code: '110100' }), {
+    origin_city_code: '110100', destination_city_code: '', departure_date: '', return_date: '',
+  })
+})
+
 test('历史尾款和差旅只发送可写声明，剔除服务端评估和引用资格，金额仍精确', async () => {
   const { editableClaimItem } = await import('./claimFields.js')
   const payload = editableClaimItem({ id: 'item', fee_type: 'TRAVEL', amount: '90071992547409.93',

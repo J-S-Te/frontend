@@ -94,10 +94,65 @@ test('原件选择实际回读权威文档，候选自动绑定运行及索引�
   } finally { fixture.unmount() }
 })
 
+test('票据维护默认只展示操作入口，表单由用户选择后展开且切换保留输入', async () => {
+  const request = async () => ({ corrections: [], impacts: [], sources: [], risks: [] })
+  const props = { invoice: { id: 'invoice', owner_subject_id: 'actor', total_minor: '100' },
+    session: { subject_id: 'actor', permissions: ['expense.invoice.review'] } }
+  const html = await renderToString(Vue.createSSRApp(component('InvoiceControlsPanel.vue', request, true), props))
+  assert.doesNotMatch(html, /<textarea|选择已就绪原件搜索|票面开始日/)
+  assert.match(html, /更正票面/)
+  assert.match(html, /补充原件/)
+  assert.match(html, /登记异常/)
+  const fixture = await mount('InvoiceControlsPanel.vue', props, request)
+  try {
+    assert.equal(typeof fixture.state.toggleAction, 'function')
+    fixture.state.toggleAction('correction')
+    fixture.state.form.value.invoice_number = '保留编辑中的票号'
+    fixture.state.toggleAction('source')
+    assert.equal(fixture.state.activeAction.value, 'source')
+    fixture.state.toggleAction('source')
+    assert.equal(fixture.state.activeAction.value, '')
+    assert.equal(fixture.state.form.value.invoice_number, '保留编辑中的票号')
+  } finally { fixture.unmount() }
+})
+
+test('本人只有查看权限时没有维护入口，重新确认原因仅向可提交者显示', async () => {
+  const props = { invoice: { id: 'invoice', owner_subject_id: 'actor', total_minor: '100' },
+    session: { subject_id: 'actor', permissions: ['expense.invoice.read'] } }
+  const request = async () => ({ impacts: [{ id: 'impact', status: 'RECONFIRM_REQUIRED' }] })
+  const html = await renderToString(Vue.createSSRApp(component('InvoiceControlsPanel.vue', request, true), props))
+  assert.doesNotMatch(html, /aria-label="票据维护操作"/)
+  const fixture = await mount('InvoiceControlsPanel.vue', props, request)
+  try {
+    fixture.state.toggleAction('correction')
+    assert.equal(fixture.state.activeAction.value, '')
+    assert.equal(fixture.state.pendingControlWork.value, false)
+  } finally { fixture.unmount() }
+  const submitter = await mount('InvoiceControlsPanel.vue', {
+    ...props, session: { subject_id: 'actor', permissions: ['expense.claim.submit'] },
+  }, request)
+  try { assert.equal(submitter.state.pendingControlWork.value, true) }
+  finally { submitter.unmount() }
+})
+
+test('来源位置按实际页码和XML路径去重，不重复展示同一页的字段坐标', async () => {
+  const fixture = await mount('InvoiceControlsPanel.vue', {
+    invoice: { id: 'invoice', owner_subject_id: 'actor', total_minor: '100' },
+    session: { subject_id: 'actor', permissions: [] },
+  }, async () => ({}))
+  try {
+    assert.equal(typeof fixture.state.sourceLocationLabel, 'function')
+    assert.equal(fixture.state.sourceLocationLabel({ sources: [
+      { page: 1 }, { page: 1 }, { page: 2 }, { xml_path: '/a' }, { xml_path: '/a' }, { xml_path: '/b' },
+    ] }), '第1、2页 · XML来源2处')
+    assert.equal(fixture.state.sourceLocationLabel({}), '未提供位置信息')
+  } finally { fixture.unmount() }
+})
+
 test('原件读取失败不得追加来源，页面无可手填原件文档运行候选或风险文件ID输入', async () => {
   let mutations = 0
   const props = { invoice: { id: 'invoice', version: 1, owner_subject_id: 'actor', total_minor: '100' },
-    session: { subject_id: 'actor', permissions: [] } }
+    session: { subject_id: 'actor', permissions: ['expense.invoice.review'] } }
   const request = async (path, options) => {
     if (options) { mutations++; return { id: 'command' } }
     if (path.startsWith('/invoice-documents/')) throw new Error('unavailable')
@@ -112,7 +167,7 @@ test('原件读取失败不得追加来源，页面无可手填原件文档运�
     assert.match(fixture.state.error.value, /原件/)
     const html = await renderToString(Vue.createSSRApp(component('InvoiceControlsPanel.vue', request, true), props))
     assert.doesNotMatch(html, /真实解析运行ID|文档ID（|候选序号（从0|原票ID|风险证据文件ID/)
-    assert.match(html, /选择已就绪原件|风险证据原件/)
+    assert.match(html, /补充原件|登记异常/)
   } finally { fixture.unmount() }
 })
 

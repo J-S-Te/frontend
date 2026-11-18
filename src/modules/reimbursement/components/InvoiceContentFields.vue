@@ -28,11 +28,11 @@ function remove(index) { emit('update:value', { lines: (props.value?.lines || []
     <legend>商品服务明细（人工对照原件确认）</legend>
     <p>解析明细仅辅助填写；请逐项核对名称。金额、税额可留空；不会自动确认、税务验真或抵扣。</p>
     <p v-if="!value?.lines?.length">未填写商品服务明细；费用建议将按已发布票种默认映射处理。</p>
-    <div v-for="(line,index) in value?.lines || []" :key="index" class="expense-form-grid">
+    <div v-for="(line,index) in value?.lines || []" :key="index" class="expense-invoice-line">
       <label>第{{ index+1 }}项名称<input :value="line.name" maxlength="256" @input="change(index,'name',$event.target.value)"></label>
       <label>不含税金额（元，可空）<input :value="line.amount" inputmode="decimal" @input="change(index,'amount',$event.target.value)"></label>
       <label>税额（元，可空）<input :value="line.tax" inputmode="decimal" @input="change(index,'tax',$event.target.value)"></label>
-      <button type="button" class="expense-button" @click="remove(index)">移除此明细</button>
+      <button type="button" class="expense-button expense-invoice-line-remove" @click="remove(index)">移除</button>
     </div>
     <button type="button" class="expense-button" :disabled="disabled || (value?.lines?.length || 0)>=100" @click="add">添加商品服务明细</button>
   </fieldset>
