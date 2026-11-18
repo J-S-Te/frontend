@@ -2802,22 +2802,23 @@ onBeforeUnmount(() => {
           ref="heading"
           tabindex="-1"
         >
-          {{ title }}
+          {{ section === 'invoices' && selectedInvoice ? '发票复核' : title }}
         </h1>
         <p>
-          {{ sectionDescriptions[workspace] || '按当前主体与数据范围读取；金额以人民币元展示。' }}
+          {{ section === 'invoices' && selectedInvoice ? '对照原件核对票面信息，其他操作按需展开。'
+            : sectionDescriptions[workspace] || '按当前主体与数据范围读取；金额以人民币元展示。' }}
         </p>
       </div>
       <div class="expense-head__actions">
         <button type="button"
-          v-if="workspace === 'invoices' && can('expense.invoice.upload')"
+          v-if="workspace === 'invoices' && !selectedInvoice && can('expense.invoice.upload')"
           class="expense-button primary"
           @click="navigate('invoice-upload')"
         >
           上传发票
         </button>
         <button type="button"
-          v-if="workspace === 'invoices' && sectionAllowed('invoice-abnormal')"
+          v-if="workspace === 'invoices' && !selectedInvoice && sectionAllowed('invoice-abnormal')"
           class="expense-button"
           @click="navigate('invoice-abnormal')"
         >
@@ -2865,7 +2866,7 @@ onBeforeUnmount(() => {
     </div>
     <LoadingState v-if="loading && !initialized" />
     <template v-if="hasModule">
-      <p class="expense-alert" role="note">
+      <p v-if="!(section === 'invoices' && selectedInvoice)" class="expense-alert" role="note">
         {{ scopeDescription }}
       </p>
       <p v-if="returnProject"><RouterLink :to="returnProject">返回来源项目</RouterLink></p>
@@ -3559,7 +3560,8 @@ onBeforeUnmount(() => {
         </section>
       </section>
       <section v-if="['claims','invoices','approvals','payments','archives','analytics'].includes(section) && workspace !== 'invoice-upload'
-        && !(section === 'claims' && (selected || claimFormOpen))" class="expense-list-tools">
+        && !(section === 'claims' && (selected || claimFormOpen))
+        && !(section === 'invoices' && selectedInvoice)" class="expense-list-tools">
         <p v-if="workspace === 'invoice-abnormal'" class="expense-alert">
           集中处理未确认、查验不一致及待关闭风险；进入详情查看真实来源和处理记录。
         </p>
@@ -3592,7 +3594,8 @@ onBeforeUnmount(() => {
         </form>
         <p class="expense-meta">日期按北京时间业务日查询。仅筛选当前账号可见对象，不授予额外数据权限。</p>
       </section>
-      <InvoiceClassificationEvidence v-if="['invoices','claims'].includes(section)" :rows="invoiceSuggestions" />
+      <InvoiceClassificationEvidence v-if="['invoices','claims'].includes(section)
+        && !(section === 'invoices' && selectedInvoice)" :rows="invoiceSuggestions" />
       <section v-if="section === 'analytics'" class="expense-analytics">
         <!-- 看板读取失败要显示原因和重试，不能让面板整块消失。 -->
         <ErrorState v-if="analyticsError" :error="analyticsError" title="看板加载失败" @retry="load" />
@@ -3699,7 +3702,8 @@ onBeforeUnmount(() => {
         <p v-else class="expense-meta">当前范围没有已封存项目档案。</p>
       </section>
       <section v-if="section !== 'dashboard' && !['invoice-upload','analytics','recovery','messages'].includes(workspace)
-        && !(section === 'claims' && (selected || claimFormOpen))" class="expense-panel expense-panel--flush">
+        && !(section === 'claims' && (selected || claimFormOpen))
+        && !(section === 'invoices' && selectedInvoice)" class="expense-panel expense-panel--flush">
         <header class="expense-card-head">
           <h2 class="expense-card-title">{{ listTitle }}</h2>
           <div class="expense-card-extra">
@@ -4899,12 +4903,12 @@ onBeforeUnmount(() => {
           </button>
         </div>
       </section>
-      <InvoiceControlsPanel v-if="selectedInvoice && section === 'invoices' && session" :key="selectedInvoice.id" :invoice="selectedInvoice" :session="session" @changed="openInvoice(selectedInvoice.id)" />
-      <section v-if="selectedInvoice && section === 'invoices'" ref="detailPanel" class="expense-panel">
+      <section v-if="selectedInvoice && section === 'invoices'" ref="detailPanel"
+        class="expense-panel expense-invoice-review" aria-label="发票人工复核">
         <header class="expense-detail-head">
           <div>
-            <h2>
-              人工复核 · {{ selectedInvoice.id }}
+            <h2>人工复核
+              <span class="expense-invoice-number">{{ selectedInvoice.invoice_number || '票号待补充' }}</span>
               <span class="expense-badge" :class="claimStatusTone(selectedInvoice.review_status)">{{ statusLabel(selectedInvoice.review_status) }}</span>
             </h2>
             <p class="expense-detail-meta">
@@ -4912,194 +4916,114 @@ onBeforeUnmount(() => {
               · 占用：<span class="expense-badge" :class="claimStatusTone(selectedInvoice.reservation_state)">{{ statusLabel(selectedInvoice.reservation_state) }}</span>
             </p>
           </div>
-          <button type="button" class="expense-button" @click="backToList('invoice')">
-            返回发票列表
-          </button>
+          <button type="button" class="expense-button" @click="backToList('invoice')">返回发票列表</button>
         </header>
         <aside v-if="selectedInvoice.suspected_duplicates?.length" class="expense-alert warning" role="alert">
           <strong>疑似重复：存在同日、同金额、同销售方的不同票据，请对照原件核验。</strong>
-          <p v-for="invoice in selectedInvoice.suspected_duplicates" :key="invoice.invoice_id">{{ invoice.invoice_number }} · {{ invoice.invoice_date }} · {{ formatMinor(invoice.total_minor) }}元</p>
+          <p v-for="invoice in selectedInvoice.suspected_duplicates" :key="invoice.invoice_id">
+            {{ invoice.invoice_number }} · {{ invoice.invoice_date }} · {{ formatMinor(invoice.total_minor) }}元
+          </p>
           <p v-if="selectedInvoice.suspected_duplicates_more">当前范围还有匹配票据，请进一步查询台账。</p>
         </aside>
-        <InvoiceContentFields v-model:value="invoiceContentEditor" :disabled="!can('expense.invoice.review') || selectedInvoice.owner_subject_id!==session?.subject_id || selectedInvoice.reservation_state!=='AVAILABLE' || saving || !!pending" />
-        <p v-if="selectedInvoice.reservation_state!=='AVAILABLE'">已占用或消费的商品服务明细只读，须通过独立更正及申请人重新确认。</p>
-        <TravelFields v-model:value="selectedInvoice.travel_facts" invoice :disabled="!can('expense.invoice.review') || selectedInvoice.review_status==='CONFIRMED'" />
-        <p v-if="selectedInvoice.review_status==='CONFIRMED'">已确认票面行程只读；重大变化请使用独立更正审批，不重新覆盖原事实。</p>
-        <div class="expense-grid">
-          <aside>
-            <h3>
-              来源原件
-            </h3>
-            <button type="button" class="expense-button" @click="invoiceSources">
-              获取受控原件
-            </button>
-            <p v-if="!invoiceRows.length">
-              OFD请下载原件对照；缺字段请人工补录，不能视为已验真。
-            </p>
-            <button type="button"
-              v-for="source in invoiceRows"
-              :key="source.id || source.file_id"
-              class="expense-button"
-              @click="readInvoiceOriginal(source)"
-            >
-              {{ source.filename || source.file_id }} 下载
-            </button>
-            <div v-if="selectedSource">
-              <p>
-                来源：{{ selectedSource.original_name || selectedSource.file_id }} · {{ selectedSource.parse_status ? statusLabel(selectedSource.parse_status) : '解析状态待查询' }}
-              </p>
-              <p>
-                解析器 {{ selectedSource.parser_version || '不可用' }} · 规则 {{ selectedSource.rules_version || '不可用' }}
-              </p>
-              <p>
-                来源性质：{{ { PARSED: '独立解析来源，仍需人工复核', MANUAL_LINK: '人工关联原件', LEGACY_UNVERIFIED: '遗留未核实来源' }[selectedSource.source_kind] || '来源性质待确认' }}
-              </p>
-              <p v-if="selectedSource.run_id">
-                运行 {{ selectedSource.run_id }} · 候选 {{ selectedSource.candidate_index }}
-              </p>
-              <p v-if="selectedSource.sources_hash">
-                来源摘要 {{ selectedSource.sources_hash }}
-              </p>
-              <ul>
-                <li v-for="issue in selectedSource.issues || []" :key="issue">
-                  {{ issue }}
-                </li>
-              </ul>
-              <details v-if="selectedSource.sources?.length">
-                <summary>
-                  字段来源与坐标（展示前50行）
-                </summary>
-                <div class="expense-table">
-                  <table class="expense-table-body">
-                    <thead>
-                      <tr>
-                        <th scope="col">
-                          页码 / XML路径
-                        </th>
-                        <th scope="col">
-                          坐标
-                        </th>
-                        <th scope="col">
-                          源文字
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      <tr
-                        v-for="(source, index) in selectedSource.sources.slice(0, 50)"
-                        :key="index"
-                      >
-                        <td>
-                          {{ source.page || source.xml_path || '—' }}
-                        </td>
-                        <td>
-                          {{ source.x ?? '—' }}, {{ source.y ?? '—' }}
-                        </td>
-                        <td>
-                          {{ source.text || '—' }}
-                        </td>
-                      </tr>
-                    </tbody>
-                  </table>
-                </div>
-              </details>
+        <p v-if="invoiceReadonlyReason" class="expense-alert warning">{{ invoiceReadonlyReason }}</p>
+        <div class="expense-invoice-workspace">
+          <aside class="expense-invoice-original">
+            <header class="expense-invoice-section-head"><h3>原件对照</h3>
+              <button type="button" class="expense-button" @click="invoiceSources">获取受控原件</button>
+            </header>
+            <p v-if="!invoiceRows.length" class="expense-meta">获取原件后选择文件查看；OFD请下载对照。</p>
+            <div v-else class="expense-actions expense-invoice-source-list">
+              <button v-for="(source, index) in invoiceRows" :key="source.id || source.file_id"
+                type="button" class="expense-button" @click="readInvoiceOriginal(source)">
+                {{ source.filename || source.original_name || ('原件' + (index + 1)) }}
+              </button>
             </div>
-            <InvoiceOriginalViewer :preview="originalPreview" :download="originalDownload" :media="originalMedia" title="发票原件对照" alt="受控发票原件" transformable :report-error="showError" />
-            <a
-              v-if="originalDownload"
-              :href="originalDownload"
-              :download="`invoice-original.${({'application/pdf':'pdf','image/png':'png','image/jpeg':'jpg'})[originalMedia] || 'ofd'}`"
-              class="expense-button"
-            >
-              下载当前原件
-            </a>
+            <p v-if="selectedSource" class="expense-meta">
+              {{ selectedSource.original_name || selectedSource.filename || '已选原件' }}
+            </p>
+            <InvoiceOriginalViewer :preview="originalPreview" :download="originalDownload"
+              :media="originalMedia" title="发票原件对照" alt="受控发票原件"
+              transformable :report-error="showError" />
+            <p v-if="!originalDownload" class="expense-original-empty">选择原件后在此对照票面</p>
+            <a v-if="originalDownload" :href="originalDownload"
+              :download="'invoice-original.' + (({'application/pdf':'pdf','image/png':'png','image/jpeg':'jpg'})[originalMedia] || 'ofd')"
+              class="expense-button">下载当前原件</a>
+            <details v-if="selectedSource" class="expense-disclosure expense-source-details">
+              <summary>来源与解析详情</summary>
+              <p>解析状态：{{ selectedSource.parse_status ? statusLabel(selectedSource.parse_status) : '解析状态待查询' }}</p>
+              <p>来源性质：{{ { PARSED: '独立解析来源，仍需人工复核', MANUAL_LINK: '人工关联原件', LEGACY_UNVERIFIED: '遗留未核实来源' }[selectedSource.source_kind] || '来源性质待确认' }}</p>
+              <p>解析器 {{ selectedSource.parser_version || '不可用' }} · 规则 {{ selectedSource.rules_version || '不可用' }}</p>
+              <p v-if="selectedSource.run_id">运行 {{ selectedSource.run_id }} · 候选 {{ selectedSource.candidate_index }}</p>
+              <p v-if="selectedSource.sources_hash">来源摘要 {{ selectedSource.sources_hash }}</p>
+              <ul v-if="selectedSource.issues?.length">
+                <li v-for="issue in selectedSource.issues" :key="issue">{{ parseIssueLabel(issue) }}</li>
+              </ul>
+              <details v-if="selectedSource.sources?.length" class="expense-disclosure">
+                <summary>字段来源与坐标（展示前50行）</summary>
+                <div class="expense-table"><table class="expense-table-body">
+                  <thead><tr><th scope="col">页码 / XML路径</th><th scope="col">坐标</th><th scope="col">源文字</th></tr></thead>
+                  <tbody><tr v-for="(source, index) in selectedSource.sources.slice(0, 50)" :key="index">
+                    <td>{{ source.page || source.xml_path || '—' }}</td>
+                    <td>{{ source.x ?? '—' }}, {{ source.y ?? '—' }}</td><td>{{ source.text || '—' }}</td>
+                  </tr></tbody>
+                </table></div>
+              </details>
+            </details>
           </aside>
-          <p v-if="invoiceReadonlyReason" class="expense-alert warning">
-            {{ invoiceReadonlyReason }}
-          </p>
-          <fieldset :disabled="saving || !!pending || !can('expense.invoice.review')
-            || selectedInvoice.owner_subject_id !== session?.subject_id
-            || !['AVAILABLE', ''].includes(selectedInvoice.reservation_state || '')
-            || selectedInvoice.review_status === 'CONFIRMED'">
-            <label>
-              发票类型
-              <input v-model="selectedInvoice.invoice_type">
-            </label>
-            <label>
-              发票号码
-              <input v-model="selectedInvoice.invoice_number">
-            </label>
-            <label>
-              开票日期
-              <input v-model="selectedInvoice.invoice_date" type="date">
-            </label>
-            <label>
-              销售方税号
-              <input v-model="selectedInvoice.seller_tax_id">
-            </label>
-            <label>
-              购买方税号
-              <input v-model="selectedInvoice.buyer_tax_id">
-            </label>
-            <label>
-              票面总额（元）
-              <input v-model="invoiceTotalYuan" inputmode="decimal" placeholder="对照原件填写，最多两位小数">
-              <small v-if="invoiceTotalMinorHint">提交时记为 {{ invoiceTotalMinorHint }}</small>
-            </label>
-            <label>
-              人工复核或校正原因
-              <textarea v-model="invoiceReviewReason" />
-            </label>
-            <button type="button" class="expense-button primary" @click="confirmInvoice">
-              确认人工复核字段
-            </button>
+          <fieldset class="expense-invoice-form" :disabled="saving || !!pending || !!invoiceReadonlyReason">
+            <legend>核对票面信息</legend>
+            <p class="expense-meta">请逐项对照原件。字段提取与人工复核不代表外部税务查验。</p>
+            <div class="expense-form-grid expense-invoice-fields">
+              <label>发票类型<input v-model="selectedInvoice.invoice_type"></label>
+              <label>发票号码<input v-model="selectedInvoice.invoice_number"></label>
+              <label>开票日期<input v-model="selectedInvoice.invoice_date" type="date"></label>
+              <label>票面总额（元）<input v-model="invoiceTotalYuan" inputmode="decimal"
+                placeholder="对照原件填写，最多两位小数"></label>
+              <label>销售方税号<input v-model="selectedInvoice.seller_tax_id"></label>
+              <label>购买方税号<input v-model="selectedInvoice.buyer_tax_id"></label>
+            </div>
+            <details class="expense-disclosure">
+              <summary>商品服务明细（{{ invoiceContentEditor?.lines?.length || 0 }}项）</summary>
+              <InvoiceContentFields v-model:value="invoiceContentEditor"
+                :disabled="selectedInvoice.reservation_state !== 'AVAILABLE' || !!invoiceReadonlyReason || saving || !!pending" />
+              <p v-if="selectedInvoice.reservation_state !== 'AVAILABLE'" class="expense-meta">
+                已占用或消费的商品服务明细只读，须通过独立更正及申请人重新确认。
+              </p>
+            </details>
+            <details class="expense-disclosure">
+              <summary>票面行程（机票、火车票或酒店）</summary>
+              <TravelFields v-model:value="selectedInvoice.travel_facts" invoice
+                :disabled="saving || !!pending || !!invoiceReadonlyReason" />
+              <p v-if="selectedInvoice.review_status === 'CONFIRMED'" class="expense-meta">
+                已确认票面行程只读；重大变化请使用独立更正审批。
+              </p>
+            </details>
+            <label>人工复核或校正原因<textarea v-model="invoiceReviewReason" rows="2" /></label>
+            <button type="button" class="expense-button primary" @click="confirmInvoice">确认人工复核字段</button>
           </fieldset>
         </div>
-        <fieldset v-if="can('expense.invoice.verify')" :disabled="saving || !!pending">
-          <h3>
-            独立人工核验记录
-          </h3>
-          <p>
-            人工核验只记录人工依据，不能代替正式外部税务查验。
-          </p>
-          <label>
-            核验结论
-            <select v-model="verificationResult">
-              <option value="PASS">
-                人工对照一致
-              </option>
-              <option value="MISMATCH">
-                存在不一致
-              </option>
-              <option value="UNKNOWN">
-                无法确认
-              </option>
-            </select>
-          </label>
-          <label>
-            核验依据
-            <textarea v-model="verificationReason" />
-          </label>
-          <div class="expense-option-field">
-            <span>核验证据原件（按文件名选择，1至20份）</span>
-            <BusinessOptionPicker
-              :model-value="splitIDs(verificationEvidence)"
-              path="/invoice-document-options"
-              purpose="reimbursement.invoice.original"
-              value-key="file_id"
-              object-label="核验证据原件"
-              multiple
-              :disabled="saving || !!pending"
-              aria-label="选择核验证据原件"
-              @update:model-value="ids => { verificationEvidence = ids.slice(0, 20).join(',') }"
-            />
-          </div>
-          <button type="button" class="expense-button" @click="verifyInvoice">
-
-            保存人工核验记录
-          </button>
-        </fieldset>
+        <details v-if="can('expense.invoice.verify')" class="expense-disclosure">
+          <summary>独立人工核验记录</summary>
+          <fieldset :disabled="saving || !!pending">
+            <p>人工核验只记录人工依据，不能代替正式外部税务查验。</p>
+            <label>核验结论<select v-model="verificationResult">
+              <option value="PASS">人工对照一致</option><option value="MISMATCH">存在不一致</option>
+              <option value="UNKNOWN">无法确认</option></select></label>
+            <label>核验依据<textarea v-model="verificationReason" /></label>
+            <div class="expense-option-field"><span>核验证据原件（按文件名选择，1至20份）</span>
+              <BusinessOptionPicker :model-value="splitIDs(verificationEvidence)"
+                path="/invoice-document-options" purpose="reimbursement.invoice.original"
+                value-key="file_id" object-label="核验证据原件" multiple :disabled="saving || !!pending"
+                aria-label="选择核验证据原件"
+                @update:model-value="ids => { verificationEvidence = ids.slice(0, 20).join(',') }" />
+            </div>
+            <button type="button" class="expense-button" @click="verifyInvoice">保存人工核验记录</button>
+          </fieldset>
+        </details>
       </section>
+      <InvoiceControlsPanel v-if="selectedInvoice && section === 'invoices' && session"
+        :key="selectedInvoice.id" :invoice="selectedInvoice" :session="session"
+        @changed="openInvoice(selectedInvoice.id)" />
     </template>
     <ConfirmDialog :open="Boolean(confirmDialog)" v-bind="confirmDialog || {}" @confirm="acceptConfirm" @cancel="cancelConfirm" />
   </AppShell>

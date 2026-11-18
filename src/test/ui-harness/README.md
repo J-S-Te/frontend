@@ -18,6 +18,7 @@
 | `priority-browser.mjs` | 访问 dev server 的 `priority.html` | 否 | **手工 dev server** |
 | `pagination-layout-browser.mjs` | `page.setContent` 内联渲染真实 PaginationBar + 模块 CSS | 否 | 仅 Chrome |
 | `first-run-browser.mjs` | 路由合成 `page.goto` + 内联真实组件/CSS | 否 | 仅 Chrome |
+| `reimbursement-page-browser.mjs` | 内联真实报销页面/组件/CSS；可单选票据复核或维护 | 否（opt-in） | 仅 Chrome，无后端/数据库 |
 | `settlement-role-browser.mjs` | 自起 Vite + 隔离夹具后端/MySQL | 否（opt-in） | 隔离夹具会话 + 隔离 MySQL + 后端 |
 
 进 CI 的只有 `responsive-boundaries-browser.mjs`：它不依赖 dev server、不依赖后端，
@@ -161,6 +162,23 @@ analysis / iam / applications / dictionaries / project-queue`。省略 `SIDEBAR_
 
 需要隔离夹具会话、隔离 MySQL 与对应后端；缺任一条件直接失败，不允许零用例通过。
 不提供夹具时改跑静态断言：`npm test`（含 `settlement-role-browser.test.mjs`）。
+
+### 5. 票据复核与维护专项
+
+```bash
+PAGE_CASES=invoice-review PAGE_WIDTHS=1440,375 \
+  PAGE_OUTPUT_DIR=/tmp/invoice-review-ui \
+  node src/test/ui-harness/reimbursement-page-browser.mjs
+```
+
+`invoice-review` 验证原件与关键字段优先、进入复核收起台账、返回恢复、行程按类别显隐、
+复核金额/明细请求接线和已确认票据只读。`invoice-controls` 验证三种维护操作按需展开、
+切换保留输入，以及待独立批准记录和原因输入仍可见；可分别执行，或逗号选择这两种场景。
+默认检查明暗主题，`PAGE_WIDTHS` 指定视口。证据包含页面与工作区截图、JSON结果。
+
+此夹具使用真实Vue视图和组件、合成会话/API响应及绘制的样例原件；所有外部请求被拦截。
+命令只记录在浏览器内，不连接业务服务、不写业务数据，也不代表真实财务流程验收。
+省略 `PAGE_CASES` 会运行原有整套视觉场景；日常票据改动应明确指定单场景。
 
 ## CI 接线
 

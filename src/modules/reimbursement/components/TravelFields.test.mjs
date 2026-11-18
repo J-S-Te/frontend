@@ -66,3 +66,16 @@ test('受控更新只覆盖当前字段并保留其余行程字段，不修改�
   assert.deepEqual(emitted[0][1], { kind: 'RAIL', origin_city_code: '110000', destination_city_code: '440300' })
   assert.deepEqual(value, { kind: 'RAIL', origin_city_code: '110000', destination_city_code: '310000' })
 })
+
+test('非行程票据不展示城市日期，选择票面类别后才展示且保留原值', async () => {
+  const value = { kind: '', origin_city_code: '110000', start_date: '2026-11-01' }
+  const initial = await renderToString(Vue.createSSRApp(component(), { invoice: true, value }))
+  assert.match(initial, /票面类别/)
+  assert.doesNotMatch(initial, /type="date"|出发城市搜索|目的城市搜索/)
+  const selected = await renderToString(Vue.createSSRApp(component(), {
+    invoice: true, value: { ...value, kind: 'RAIL' },
+  }))
+  assert.match(selected, /出发城市搜索/)
+  assert.match(selected, /value="2026-11-01"/)
+  assert.equal(value.start_date, '2026-11-01')
+})

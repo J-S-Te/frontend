@@ -1140,6 +1140,68 @@
   font-size: var(--fs-sm, 13px);
 }
 
+/* 票据常规复核优先：原件与关键字段并列，维护操作和技术来源按需展开。 */
+.expense-invoice-workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr);
+  align-items: start;
+  gap: 24px;
+}
+.expense-invoice-number { font-size: var(--fs-body, 14px); overflow-wrap: anywhere; }
+.expense-invoice-original {
+  min-width: 0;
+  padding: 16px;
+  border: 1px solid var(--exp-line);
+  border-radius: var(--exp-radius);
+  background: var(--exp-inset);
+}
+.expense-invoice-section-head { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+.expense-invoice-section-head h3 { flex: 1; margin: 0; }
+.expense-invoice-source-list { margin: 12px 0; }
+.expense-invoice-source-list .expense-button { white-space: normal; text-align: left; }
+.expense-original-empty { padding: 40px 12px; text-align: center; color: var(--exp-muted); }
+.expense-invoice-form > legend,
+.expense-control-form > legend { margin-bottom: 10px; font-weight: 600; color: var(--exp-ink); }
+.expense-invoice-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 16px; }
+.expense-disclosure {
+  min-width: 0;
+  padding: 10px 14px;
+  margin: 12px 0;
+  border: 1px solid var(--exp-line);
+  border-radius: var(--exp-radius-sm);
+  background: var(--exp-card);
+  overflow-wrap: anywhere;
+}
+.expense-disclosure > summary { padding: 4px 0; cursor: pointer; font-weight: 600; color: var(--exp-ink); }
+.expense-disclosure[open] > summary { margin-bottom: 10px; }
+.expense-disclosure > .expense-item { margin: 0; padding: 0; border: 0; box-shadow: none; }
+.expense-invoice-line {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) repeat(2, minmax(0, 1fr)) auto;
+  align-items: end;
+  gap: 10px;
+  padding-bottom: 12px;
+}
+.expense-invoice-line .expense-invoice-line-remove { align-self: end; margin-bottom: 8px; }
+.expense-control-actions .expense-button.active {
+  border-color: var(--exp-accent);
+  color: var(--primary-ink, var(--exp-accent));
+  background: var(--exp-accent-soft);
+}
+.expense-control-form { margin-top: 16px; max-width: 1080px; }
+.expense-control-reason { max-width: 720px; }
+.expense-control-record { padding: 12px 0; border-top: 1px solid var(--exp-line); }
+.expense-invoice-controls .expense-detail-head { margin-bottom: 12px; }
+.expense-invoice-controls .expense-detail-head h3 { margin: 0; }
+@media (max-width: 900px) {
+  .expense-invoice-workspace { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 640px) {
+  .expense-invoice-fields, .expense-invoice-line { grid-template-columns: minmax(0, 1fr); }
+  .expense-invoice-line .expense-invoice-line-remove { justify-self: start; margin-bottom: 0; }
+  .expense-invoice-original { padding: 12px; }
+}
+
 .expense-summary-list {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

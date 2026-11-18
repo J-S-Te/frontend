@@ -7,10 +7,12 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import { parse, compileScript, compileStyle } from '@vue/compiler-sfc'
 import { chromium } from 'playwright-core'
+import assert from 'node:assert/strict'
 
 const root = fileURLToPath(new URL('../../../', import.meta.url))
-const outputDir = process.env.PAGE_OUTPUT_DIR
-  || fileURLToPath(new URL('../../../../.ai/qa/reimbursement-prototype-alignment-20261112/screenshots/', import.meta.url))
+const outputDir = (process.env.PAGE_OUTPUT_DIR
+  || fileURLToPath(new URL('../../../../.ai/qa/reimbursement-prototype-alignment-20261112/screenshots/', import.meta.url)))
+  .replace(/\/?$/, '/')
 const widthList = (process.env.PAGE_WIDTHS || '1440,375').split(',').map(Number)
 const selectedCases = (process.env.PAGE_CASES || '').split(',').filter(Boolean)
 const componentStyles = new Map()
@@ -18,6 +20,8 @@ const cases = [
   { key: 'dashboard', section: 'dashboard' },
   { key: 'dashboard-collapsed', section: 'dashboard', click: '发票中心', hideAfterClick: '发票台账' },
   { key: 'invoices', section: 'invoices' },
+  { key: 'invoice-review', section: 'invoices', invoice: true },
+  { key: 'invoice-controls', section: 'invoices', invoice: true },
   { key: 'invoice-upload', section: 'invoice-upload' },
   { key: 'claims', section: 'claims' },
   { key: 'claim-detail', section: 'claims', query: { claim_id: 'claim-1' } },
@@ -29,6 +33,9 @@ const cases = [
   { key: 'analytics', section: 'analytics' },
   { key: 'messages', section: 'messages' },
 ]
+const runCases = cases.filter(row => !selectedCases.length || selectedCases.includes(row.key))
+assert.ok(runCases.length && selectedCases.every(key => cases.some(row => row.key === key)),
+  'PAGE_CASES包含未知场景，不能以零用例通过')
 
 const routerStub = `import { h, reactive } from 'vue'
 export const __route = reactive({ params: { section: 'dashboard' }, query: {} })
@@ -48,13 +55,14 @@ export const RouterLink = { props: ['to'], setup(_props, { slots }) { return () 
 `
 
 const apiStub = `const session = {
-  tenant_id: 'tenant-demo', subject_id: 'actor-demo', display_name: '王晓磊',
+  tenant_id: 'tenant-demo', subject_id: 'actor-demo', username: 'fixture.reader', display_name: '王晓磊',
   roles: ['reimbursement_admin', 'expense_applicant', 'expense_approver', 'expense_accountant',
     'expense_cashier', 'expense_archive_operator', 'expense_finance_director'],
   permissions: [
     'expense.claim.read', 'expense.claim.create', 'expense.claim.update', 'expense.claim.submit',
     'expense.claim.withdraw', 'expense.claim.void', 'expense.claim.reopen', 'expense.claim.approved_void',
     'expense.invoice.read', 'expense.invoice.upload', 'expense.invoice.review',
+    'expense.invoice.correct', 'expense.finance.review',
     'expense.approval.act', 'expense.approval.transfer', 'expense.approval.recover',
     'expense.payment.read', 'expense.payment.record', 'expense.payment.exception.record',
     'expense.payment.exception.review', 'expense.archive.read', 'expense.archive.export',
@@ -63,6 +71,7 @@ const apiStub = `const session = {
     'expense.project.reference', 'expense.analytics.read'
   ],
 }
+window.__invoiceFixtureSession = session;
 const claim = {
   id: 'claim-1', claim_no: 'BX-2026-0001', title: '北京项目差旅', status: 'IN_APPROVAL', version: 3,
   claim_type: 'TRAVEL', applicant_subject_id: 'actor-demo', applicant_name: '王晓磊',
@@ -90,6 +99,8 @@ const claimRow = { id: 'claim-1', claim_no: 'BX-2026-0001', title: '北京项目
   pending_since: '2026-11-10T09:00:00+08:00', has_over_standard: true }
 const invoiceRow = { id: 'inv-1', invoice_number: 'INV-2026-0001', invoice_type: '增值税专用发票',
   invoice_date: '2026-11-08', total_minor: '128800', seller_tax_id: '91310000DEMO',
+  owner_subject_id: 'actor-demo', buyer_tax_id: '91310000FIXTURE', file_ids: ['file-demo'],
+  content: { lines: [{ name: '合成检测服务', amount_minor: '120000', tax_minor: '8800' }] },
   verification_status: 'MANUAL_REVIEWED', review_status: 'PENDING', reservation_state: 'AVAILABLE',
   created_at: '2026-11-08T10:00:00+08:00', version: 1 }
 const round = { round: 2, created_at: '2026-11-10T09:00:00+08:00', content_hash: 'hash-demo', rule_version: 'v2',
@@ -100,6 +111,15 @@ const round = { round: 2, created_at: '2026-11-10T09:00:00+08:00', content_hash:
       source_field: 'finance_director', source_version: '7' }] }],
   actions: [{ ID: 'action-1', CreatedAt: '2026-11-10T10:00:00+08:00', Actor: 'actor-demo', Action: 'APPROVE', Reason: '同意' }] }
 
+const invoiceSource = { id: 'source-demo', file_id: 'file-demo', document_id: 'document-demo',
+  filename: '隔离票据样例.png', original_name: '隔离票据样例.png', source_kind: 'PARSED',
+  parse_status: 'NEEDS_REVIEW', parser_version: 'fixture-parser', rules_version: 'fixture-rules',
+  run_id: 'fixture-run', candidate_index: 0, sources_hash: 'fixture-source-hash',
+  issues: ['MANUAL_CONFIRMATION_REQUIRED'],
+  sources: Array.from({ length: 30 }, () => ({ page: 1, text: '隔离来源字段', x: 10, y: 20 })) }
+// 用途：只为隔离页面返回合成HTTP数据，不读取业务服务。
+// 参数：path 为真实组件请求的业务路径。
+// 返回值：与对应读取/命令边界匹配的合成响应。
 function fixture(path) {
   const value = String(path)
   if (value === '/dashboard') return { my_claims: 3, pending_approvals: 1, pending_payments: 2,
@@ -117,7 +137,20 @@ function fixture(path) {
   if (value === '/claims/claim-1') return claim
   if (value.startsWith('/claims?')) return { items: [claimRow], total: 1, page: 1 }
   if (value.startsWith('/invoices?')) return { items: [invoiceRow], total: 1, page: 1 }
-  if (value === '/invoices/inv-1') return invoiceRow
+  if (value === '/invoices/inv-1') return { ...invoiceRow,
+    review_status: window.__invoiceReadonly ? 'CONFIRMED' : 'PENDING' }
+  if (value === '/invoices/inv-1/sources') return { items: [invoiceSource] }
+  if (value === '/invoices/inv-1/controls') return {
+    corrections: window.__invoiceReviewWork ? [{ id: 'correction-fixture', status: 'PENDING',
+      version: 1, requester_subject_id: 'other-actor', content: { reason: '合成更正原因' } }] : [],
+    impacts: [], risks: [], sources: [invoiceSource] }
+  if (value === '/invoices/inv-1/files/file-demo/download-ticket') return {
+    download_url: '/file-gateway/fixture-original.png', ticket: 'fixture-only-download-ticket' }
+  if (value.startsWith('/invoice-document-options')) return { items: [], total: 0 }
+  if (value.startsWith('/invoice-options')) return { items: [{ id: invoiceRow.id,
+    name: invoiceRow.invoice_number }], total: 1 }
+  if (value === '/invoices/inv-1/confirm') return { id: 'inv-1' }
+  if (value === '/invoices/inv-1/corrections') return { id: 'correction-fixture' }
   if (value.startsWith('/approval-tasks?')) return { items: [task], total: 1, page: 1 }
   if (value === '/approval-tasks/task-1') return task
   if (value.startsWith('/approval-tasks/task-1/history')) return { items: [{ id: 'h1', round: 1, node_role: 'TECH_DIRECTOR',
@@ -150,7 +183,16 @@ export async function ensureReimbursementSession() { return session }
 export function getReimbursementSession() { return session }
 export async function logoutReimbursement() {}
 export function startReimbursementLogin() {}
-export const reimbursementAPI = { request: async (path) => fixture(path) }
+export const reimbursementAPI = {
+// 用途：记录真实组件发送的读取和命令，转到隔离数据边界。
+// 参数：path为请求路径，options为真实组件传入的请求选项。
+// 返回值：对应合成响应，不向真实后端发送请求。
+request: async (path, options) => {
+  window.__invoiceFixtureRequests ||= [];
+  window.__invoiceFixtureRequests.push({path,method:options?.method || 'GET',
+    body:options?.body ? JSON.parse(options.body) : null});
+  return fixture(path);
+} }
 `
 
 const notificationsStub = `export async function listInbox() {
@@ -162,6 +204,10 @@ const notificationsStub = `export async function listInbox() {
 export async function getUnreadCount() { return { unread_count: 1 } }
 export async function getNotification() { return { title: '审批待办', content: '报销单 BX-2026-0001 等待审批。', target_url: '/reimbursement/claims' } }
 export async function markNotificationRead() { return {} }
+// 用途：显式拒绝本票据夹具未覆盖的通知删除操作。
+// 参数：无。
+// 返回值：无；调用即失败，不能冒充业务删除成功。
+export async function deleteReadNotifications() { throw new Error('票据夹具不包含通知删除操作') }
 `
 
 const entry = `import { createApp } from 'vue'
@@ -219,6 +265,115 @@ const css = result.outputFiles.find(file => file.path.endsWith('.css'))?.text ||
 const scopedCss = [...componentStyles.values()].join('\n')
 if (!js || !css) throw new Error('page fixture bundle incomplete')
 
+// 用途：验证三种维护操作互斥展开、输入保留和待批准记录可见。
+// 参数：page为隔离页面，review/controls为真实面板，width/theme用于证据命名。
+// 返回值：无；维护表单或独立财务动作不可达时断言失败。
+async function checkInvoiceControls(page, review, controls, width, theme) {
+  assert.equal(await controls.locator('textarea:visible').count(), 0, '维护表单不应默认全部展开')
+  await controls.getByRole('button', { name: '更正票面', exact: true }).click()
+  await controls.getByLabel('发票号码', { exact: true }).fill('编辑中的合成票号')
+  await controls.screenshot({ path: outputDir + 'invoice-controls-' + width + '-' + theme + '-working.png' })
+  await controls.getByRole('button', { name: '补充原件', exact: true }).click()
+  assert.equal(await controls.getByLabel('发票号码', { exact: true }).count(), 0)
+  await controls.getByRole('button', { name: '登记异常', exact: true }).click()
+  assert.equal(await controls.getByRole('combobox', { name: /^事实类型/ }).isVisible(), true)
+  await controls.getByRole('button', { name: '更正票面', exact: true }).click()
+  assert.equal(await controls.getByLabel('发票号码', { exact: true }).inputValue(), '编辑中的合成票号')
+  await controls.locator('summary').filter({ hasText: '票面行程' }).click()
+  const kind = controls.getByRole('combobox', { name: /^票面类别/ })
+  await kind.selectOption('RAIL')
+  await controls.getByLabel('票面开始日', { exact: true }).fill('2026-11-08')
+  await kind.selectOption('')
+  await controls.getByLabel('本次处理原因', { exact: true }).fill('对照隔离原件更正')
+  await controls.getByRole('button', { name: '提交独立更正申请', exact: true }).click()
+  await page.waitForFunction(() => window.__invoiceFixtureRequests.some(row => row.path.endsWith('/corrections')))
+  const correction = await page.evaluate(() => window.__invoiceFixtureRequests.find(row => row.path.endsWith('/corrections')).body)
+  assert.equal(Object.hasOwn(correction.proposed_invoice, 'travel_facts'), false)
+  await page.evaluate(() => { window.__invoiceReviewWork = true })
+  await review.getByRole('button', { name: '返回发票列表', exact: true }).click()
+  await page.getByRole('button', { name: '复核详情', exact: true }).click()
+  await controls.getByRole('button', { name: '独立批准', exact: true }).waitFor()
+  assert.equal(await controls.getByLabel('本次处理原因', { exact: true }).isVisible(), true)
+  await review.getByRole('button', { name: '返回发票列表', exact: true }).click()
+  await page.evaluate(() => {
+    window.__invoiceFixtureSession.permissions = ['expense.invoice.read']
+    window.__invoiceReviewWork = false
+  })
+  await page.getByRole('button', { name: '复核详情', exact: true }).click()
+  assert.equal(await controls.getByRole('button', { name: '更正票面', exact: true }).count(), 0)
+  assert.equal(await review.getByLabel('发票号码', { exact: true }).isDisabled(), true)
+}
+
+// 用途：验证普通票据不展示行程字段，选择类别后才显示且切换不丢输入。
+// 参数：review为真实人工复核区域。
+// 返回值：无；行程显隐或本地编辑保留不正确时断言失败。
+async function checkInvoiceTravel(review) {
+  await review.locator('summary').filter({ hasText: '票面行程' }).click()
+  assert.equal(await review.locator('input[type=date]:visible').count(), 1)
+  const kind = review.getByRole('combobox', { name: /^票面类别/ })
+  await kind.selectOption('RAIL')
+  await review.getByLabel('票面开始日', { exact: true }).fill('2026-11-08')
+  assert.equal(await review.locator('input[type=date]:visible').count(), 3)
+  await kind.selectOption('')
+  assert.equal(await review.locator('input[type=date]:visible').count(), 1)
+  await kind.selectOption('RAIL')
+  assert.equal(await review.getByLabel('票面开始日', { exact: true }).inputValue(), '2026-11-08')
+  await kind.selectOption('')
+}
+
+// 用途：确认复核仍发送真实金额/明细契约，已确认票据保持只读。
+// 参数：page为隔离页面，review为真实人工复核区域。
+// 返回值：无；命令接线、列表返回或只读失效时断言失败。
+async function checkInvoiceConfirmation(page, review) {
+  await review.getByLabel('人工复核或校正原因', { exact: true }).fill('对照隔离原件确认')
+  await review.getByRole('button', { name: '确认人工复核字段', exact: true }).click()
+  await page.waitForFunction(() => window.__invoiceFixtureRequests.some(row => row.path.endsWith('/confirm')))
+  const payload = await page.evaluate(() => window.__invoiceFixtureRequests.find(row => row.path.endsWith('/confirm')).body)
+  assert.equal(payload.total_minor, '128800')
+  assert.equal(payload.content.lines[0].name, '合成检测服务')
+  assert.equal(Object.hasOwn(payload, 'travel_facts'), false)
+  await page.evaluate(() => { window.__invoiceReadonly = true })
+  await review.getByRole('button', { name: '返回发票列表', exact: true }).click()
+  assert.equal(await page.locator('.expense-list-tools').isVisible(), true)
+  await page.getByRole('button', { name: '复核详情', exact: true }).click()
+  assert.equal(await review.getByLabel('发票号码', { exact: true }).isDisabled(), true)
+  await review.locator('summary').filter({ hasText: '商品服务明细' }).click()
+  assert.equal(await review.getByLabel('第1项名称', { exact: true }).isDisabled(), true)
+}
+
+// 用途：检查真实票据页面以原件和关键字段为主，其他内容按需展开。
+// 参数：page为隔离浏览器，item为场景，width/theme为当前视口及主题。
+// 返回值：无；页面层次、布局、原件访问或交互错误时断言失败。
+async function checkInvoicePage(page, item, width, theme) {
+  await page.getByRole('button', { name: '复核详情', exact: true }).click()
+  const review = page.locator('section.expense-panel').filter({
+    has: page.getByRole('heading', { name: /^人工复核/ }),
+  })
+  const controls = page.locator('article').filter({
+    has: page.getByRole('heading', { name: '票据更正与财务复核', exact: true }),
+  })
+  await review.waitFor()
+  if (item.key === 'invoice-controls') return checkInvoiceControls(page, review, controls, width, theme)
+  assert.ok((await review.boundingBox()).y < (await controls.boundingBox()).y,
+    '常规人工复核应位于维护操作之前')
+  assert.equal(await page.locator('.expense-list-tools').count(), 0,
+    '复核时收起台账筛选，返回列表后恢复原上下文')
+  assert.equal(await review.locator('input[type=date]:visible').count(), 1,
+    '普通票据不应展示行程日期')
+  await review.getByRole('button', { name: '获取受控原件', exact: true }).click()
+  await review.getByRole('button', { name: /隔离票据样例.png/ }).click()
+  await review.getByRole('img', { name: '受控发票原件', exact: true }).waitFor()
+  assert.equal(await review.getByText('fixture-run', { exact: false }).isVisible(), false)
+  const original = await review.locator('.expense-invoice-original').boundingBox()
+  const fields = await review.locator('.expense-invoice-form').boundingBox()
+  assert.ok(width <= 900 ? fields.y > original.y : fields.x > original.x)
+  await review.screenshot({ path: outputDir + 'invoice-review-' + width + '-' + theme + '-working.png' })
+  await review.locator('summary').filter({ hasText: '商品服务明细' }).click()
+  assert.equal(await review.getByLabel('第1项名称', { exact: true }).inputValue(), '合成检测服务')
+  await checkInvoiceTravel(review)
+  await checkInvoiceConfirmation(page, review)
+}
+
 await mkdir(outputDir, { recursive: true })
 const browser = await chromium.launch({
   executablePath: process.env.CHROMIUM_PATH || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
@@ -227,18 +382,51 @@ const results = []
 try {
   for (const width of widthList) {
     for (const theme of ['light', 'dark']) {
-      for (const item of cases.filter(row => !selectedCases.length || selectedCases.includes(row.key))) {
+      for (const item of runCases) {
         const page = await browser.newPage({ viewport: { width, height: 1000 }, reducedMotion: 'reduce' })
+        page.setDefaultTimeout(8000)
         const errors = []
         page.on('pageerror', error => errors.push(error.message))
         page.on('console', message => { if (message.type() === 'error') errors.push(message.text()) })
-        await page.setContent('<style>html,body{margin:0;background:#f1f5f9}' + css + scopedCss + '</style><div id="app"></div>')
+        await page.route('**/*', async route => {
+          const path = new URL(route.request().url()).pathname
+          if (path === '/') return route.fulfill({ contentType: 'text/html', body:
+            '<style>html,body{margin:0;background:#f1f5f9}' + css + scopedCss + '</style><div id="app"></div>' })
+          if (path === '/api/v1/auth/me') return route.fulfill({ json: {
+            tenant_id: 'tenant-demo', user_id: 'actor-demo', account: { name: 'fixture.reader' },
+          } })
+          if (path === '/file-gateway/fixture-original.png') {
+            const base64 = await page.evaluate(() => {
+              const canvas = document.createElement('canvas')
+              canvas.width = 840; canvas.height = 560
+              const ctx = canvas.getContext('2d')
+              ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, 840, 560)
+              ctx.strokeStyle = '#2563eb'; ctx.strokeRect(20, 20, 800, 520)
+              ctx.fillStyle = '#1e293b'; ctx.font = '26px sans-serif'
+              ctx.fillText('隔离票据样例 · 非真实业务票据', 50, 85)
+              ctx.font = '20px sans-serif'
+              ctx.fillText('发票号码 INV-2026-0001', 50, 155)
+              ctx.fillText('开票日期 2026/11/08', 50, 210)
+              ctx.fillText('合成检测服务', 50, 300)
+              ctx.fillText('价税合计  ¥1,288.00', 50, 415)
+              return canvas.toDataURL('image/png').split(',')[1]
+            })
+            return route.fulfill({ contentType: 'image/png', body: Buffer.from(base64, 'base64') })
+          }
+          errors.push('未声明的外部请求：' + path)
+          return route.abort()
+        })
+        await page.goto('http://reimbursement-fixture.invalid/')
         await page.addScriptTag({ content: js })
         await page.evaluate(({ item, theme }) => {
           document.documentElement.dataset.theme = theme
           window.__mountReimbursement({ section: item.section, query: item.query || {} })
         }, { item, theme })
         await page.waitForTimeout(900)
+        if (item.invoice) {
+          try { await checkInvoicePage(page, item, width, theme) }
+          catch (error) { errors.push(error.message) }
+        }
         // 桌面侧栏常驻才做折叠交互；窄屏侧栏在抽屉里，截图保留默认态。
         if (item.click && width >= 821) {
           const button = page.getByRole('button', { name: item.click }).first()

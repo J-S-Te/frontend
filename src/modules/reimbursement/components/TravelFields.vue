@@ -19,10 +19,11 @@ function change(key, value) {
 <template>
  <fieldset :disabled="disabled">
   <legend>{{ invoice ? '票面行程事实（人工对照原件）' : '本人差旅行程填报' }}</legend>
-  <p>搜索并选择城市。填写后由服务器与权威项目及票面逐项交叉核验。</p>
+  <p v-if="!invoice || value?.kind">搜索并选择城市。填写后由服务器与权威项目及票面逐项交叉核验。</p>
   <div class="expense-grid">
    <label v-if="invoice">票面类别<select :value="value?.kind || ''" @change="change('kind',$event.target.value)">
     <option value="">不录入票面行程</option><option value="AIR">机票</option><option value="RAIL">火车票</option><option value="HOTEL">酒店</option></select></label>
+   <template v-if="!invoice || value?.kind">
    <CitySelect label="出发城市" :model-value="value?.origin_city_code || ''"
     :disabled="disabled" :optional="invoice && value?.kind === 'HOTEL'"
     @update:model-value="change('origin_city_code', $event)" />
@@ -30,6 +31,8 @@ function change(key, value) {
     :disabled="disabled" @update:model-value="change('destination_city_code', $event)" />
    <label>{{ invoice ? '票面开始日' : '出发日' }}<input type="date" :value="value?.[invoice?'start_date':'departure_date'] || ''" @input="change(invoice?'start_date':'departure_date',$event.target.value)"></label>
    <label>{{ invoice ? '票面结束日（酒店为离店日）' : '返回日' }}<input type="date" :value="value?.[invoice?'end_date':'return_date'] || ''" @input="change(invoice?'end_date':'return_date',$event.target.value)"></label>
+   </template>
   </div>
+  <p v-if="invoice && !value?.kind" class="expense-meta">仅机票、火车票或酒店票据需要补充行程。</p>
  </fieldset>
 </template>
