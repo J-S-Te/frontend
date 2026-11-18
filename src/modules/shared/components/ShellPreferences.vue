@@ -64,7 +64,7 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .shell-preferences { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
-.shell-preferences button, .shell-preferences select { min-height: 32px; padding: 4px 7px; border: 1px solid var(--border); border-radius: var(--radius-sm, 8px); color: var(--text); background: var(--surface-card); font: inherit; font-size: var(--fs-xs); }
+.shell-preferences button, .shell-preferences select { min-height: 32px; padding: 4px 7px; border: 1px solid var(--border); border-radius: var(--radius-sm, 6px); color: var(--text); background: var(--surface-card); font: inherit; font-size: var(--fs-xs); }
 .shell-preferences label { display: flex; align-items: center; gap: 4px; margin: 0; }
 .shell-preferences-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
 @media (max-width: 900px) { .shell-preferences-collapse { display: none; } }

@@ -114,7 +114,7 @@ body {
 :root :is(.console-page-head, .contract-page-head, .crm-page-head, .da-page-head, .pm-page-head, .portal-title, .expense-head) h1 {
   color: var(--ui-text);
   font-size: var(--fs-title);
-  font-weight: 700;
+  font-weight: 600;
   letter-spacing: 0;
   line-height: var(--lh-title);
 }
@@ -276,29 +276,24 @@ body {
   .metric-facts-table, .expense-table-body table) th {
   height: 44px;
   padding: 0 16px;
-  color: var(--text-3);
-  font-size: 12px;
+  color: var(--text-2);
+  font-size: 13px;
   font-weight: 500;
-  line-height: 18px;
+  line-height: 20px;
   border-bottom: 1px solid var(--line);
   background: var(--ui-table-head);
 }
 :root :is(.console-data-table, .contract-data-table, .crm-data-table, .crm-light-table,
   .pm-table, .da-table, .settlement-plan-table, .settlement-invoice-table table,
   .metric-facts-table, .expense-table-body table) td {
-  height: 56px;
+  height: 48px;
   padding: 8px 16px;
   border-bottom: 1px solid var(--line-2);
 }
 :root :is(.console-data-table, .contract-data-table, .crm-data-table, .crm-light-table,
   .pm-table, .da-table, .settlement-plan-table, .settlement-invoice-table table,
-  .metric-facts-table, .expense-table-body table) tbody tr:nth-child(even) td {
-  background: #f8fafc;
-}
-:root :is(.console-data-table, .contract-data-table, .crm-data-table, .crm-light-table,
-  .pm-table, .da-table, .settlement-plan-table, .settlement-invoice-table table,
   .metric-facts-table, .expense-table-body table) tbody tr:hover td {
-  background: var(--ui-hover);
+  background: var(--brand-weak);
 }
 
 /* Tabs：Ant 的下划线页签，而非 pill。 */
@@ -377,8 +372,8 @@ body {
 :root :is(.contract-badge, .settlement-badge, .console-badge, .crm-badge, .pm-badge, .da-badge, .expense-badge) {
   display: inline-flex;
   align-items: center;
-  min-height: 24px;
-  padding: 0 10px;
+  min-height: 22px;
+  padding: 0 8px;
   font-size: 12px;
   font-weight: 500;
   line-height: 18px;
@@ -388,7 +383,7 @@ body {
 /* Modal：Ant 8px 圆角、轻阴影。 */
 :root :is(.console-modal, .contract-detail-modal, .pm-dialog, .da-modal, .settlement-modal, .crm-detail) {
   border: 1px solid var(--line);
-  border-radius: var(--radius-card);
+  border-radius: var(--radius-panel);
   background: var(--ui-card);
   box-shadow: var(--shadow-popover);
 }
