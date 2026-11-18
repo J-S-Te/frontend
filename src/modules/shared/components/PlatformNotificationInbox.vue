@@ -1,6 +1,7 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
 import { deleteReadNotifications, getNotification, getUnreadCount, listInbox, markNotificationRead } from '@/modules/platform/notifications/api/notifications'
+import { notificationTargetPath } from '@/modules/platform/notifications/target.js'
 import { formatBusinessDateTime } from '@/modules/shared/utils/businessTime.js'
 import { formatUserError } from '@/modules/shared/utils/userError.js'
 import ConfirmDialog from '@/modules/shared/components/ConfirmDialog.vue'
@@ -23,6 +24,8 @@ const loading = ref(false), error = ref(''), detail = ref(null), busy = ref(fals
 const activeScope = computed(() => props.scope || tab.value)
 const pages = computed(() => Math.max(1, Math.ceil(total.value / props.pageSize)))
 const hasRead = computed(() => items.value.some((item) => item.read_at))
+// 详情里的业务入口只接受同源相对路径；目标页仍会重新校验对象权限。
+const detailTarget = computed(() => notificationTargetPath(detail.value?.target_url))
 
 function scopeParams() {
   if (activeScope.value === 'local') return { sourceApplication: props.appCode }
@@ -136,6 +139,7 @@ onMounted(load)
       <header><h3>{{ detail.title }}</h3><button type="button" @click="detail = null">关闭</button></header>
       <p>{{ detail.content }}</p>
       <small>来源：{{ detail.source_application }} · 送达：{{ formatBusinessDateTime(detail.delivered_at) }}</small>
+      <a v-if="detailTarget" class="shared-inbox-target" :href="detailTarget">前往业务页面</a>
     </aside>
   </section>
 </template>
@@ -154,5 +158,5 @@ onMounted(load)
 .shared-inbox-pagination{display:flex;align-items:center;gap:8px;color:#64748b}
 .shared-inbox-detail{padding:10px;border:1px solid #e2e8f0;border-radius:9px}
 .shared-inbox-detail header{display:flex;align-items:center;justify-content:space-between;gap:8px}
-.shared-inbox-detail h3{margin:0;font-size:14px}.shared-inbox-detail p{white-space:pre-wrap;overflow-wrap:anywhere;color:#475569}
+.shared-inbox-detail h3{margin:0;font-size:14px}.shared-inbox-detail p{white-space:pre-wrap;overflow-wrap:anywhere;color:#475569}.shared-inbox-target{display:inline-flex;margin-top:6px;padding:5px 9px;border:1px solid #2563eb;border-radius:8px;color:#2563eb;text-decoration:none}
 </style>

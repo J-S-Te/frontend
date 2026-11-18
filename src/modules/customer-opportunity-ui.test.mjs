@@ -23,9 +23,7 @@ const api = await import('./customer_opportunity/api/presale.js')
 const customer = await import('./customer_opportunity/api/customer.js')
 const client = await import('./customer_opportunity/api/client.js')
 const opportunity = await import('./customer_opportunity/api/opportunity.js')
-const notification = await import('./customer_opportunity/api/notification.js')
 const ownerDirectory = await import('./customer_opportunity/api/ownerDirectory.js')
-const { parseNotificationTarget } = await import('./customer_opportunity/navigation.js')
 const { presaleAPIParams, presaleStateFromQuery, presaleStateToQuery } = await import('./customer_opportunity/presaleQuery.js')
 const { createPresaleMutationRetryState, normalizePresaleMutationPayload } = await import('./customer_opportunity/presaleMutationRetry.js')
 const { createCreateMutationRetryState, normalizeCreateMutationPayload } = await import('./customer_opportunity/createMutationRetry.js')
@@ -147,12 +145,12 @@ test('技术总监可同时承担部门与团队负责人并进入两级执行�
   assert.match(view, /接管负责人/)
 })
 
-test('两级执行指派展示新状态、团队负责人和通知/超时文案', () => {
+test('两级执行指派展示新状态、团队负责人和超时文案', () => {
   assert.match(displaySource, /PENDING_EXECUTION_ASSIGNMENT: '待执行指派'/)
   assert.match(view, /<span>团队负责人<\/span>/)
-  assert.match(view, /PRESALE_EXECUTOR_ASSIGNMENT_PENDING/)
-  assert.match(view, /PRESALE_EXECUTION_ASSIGNMENT_REJECTED/)
-  assert.match(view, /PRESALE_TEAM_LEAD_INVALID/)
+  // 具体通知文案改由平台统一收件箱呈现，CRM 视图不再维护第二套事件字典。
+  assert.ok(view.includes('<PlatformNotificationInbox app-code="customer_opportunity"'))
+  assert.doesNotMatch(view, /PRESALE_EXECUTOR_ASSIGNMENT_PENDING/)
   assert.match(displaySource, /EXECUTION_ASSIGNMENT_OVERDUE: '待团队负责人指派超时'/)
   assert.match(view, /@change="onExecutionDepartmentChange"/)
   assert.match(view, /v-model="selectedTeamLeadPersonID"/)
@@ -1747,66 +1745,12 @@ test('商机负责人和团队 API 使用独立权限路由及幂等键', async 
   assert.ok(requests[2].options.headers['Idempotency-Key'])
 })
 
-test('个人通知 API 仅调用后端个人收件箱与已读路由', async (t) => {
-  const originalFetch = globalThis.fetch
-  t.after(() => { globalThis.fetch = originalFetch })
-  const requests = []
-  globalThis.fetch = async (url, options = {}) => {
-    requests.push({ url, options })
-    return jsonResponse(url.endsWith('/unread-count') ? { count: 2 } : { items: [] })
-  }
-  await notification.listNotifications({ unread_only: true, page: 1, page_size: 20 })
-  await notification.getNotificationUnreadCount()
-  await notification.markNotificationRead(19)
-  assert.deepEqual(requests.map((item) => item.url), [
-    '/customer-opportunity/api/v1/notifications?unread_only=true&page=1&page_size=20',
-    '/customer-opportunity/api/v1/notifications/unread-count',
-    '/customer-opportunity/api/v1/notifications/19/read',
-  ])
-  assert.equal(requests[2].options.method, 'POST')
-  assert.equal(requests[2].options.headers['X-CSRF-Token'], '1')
-  assert.ok(requests.every((item) => !item.url.includes('owner_id') && !item.url.includes('scope')))
-})
-
-test('通知目标只接受当前源的现有 CRM 商机或售前入口', () => {
-  assert.deepEqual(
-    parseNotificationTarget('/customer-opportunity/opportunities?opportunity_id=31', 'https://crm.example'),
-    { name: 'customer_opportunity', params: { section: 'opportunities' }, query: { opportunity_id: '31' } },
-  )
-  assert.deepEqual(
-    parseNotificationTarget('/customer-opportunity/presale?request_id=17', 'https://crm.example'),
-    { name: 'customer_opportunity', params: { section: 'presale' }, query: { request_id: '17' } },
-  )
-  assert.deepEqual(
-    parseNotificationTarget('/customer-opportunity/customers?customer_id=31&tab=credit', 'https://crm.example'),
-    { name: 'customer_opportunity', params: { section: 'customers' }, query: { customer_id: '31', tab: 'credit' } },
-  )
-  for (const target of [
-    'https://evil.example/customer-opportunity/opportunities?opportunity_id=31',
-    '/customer-opportunity/opportunities?opportunity_id=0',
-    '/customer-opportunity/opportunities?opportunity_id=abc',
-    '/customer-opportunity/notifications?opportunity_id=31',
-    '/customer-opportunity/presale?request_id=0',
-    '/customer-opportunity/presale?request_id=17&scope=ALL',
-    '/customer-opportunity/customers?customer_id=31',
-    '/customer-opportunity/customers?customer_id=31&tab=basic',
-    '/customer-opportunity/customers?customer_id=31&tab=credit&scope=ALL',
-  ]) assert.equal(parseNotificationTarget(target, 'https://crm.example'), null)
-})
-
-test('个人通知去除冗余边界说明，保留权限检查和真实详情跳转', () => {
-  assert.doesNotMatch(view, /通知收件人固定为当前登录用户/)
-  assert.match(view, /parseNotificationTarget\(item\.target_path/)
-  assert.match(view, /route\.query\.opportunity_id/)
-  assert.match(view, /await openOpportunity\(id\)/)
-  assert.match(view, /target\.params\.section === 'presale'/)
-  assert.match(view, /await openPresale\(Number\(target\.query\.request_id\)\)/)
-  assert.match(view, /requestedTab === 'credit'/)
-  assert.match(view, /await openCustomerTab\('credit'\)/)
+test('CRM 个人通知改读平台统一收件箱，未读数按本系统来源收敛', () => {
+  assert.ok(view.includes('<PlatformNotificationInbox app-code="customer_opportunity"'))
+  assert.ok(view.includes('@unread-change="notificationUnreadCount = $event"'))
+  assert.ok(view.includes("getUnreadCount({ sourceApplication: 'customer_opportunity' })"))
+  assert.doesNotMatch(view, /listNotifications|getNotificationUnreadCount|markNotificationRead|parseNotificationTarget/)
   assert.match(view, /canReadNotifications/)
-  assert.doesNotMatch(view, /只包含发给当前用户的商机负责人和售前执行人通知/)
-  assert.match(view, /ASSIGNEE_ADDED/)
-  assert.match(view, /ASSIGNEE_REMOVED/)
 })
 
 test('阶段告警 API 对接真实列表、已读和规则路由及数据版本', async (t) => {
