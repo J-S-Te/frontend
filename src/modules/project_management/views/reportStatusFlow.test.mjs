@@ -5,7 +5,8 @@ import vm from 'node:vm'
 import * as Vue from 'vue'
 import { compile } from '@vue/compiler-dom'
 import { renderToString } from '@vue/server-renderer'
-import { reportStatusLabel, statusTone } from '../projectDisplay.js'
+import { reportStatusLabel, serviceItemReportStage, serviceItemReportSteps,
+  statusTone } from '../projectDisplay.js'
 
 const source = readFileSync(new URL('./ProjectManagementView.vue', import.meta.url), 'utf8')
 
@@ -24,6 +25,7 @@ function reportHarness(status, permissions = ['project.report.prepare']) {
     reportItems: Vue.ref([item]), projectByID: Vue.ref(new Map()),
     // 报告中文词表已迁到 projectDisplay.js，这里以真实导入值注入，不再从视图切片求值。
     reportStatusLabel,
+    serviceItemReportStage, serviceItemReportSteps,
     personLabel: () => '合成负责人', formatBusinessDate: () => '',
     showToast: () => {}, refreshAfterWrite: async () => {},
     formatUserError: (error) => { throw error },
@@ -34,7 +36,7 @@ function reportHarness(status, permissions = ['project.report.prepare']) {
     'preparationItems', 'capabilities', 'assignmentItems', 'methodItems', 'pendingDeviations']) {
     context[name] = Vue.ref([])
   }
-  const statements = ['reportStatusRank', 'reportPhaseNext'].map((name) =>
+  const statements = ['reportStatusRank', 'reportPhaseNext', 'selectedReportStage'].map((name) =>
     source.match(new RegExp(`^const ${name} = .+$`, 'm'))[0])
   const gate = source.indexOf('function canAdvanceReportPhase(')
   statements.push(source.slice(gate, source.indexOf('\n}', gate) + 2))
@@ -48,6 +50,7 @@ function reportHarness(status, permissions = ['project.report.prepare']) {
   statements.push(source.slice(start, source.indexOf('\n}', start) + 2))
   const results = vm.runInNewContext(`${statements.join('\n')}\n({
     reportStatusLabel, reportSteps, operationRows, reportPhaseNext, canAdvanceReportPhase, runOperation,
+    selectedReportStage,
     ...(typeof reportPhaseAction === 'undefined' ? {} : { reportPhaseAction })
   })`, context)
   return { item: context.selectedServiceItem.value, context, writes, ...results }

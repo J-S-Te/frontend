@@ -2655,6 +2655,8 @@
 .pm-operation-queue .pm-picker-meta { grid-column: 2; flex-wrap: wrap; }
 .pm-operation-queue .pm-service-code { white-space: normal; }
 .pm-operation-detail { display: grid; gap: var(--pm-sp-4); min-width: 0; }
+.pm-operation-progress { padding: var(--pm-sp-3); }
+.pm-operation-status { display: flex; flex-wrap: wrap; gap: var(--pm-sp-2); }
 .pm-operation-summary {
   display: flex;
   flex-wrap: wrap;

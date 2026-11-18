@@ -118,6 +118,10 @@ import {
   reportTechReviewLabel,
   selectedIDs,
   serviceItemLabel,
+  serviceItemOperationSteps,
+  serviceItemReportStage,
+  serviceItemReportSteps,
+  serviceItemStatusBadges,
   slaDueLabel,
   specialMethodLabel,
   specialMethodOptions,
@@ -1287,7 +1291,9 @@ const selectedServiceItems = computed(() => {
 const selectedServiceItem = computed(() => selectedServiceItems.value[0] || null)
 const selectedServiceProject = computed(() => selectedServiceItem.value ? projectByID.value.get(selectedServiceItem.value.project_id) || null : null)
 const selectedServiceOwner = computed(() => selectedServiceItem.value ? personLabel(selectedServiceItem.value.project_manager_id || selectedServiceItem.value.team_lead_id, '待指派') : '—')
-const selectedServiceDue = computed(() => formatBusinessDate(selectedServiceItem.value?.planned_end) || '待排期')
+const selectedServiceDue = computed(() => formatBusinessDate(selectedServiceItem.value?.planned_end
+  || selectedServiceItem.value?.implementation_plan?.planned_end) || '待排期')
+const selectedReportStage = computed(() => serviceItemReportStage(selectedServiceItem.value))
 // 现场缺项判定（BIZ-PROJECT-06）：口径来自服务端 GET /service-items/:id/field-evidence，
 // 不再从 deliveryEvents（租户最近 500 条窗口）里挑事件推导。判定不可用即"未知"，
 // 未知不等于齐全——完成动作必须被拦下。
@@ -1800,37 +1806,14 @@ function validateCapabilityCodes(resourceType, codes, originalCodes = []) {
   return true
 }
 
-// 原型 PG-RES-04 的七步交付链：按当前服务项的真实状态与人员/计划数据判定，
-// 只读展示，不引入任何本地状态机。
+// 只读交付进度与报告阶段共用展示规则，刷新快照后随当前服务项一起更新。
 const operationSteps = computed(() => {
-  const item = selectedServiceItem.value
-  if (!item) return []
-  const plan = item.implementation_plan || {}
-  const preparing = ['实施准备中', '实施中', '异常处理中', '现场实施完成', '报告编制', '已完成'].includes(item.status)
-  const executing = ['实施中', '异常处理中', '现场实施完成', '报告编制', '已完成'].includes(item.status)
-  const closing = ['现场实施完成', '报告编制', '已完成'].includes(item.status)
-  return [
-    { label: '拆解确认', state: item.status === '待确认' || item.status === '待复核' ? 'doing' : 'done' },
-    { label: '分配至团队', state: item.team_lead_id ? 'done' : 'idle' },
-    { label: '指派人员', state: item.project_manager_id && (item.engineer_ids || []).length ? 'done' : item.team_lead_id ? 'doing' : 'idle' },
-    { label: '制定实施计划', state: item.planned_start ? 'done' : item.status === '待分配' ? 'doing' : 'idle' },
-    { label: '实施准备', state: preparing ? 'done' : item.planned_start ? 'doing' : 'idle' },
-    { label: '现场实施', state: executing ? 'done' : 'idle' },
-    { label: '完成确认', state: closing ? 'done' : 'idle', note: plan.planned_end ? `计划至 ${formatBusinessDate(plan.planned_end)}` : '' },
-  ]
+  return serviceItemOperationSteps(selectedServiceItem.value)
 })
 
 // 报告默认先整改；无需整改时可直接编制，审核、签发与归档仍依次完成。
 const reportSteps = computed(() => {
-  const item = selectedServiceItem.value
-  const current = reportStatusRank[item?.report_status] || 0
-  return [
-    { phase: 'RECTIFYING', label: '报告整改（可选）' },
-    { phase: 'COMPILING', label: '报告编制' },
-    { phase: 'REVIEWED', label: '报告审核' },
-    { phase: 'ISSUED', label: '报告签发' },
-    { phase: 'ARCHIVED', label: '报告归档' },
-  ].map((step, index) => ({ ...step, state: index + 1 < current ? 'done' : index + 1 === current ? 'doing' : 'idle' }))
+  return serviceItemReportSteps(selectedServiceItem.value)
 })
 
 const {
@@ -4401,13 +4384,29 @@ onBeforeUnmount(() => {
                     <div><dt>客户</dt><dd>{{ selectedServiceProject?.customer || '—' }}</dd></div>
                     <div><dt>负责人</dt><dd>{{ selectedServiceOwner }}</dd></div>
                     <div><dt>计划完成</dt><dd>{{ selectedServiceDue }}</dd></div>
-                    <div><dt>状态</dt><dd><span class="pm-badge" :class="statusTone(selectedServiceItem.status)">{{ selectedServiceItem.status }}</span></dd></div>
+                    <div><dt>状态</dt><dd class="pm-operation-status">
+                      <span v-for="badge in serviceItemStatusBadges(selectedServiceItem)"
+                        :key="badge.key" class="pm-badge" :class="badge.tone">{{ badge.label }}</span>
+                    </dd></div>
                   </dl>
                 </div>
                 <div v-else-if="activeSection === 'allocation'" class="pm-operation-summary pm-operation-summary--batch">
                   <div class="pm-operation-summary-main"><span class="pm-panel-kicker">批量分配</span><b>已选 {{ selectedServiceItems.length }} 个服务项</b><span>从左侧勾选服务项后，在下方统一分配团队与执行人员。</span></div>
                 </div>
                 <div v-else class="pm-operation-empty">请从左侧选择一个服务项后继续。</div>
+                <section v-if="selectedServiceItem && activeSection !== 'allocation'"
+                  class="pm-panel pm-stepper-panel pm-operation-progress" aria-label="服务项交付进度">
+                  <div class="pm-stepper">
+                    <template v-for="(step, index) in operationSteps" :key="step.label">
+                      <div class="pm-step" :class="step.state"
+                        :aria-current="step.state === 'doing' ? 'step' : undefined">
+                        <span class="pm-step-num">{{ step.state === 'done' ? '✓' : index + 1 }}</span>
+                        <span>{{ step.label }}</span>
+                      </div>
+                      <div v-if="index < operationSteps.length - 1" class="pm-step-line"></div>
+                    </template>
+                  </div>
+                </section>
             <PenetrationWorkPackageCard v-if="activeSection !== 'allocation' && selectedServiceItem && isEmbeddedPenetrationItem(selectedServiceItem)" :item="selectedServiceItem" :session="session" :engineer-options="penetrationEngineerOptions" :auto-ensure="activeSection === 'planning'" @updated="updatePenetrationPackage" @notify="notifyFromPenetration" />
             <div v-if="activeSection === 'allocation' && selectedServiceItems.length" class="pm-panel-actions">
               <button v-if="canManageDecomposition" type="button" class="pm-button" :disabled="saving" @click="returnSelectedToDecomposition">退回拆解确认</button>
@@ -4432,7 +4431,7 @@ onBeforeUnmount(() => {
                 <p v-if="selectedServiceItems.length" class="pm-form-hint pm-allocation-preview">影响预览：将为 {{ selectedServiceItems.length }} 个服务项{{ canExecutionAssign ? '写入团队负责人、项目经理与实施工程师并触发能力校验' : '写入团队负责人' }}；已选 {{ selectedServiceItems.map((item) => item.id).join('、') }}</p>
                 <button v-if="canSubmitAllocation" class="pm-button primary" :disabled="saving" @click="runOperation('allocation')">{{ saving ? '提交中…' : canExecutionAssign ? '保存分配并校验能力' : '分配团队负责人' }}</button>
               </template>
-              <template v-else-if="activeSection === 'planning'"><section v-if="operationSteps.length" class="pm-panel pm-stepper-panel"><div class="pm-stepper"><template v-for="(step, index) in operationSteps" :key="step.label"><div class="pm-step" :class="step.state"><span class="pm-step-num">{{ step.state === 'done' ? '✓' : index + 1 }}</span><span>{{ step.label }}</span></div><div v-if="index < operationSteps.length - 1" class="pm-step-line"></div></template></div></section><div v-if="planningBlocked" class="pm-blocker" :class="planningBlocked.tone" role="alert"><b>暂时不能发布实施计划</b><span>{{ planningBlocked.reason }}</span><button class="pm-button" type="button" @click="navigate('allocation')">前往任务分配</button></div><label><span>计划开始 <em>*</em></span><input v-model.trim="operationForm.plannedStart" type="datetime-local" /></label><label><span>计划结束 <em>*</em></span><input v-model.trim="operationForm.plannedEnd" type="datetime-local" /></label><label><span>现场计划</span><textarea v-model.trim="operationForm.sitePlan" rows="3" placeholder="现场实施步骤和窗口" maxlength="5000"></textarea></label><template v-if="selectedServiceItem.test_mode === 'PENETRATION'"><label><span>渗透测试专项计划 <em>*</em></span><textarea v-model.trim="operationForm.penetrationTestPlan" rows="3" maxlength="5000"></textarea></label><fieldset class="pm-compliant-fieldset"><legend>专项合规要素（授权 / 白名单 / 时间窗 / 应急 / 回滚）</legend><label><span>授权书编号 <em>*</em></span><input v-model.trim="operationForm.authDocNo" required placeholder="例如 AUTH-2026-001"  maxlength="128"/></label><label><span>授权生效 <em>*</em></span><input v-model.trim="operationForm.authStart" type="datetime-local" required /></label><label><span>授权截止 <em>*</em></span><input v-model.trim="operationForm.authEnd" type="datetime-local" required /></label><label><span>授权范围 <em>*</em></span><input v-model.trim="operationForm.authScope" required placeholder="例如 内网段 10.0.0.0/8"  maxlength="5000"/></label><label><span>计划测试范围 <em>*</em></span><input v-model.trim="operationForm.testScope" required placeholder="例如 关键业务系统 WEB 渗透"  maxlength="5000"/></label><label><span>测试时间窗 <em>*</em></span><input v-model.trim="operationForm.testWindow" required placeholder="例如 00:00-06:00"  maxlength="128"/></label><label><span>应急联系人 <em>*</em></span><input v-model.trim="operationForm.emergencyContact" required placeholder="姓名 + 电话"  maxlength="128"/></label><label><span>回滚方案 <em>*</em></span><textarea v-model.trim="operationForm.rollbackPlan" rows="3" required maxlength="5000"></textarea></label></fieldset></template><section class="pm-plan-resources"><header><div><b>实施人员</b><small>资质编码取自「资质与能力」档案，人员不限制有效期；使用时段留空表示全程；设备清单在「实施准备」中登记</small></div></header><div class="pm-table-scroll"><table class="pm-table"><thead><tr><th scope="col">名称</th><th scope="col">规格 / 资质</th><th scope="col">有效期规则</th><th scope="col">使用时段</th><th scope="col">备注</th><th scope="col"></th></tr></thead><tbody><tr v-for="(row, index) in operationForm.personnel" :key="row.resourceID"><td>{{ planResourceName(row) }}</td><td><CodePills :codes="planResourceCodes(row)" /></td><td>{{ planResourceValidUntil(row) }}</td><td><div class="pm-plan-window"><input v-model="row.windowStart" type="date" aria-label="使用时段开始" /><span>~</span><input v-model="row.windowEnd" type="date" aria-label="使用时段结束" /></div></td><td><input v-model.trim="row.note" placeholder="例如 备份"  maxlength="500"/></td><td><button type="button" class="pm-link danger" @click="removePlanPersonnel(index)">移除</button></td></tr><tr v-if="!operationForm.personnel.length"><td colspan="6" class="pm-empty-mini">请至少添加一名实施人员</td></tr></tbody></table></div></section><button v-if="canPlanImplementation" class="pm-button primary" :disabled="saving || !!planningBlocked" :title="planningBlocked ? planningBlocked.reason : ''" @click="runOperation('planning')">发布实施计划</button></template>
+              <template v-else-if="activeSection === 'planning'"><div v-if="planningBlocked" class="pm-blocker" :class="planningBlocked.tone" role="alert"><b>暂时不能发布实施计划</b><span>{{ planningBlocked.reason }}</span><button class="pm-button" type="button" @click="navigate('allocation')">前往任务分配</button></div><label><span>计划开始 <em>*</em></span><input v-model.trim="operationForm.plannedStart" type="datetime-local" /></label><label><span>计划结束 <em>*</em></span><input v-model.trim="operationForm.plannedEnd" type="datetime-local" /></label><label><span>现场计划</span><textarea v-model.trim="operationForm.sitePlan" rows="3" placeholder="现场实施步骤和窗口" maxlength="5000"></textarea></label><template v-if="selectedServiceItem.test_mode === 'PENETRATION'"><label><span>渗透测试专项计划 <em>*</em></span><textarea v-model.trim="operationForm.penetrationTestPlan" rows="3" maxlength="5000"></textarea></label><fieldset class="pm-compliant-fieldset"><legend>专项合规要素（授权 / 白名单 / 时间窗 / 应急 / 回滚）</legend><label><span>授权书编号 <em>*</em></span><input v-model.trim="operationForm.authDocNo" required placeholder="例如 AUTH-2026-001"  maxlength="128"/></label><label><span>授权生效 <em>*</em></span><input v-model.trim="operationForm.authStart" type="datetime-local" required /></label><label><span>授权截止 <em>*</em></span><input v-model.trim="operationForm.authEnd" type="datetime-local" required /></label><label><span>授权范围 <em>*</em></span><input v-model.trim="operationForm.authScope" required placeholder="例如 内网段 10.0.0.0/8"  maxlength="5000"/></label><label><span>计划测试范围 <em>*</em></span><input v-model.trim="operationForm.testScope" required placeholder="例如 关键业务系统 WEB 渗透"  maxlength="5000"/></label><label><span>测试时间窗 <em>*</em></span><input v-model.trim="operationForm.testWindow" required placeholder="例如 00:00-06:00"  maxlength="128"/></label><label><span>应急联系人 <em>*</em></span><input v-model.trim="operationForm.emergencyContact" required placeholder="姓名 + 电话"  maxlength="128"/></label><label><span>回滚方案 <em>*</em></span><textarea v-model.trim="operationForm.rollbackPlan" rows="3" required maxlength="5000"></textarea></label></fieldset></template><section class="pm-plan-resources"><header><div><b>实施人员</b><small>资质编码取自「资质与能力」档案，人员不限制有效期；使用时段留空表示全程；设备清单在「实施准备」中登记</small></div></header><div class="pm-table-scroll"><table class="pm-table"><thead><tr><th scope="col">名称</th><th scope="col">规格 / 资质</th><th scope="col">有效期规则</th><th scope="col">使用时段</th><th scope="col">备注</th><th scope="col"></th></tr></thead><tbody><tr v-for="(row, index) in operationForm.personnel" :key="row.resourceID"><td>{{ planResourceName(row) }}</td><td><CodePills :codes="planResourceCodes(row)" /></td><td>{{ planResourceValidUntil(row) }}</td><td><div class="pm-plan-window"><input v-model="row.windowStart" type="date" aria-label="使用时段开始" /><span>~</span><input v-model="row.windowEnd" type="date" aria-label="使用时段结束" /></div></td><td><input v-model.trim="row.note" placeholder="例如 备份"  maxlength="500"/></td><td><button type="button" class="pm-link danger" @click="removePlanPersonnel(index)">移除</button></td></tr><tr v-if="!operationForm.personnel.length"><td colspan="6" class="pm-empty-mini">请至少添加一名实施人员</td></tr></tbody></table></div></section><button v-if="canPlanImplementation" class="pm-button primary" :disabled="saving || !!planningBlocked" :title="planningBlocked ? planningBlocked.reason : ''" @click="runOperation('planning')">发布实施计划</button></template>
               <template v-else-if="activeSection === 'methods'"><div class="pm-review-state"><span>复核状态</span><b class="pm-badge" :class="statusTone(item && reportTechReviewLabel(item.tech_review_status))">{{ item && reportTechReviewLabel(item.tech_review_status) }}</b></div><template v-if="item && ['PENDING', 'REJECTED'].includes(item.tech_review_status)"><label><span>复核意见</span><textarea v-model.trim="operationForm.reviewComment" rows="3" placeholder="填写风险说明或驳回原因" maxlength="1000"></textarea></label><div v-if="canReviewSpecialMethod" class="pm-form-row"><button class="pm-button primary" :disabled="saving" @click="runOperation('special-approve')">通过复核</button><button class="pm-button" :disabled="saving" @click="runOperation('special-reject')">驳回复核</button></div></template><template v-else-if="item && item.tech_review_status === 'APPROVED'"><p class="pm-form-hint">{{ item.tech_review_comment || '已通过复核，可发布实施计划' }}<span v-if="item.tech_reviewed_at"> · {{ formatDateTime(item.tech_reviewed_at) }} · {{ item.tech_reviewed_by }} </span></p></template><template v-else-if="item && item.tech_review_status === 'PENDING'"><p class="pm-form-hint">等待技术总监复核特殊方法。</p></template></template>
               <template v-else-if="activeSection === 'preparation'">
                 <section class="pm-plan-resources"><header><div><b>设备清单（选填）</b><small>无需设备的项目可留空；选择设备后仍会校验有效档案、检定有效期、在位状态及占用冲突</small></div><button type="button" class="pm-button" @click="openEquipmentPicker">＋ 添加设备</button></header><div class="pm-table-scroll"><table class="pm-table"><thead><tr><th scope="col">设备</th><th scope="col">能力码</th><th scope="col">检定有效期</th><th scope="col">使用时段</th><th scope="col">备注</th><th scope="col"></th></tr></thead><tbody><tr v-for="(row, index) in operationForm.equipment" :key="row.resourceID"><td>{{ planResourceName(row) }}</td><td><CodePills :codes="planResourceCodes(row)" /></td><td>{{ planResourceValidUntil(row) }}</td><td><div class="pm-plan-window"><input v-model="row.windowStart" type="date" aria-label="使用时段开始" /><span>~</span><input v-model="row.windowEnd" type="date" aria-label="使用时段结束" /></div></td><td><input v-model.trim="row.note" placeholder="例如 备用机"  maxlength="500"/></td><td><button type="button" class="pm-link danger" @click="removePlanEquipment(index)">移除</button></td></tr><tr v-if="!operationForm.equipment.length"><td colspan="6" class="pm-empty-mini">本服务项无需设备时可留空</td></tr></tbody></table></div></section>
@@ -4471,7 +4470,7 @@ onBeforeUnmount(() => {
                       <h2>报告阶段链</h2>
                     </div>
                     <div class="pm-report-hero-actions">
-                      <span v-if="selectedServiceItem" class="pm-op-current">当前：<span class="pm-badge" :class="statusTone(reportStatusLabel[selectedServiceItem.report_status] || '未开始')">{{ reportStatusLabel[selectedServiceItem.report_status] || '未开始' }}</span></span>
+                      <span v-if="selectedServiceItem" class="pm-op-current">当前：<span class="pm-badge" :class="selectedReportStage.tone">{{ selectedReportStage.label }}</span></span>
                       <button
                         v-if="selectedServiceItem && reportPhaseNext[selectedServiceItem.report_status] && canAdvanceReportPhase(reportPhaseNext[selectedServiceItem.report_status])"
                         class="pm-button primary" :disabled="saving" @click="runOperation('report-next')"
@@ -4492,7 +4491,7 @@ onBeforeUnmount(() => {
                     </template>
                   </div>
                 </section>
-                <div class="pm-report-phase" v-if="selectedServiceItem?.report_status"><span>当前报告阶段</span><b class="pm-badge" :class="statusTone(reportStatusLabel[selectedServiceItem.report_status] || selectedServiceItem.report_status)">{{ reportStatusLabel[selectedServiceItem.report_status] || selectedServiceItem.report_status }}</b></div>
+                <div class="pm-report-phase" v-if="selectedServiceItem"><span>当前报告阶段</span><b class="pm-badge" :class="selectedReportStage.tone">{{ selectedReportStage.label }}</b></div>
                 <div
                   v-if="reportFileUploadEnabled && selectedServiceItem?.report_status === 'COMPILING'
                     && permissionSet.has('project.report.prepare')"

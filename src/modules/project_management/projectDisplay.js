@@ -105,6 +105,85 @@ export const reportStageLabel = Object.freeze({
   ARCHIVED: '已归档',
 })
 
+// 仅用于展示服务项自身进度，口径对应服务端 domain/project_status.go；
+// 不由服务项推导项目状态，也不用于放行任何写操作。
+const serviceItemDeliveryRank = Object.freeze({
+  待确认: 0, 待复核: 0, 待分配: 1, 待实施: 2,
+  实施准备中: 3, 实施中: 4, 异常处理中: 5, 现场实施完成: 6,
+})
+const serviceItemReportRank = Object.freeze({
+  NONE: 0, RECTIFYING: 1, COMPILING: 2, REVIEWED: 3, ISSUED: 4, ARCHIVED: 5,
+})
+
+// 用途：读取服务项的独立报告阶段，避免回退后的历史值冒充当前进度。
+// 参数：item 为服务端返回的当前服务项快照。
+// 返回值：阶段名称、色调及展示顺序；缺失、未知或尚未进入报告阶段时顺序为 -1。
+export function serviceItemReportStage(item) {
+  const phase = String(item?.report_status ?? '').trim().toUpperCase()
+  if (String(item?.status ?? '').trim() !== '现场实施完成') {
+    return { label: '未进入报告阶段', tone: 'neutral', rank: -1 }
+  }
+  if (!Object.hasOwn(serviceItemReportRank, phase)) {
+    return { label: phase ? `未知阶段（${phase}）` : '阶段未提供', tone: 'neutral', rank: -1 }
+  }
+  return { label: reportStageLabel[phase], tone: statusTone(phase), rank: serviceItemReportRank[phase] }
+}
+
+// 用途：统一队列与摘要的服务项主状态和报告阶段徽章。
+// 参数：item 为当前服务项快照，不接受项目聚合状态代替服务项状态。
+// 返回值：可直接渲染的徽章；报告阶段仅在现场完成后显示，未知值明确回显。
+export function serviceItemStatusBadges(item) {
+  const status = String(item?.status ?? '').trim()
+  const badges = [{ key: 'status', label: status || '状态未提供', tone: statusTone(status) }]
+  if (status === '现场实施完成') {
+    const stage = serviceItemReportStage(item)
+    badges.push({ key: 'report', label: `报告${stage.label}`, tone: stage.tone })
+  }
+  return badges
+}
+
+// 用途：按真实主状态展示交付进度，进入某阶段不代表该阶段已经完成。
+// 参数：item 为当前服务项；待分配阶段额外核对团队与执行人员是否齐备。
+// 返回值：七步只读进度；未知或终止状态不推断完成，无服务项时返回空数组。
+export function serviceItemOperationSteps(item) {
+  if (!item) return []
+  const status = String(item.status ?? '').trim()
+  const rank = Object.hasOwn(serviceItemDeliveryRank, status) ? serviceItemDeliveryRank[status] : -1
+  let current = -1
+  if (rank === 0) current = 0
+  else if (rank === 1) {
+    const assigned = item.project_manager_id && item.engineer_ids?.length
+    current = !item.team_lead_id ? 1 : assigned ? 3 : 2
+  } else if (rank === 2 || rank === 3) current = 4
+  else if (rank === 4 || rank === 5) current = 5
+  else if (rank === 6) current = 7
+
+  return ['拆解确认', '分配至团队', '指派人员', '制定实施计划',
+    '实施准备', '现场实施', '完成确认'].map((label, index) => ({
+    label, state: index < current ? 'done' : index === current ? 'doing' : 'idle',
+  }))
+}
+
+// 用途：随服务项报告阶段更新阶段链，归档后不再保留进行中标记。
+// 参数：item 为含主状态及独立 report_status 的服务项快照。
+// 返回值：整改至归档的五步进度；尚未进入报告或未知阶段时均为未完成。
+export function serviceItemReportSteps(item) {
+  const current = serviceItemReportStage(item).rank
+  // 审核、签发和归档是已完成里程碑；整改和编制是进行态。
+  const completedThrough = current >= serviceItemReportRank.REVIEWED ? current : current - 1
+  return [
+    { phase: 'RECTIFYING', label: '报告整改（可选）' },
+    { phase: 'COMPILING', label: '报告编制' },
+    { phase: 'REVIEWED', label: '报告审核' },
+    { phase: 'ISSUED', label: '报告签发' },
+    { phase: 'ARCHIVED', label: '报告归档' },
+  ].map((step, index) => ({
+    ...step,
+    state: index + 1 <= completedThrough ? 'done'
+      : index + 1 === current ? 'doing' : 'idle',
+  }))
+}
+
 // 项目列表、看板与监控都通过这个函数取报告阶段文案：字段缺失或空值一律返回空串，
 // 旧后端不返回 report_stage 时界面保持原样，前端不根据其它状态自行推断阶段。
 export function projectReportStageLabel(project) {
