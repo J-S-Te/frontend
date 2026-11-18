@@ -21,13 +21,19 @@ function timeBoundary(value, fallback) {
   return Number.isFinite(parsed) ? parsed : fallback
 }
 
-function effectiveRange(template, role) {
+// 用途：计算模板、岗位映射和角色条目从当前时刻起的有效期交集。
+// 参数：template 为模板，role 为条目，assignment 为映射，now 为当前毫秒时间。
+// 返回值：尚未到期的交集起止时间；无交集或已到期时返回 null。
+function effectiveRange(template, role, assignment, now) {
   const start = Math.max(
+    now,
     timeBoundary(template?.valid_from, Number.NEGATIVE_INFINITY),
+    timeBoundary(assignment?.valid_from, Number.NEGATIVE_INFINITY),
     timeBoundary(role?.valid_from, Number.NEGATIVE_INFINITY),
   )
   const end = Math.min(
     timeBoundary(template?.valid_until, Number.POSITIVE_INFINITY),
+    timeBoundary(assignment?.valid_until, Number.POSITIVE_INFINITY),
     timeBoundary(role?.valid_until, Number.POSITIVE_INFINITY),
   )
   return end > start ? { start, end } : null
@@ -41,22 +47,34 @@ function roleItems(template) {
   return Array.isArray(template?.roles) ? template.roles : []
 }
 
-/**
- * 检查同一岗位拟应用的多个模板是否在重叠有效期内授予同一个“应用 + 角色 + 范围”。
- * 只做分析，不修改模板或岗位映射；调用方仍以服务端保存结果作为事实来源。
- */
-export function inspectPositionTemplateDuplicates(templates, selectedTemplateIds) {
+// 用途：检查岗位所选模板在未过期时间窗内是否重复授予相同应用角色与范围。
+// 参数：templates 为模板目录，selectedTemplateIds 为勾选 ID；
+//   options.assignments 为已有岗位映射，options.now 为当前毫秒时间，默认读取当前时钟。
+// 返回值：查重计数、重复来源与不可用模板，不修改输入或阻止保存。
+export function inspectPositionTemplateDuplicates(
+  templates,
+  selectedTemplateIds,
+  { assignments = [], now = Date.now() } = {},
+) {
   const templateList = Array.isArray(templates) ? templates : []
   const selectedIds = [...new Set((Array.isArray(selectedTemplateIds) ? selectedTemplateIds : []).map(normalizedId).filter(Boolean))]
   const byTemplateId = new Map(templateList.map((template) => [itemId(template, 'template_id', 'id'), template]))
   const missingTemplateIds = selectedIds.filter((templateId) => !byTemplateId.has(templateId))
   const selectedTemplates = selectedIds.map((templateId) => byTemplateId.get(templateId)).filter(Boolean)
+  const byAssignedTemplateId = new Map(
+    (Array.isArray(assignments) ? assignments : []).map((assignment) => [
+      itemId(assignment?.template, 'template_id', 'id') || itemId(assignment, 'template_id'),
+      assignment,
+    ]),
+  )
   const occurrencesByKey = new Map()
   const emptyTemplates = []
   let checkedRoleCount = 0
 
   selectedTemplates.forEach((template) => {
     let eligibleRoleCount = 0
+    // 尚未保存的新勾选没有映射期限，与页面保存时的长期默认值保持一致。
+    const assignment = byAssignedTemplateId.get(itemId(template, 'template_id', 'id'))
     if (active(template)) {
       roleItems(template).forEach((role) => {
         if (!active(role)) return
@@ -64,7 +82,7 @@ export function inspectPositionTemplateDuplicates(templates, selectedTemplateIds
         const roleId = itemId(role, 'role_id', 'roleId', 'id')
         const scopeType = normalizedId(role?.scope_type || role?.scopeType || 'TENANT').toUpperCase() || 'TENANT'
         const scopeId = scopeType === 'ENVIRONMENT' ? normalizedId(role?.scope_id || role?.scopeId) : ''
-        const range = effectiveRange(template, role)
+        const range = effectiveRange(template, role, assignment, now)
         if (!applicationId || !roleId || !range) return
         const key = `${applicationId}|${roleId}|${scopeType}|${scopeId}`
         const occurrence = {

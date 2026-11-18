@@ -502,12 +502,21 @@ async function saveAssignments() {
   }
 }
 
+/**
+ * 用途：分析当前岗位勾选模板的重复授权并按需显示提醒。
+ * 参数：notify 为是否显示查重提示；已有岗位映射期限原样参与计算。
+ * 返回值：查重结果；未选择岗位时返回 null，不修改勾选或阻断保存。
+ */
 function runAssignmentDuplicateCheck(notify = true) {
   if (!selectedPositionId.value) {
     if (notify) emit('toast', '请先选择需要查重的目标岗位。')
     return null
   }
-  duplicateCheckResult.value = inspectPositionTemplateDuplicates(activeTemplates.value, assignedTemplateIds.value)
+  duplicateCheckResult.value = inspectPositionTemplateDuplicates(
+    activeTemplates.value,
+    assignedTemplateIds.value,
+    { assignments: assignedTemplateEntries.value },
+  )
   if (!notify) return duplicateCheckResult.value
   if (!assignedTemplateIds.value.length) {
     emit('toast', '当前岗位尚未勾选授权模板，没有需要查重的内容。')
@@ -826,7 +835,12 @@ onMounted(() => {
           <span class="iam-template-card-icon" :class="duplicateCheckResult.duplicate_group_count ? 'is-warn' : 'is-green'"><ConsoleIcon :name="duplicateCheckResult.duplicate_group_count ? 'info' : 'save'" /></span>
           <div>
             <h5>{{ duplicateCheckResult.duplicate_group_count ? `发现 ${duplicateCheckResult.duplicate_group_count} 组重复权限` : '查重通过，未发现重复权限' }}</h5>
-            <p>已检查 {{ duplicateCheckResult.selected_template_count }} 个模板、{{ duplicateCheckResult.checked_role_count }} 条有效角色配置；查重依据为应用、角色、授权范围及有效期交集。</p>
+            <p>
+              已检查 {{ duplicateCheckResult.selected_template_count }} 个模板、
+              {{ duplicateCheckResult.checked_role_count }} 条未过期角色配置；
+              查重依据为应用、角色、授权范围及有效期交集，
+              已纳入岗位映射期限并排除已过期配置。
+            </p>
           </div>
         </header>
         <ul v-if="duplicateCheckResult.duplicates.length" class="iam-template-duplicate-list">
