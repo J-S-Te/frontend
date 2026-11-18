@@ -502,9 +502,11 @@ async function saveAssignments() {
   }
 }
 
-// 用途：分析当前岗位勾选模板的重复授权并按需显示提醒。
-// 参数：notify 为是否显示查重提示；已有岗位映射期限原样参与计算。
-// 返回值：查重结果；未选择岗位时返回 null，不修改勾选或阻断保存。
+/**
+ * 用途：分析当前岗位勾选模板的重复授权并按需显示提醒。
+ * 参数：notify 为是否显示查重提示；已有岗位映射期限原样参与计算。
+ * 返回值：查重结果；未选择岗位时返回 null，不修改勾选或阻断保存。
+ */
 function runAssignmentDuplicateCheck(notify = true) {
   if (!selectedPositionId.value) {
     if (notify) emit('toast', '请先选择需要查重的目标岗位。')
