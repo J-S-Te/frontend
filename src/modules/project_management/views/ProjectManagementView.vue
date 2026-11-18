@@ -3715,7 +3715,7 @@ onBeforeUnmount(() => {
       </header>
 
       <div class="pm-page">
-        <PageHead eyebrow="项目运营" data-first-run-anchor="subsystem-title" :title="currentMeta[0]" :description="activeSection === 'notifications' ? currentMeta[1] : `${currentMeta[1]} · 数据更新于 ${lastUpdatedLabel}`">
+        <PageHead eyebrow="项目运营" data-first-run-anchor="subsystem-title" :title="activeSection === 'project_detail' && detailProject ? `${detailProject.id} · ${detailProject.customer}` : currentMeta[0]" :description="activeSection === 'notifications' ? currentMeta[1] : activeSection === 'project_detail' && detailProject ? `${currentMeta[1]} · 进度 ${detailProject.progress ?? 0}% · 计划完成 ${detailProject.due || '待排期'} · 更新于 ${lastUpdatedLabel}` : `${currentMeta[1]} · 数据更新于 ${lastUpdatedLabel}`">
           <template #actions>
             <button v-if="activeSection !== 'notifications'" class="pm-button" :disabled="loading || refreshing" @click="refreshWorkspace"><ConsoleIcon name="reset" />{{ loading ? '加载中' : (refreshing ? '同步中' : '刷新') }}</button><span v-if="refreshing" class="pm-sync-status" role="status">正在同步最新状态…</span>
             <button v-if="activeSection === 'projects'" class="pm-button" @click="exportProjects"><ConsoleIcon name="export" />导出</button>
@@ -3940,7 +3940,7 @@ onBeforeUnmount(() => {
             <ConsoleIcon name="info" /><b>未找到项目</b><span>可能已被删除或不在你的数据范围内。</span><button class="pm-button" @click="navigate('projects')">返回项目列表</button>
           </section>
           <template v-else>
-            <section class="pm-actions-bar"><button class="pm-button" @click="navigate('projects')"><ConsoleIcon name="reset" />返回项目列表</button><button class="pm-button" :disabled="loading || refreshing" @click="refreshWorkspace"><ConsoleIcon name="reset" />{{ refreshing ? '同步中…' : '刷新' }}</button></section>
+            <div class="pm-detail-stack">
             <section v-if="detailProject.source_kind === 'NATIVE' && canReadNativeProjectScope && (nativeProjectEnabled || nativeScopeProjectID === detailProject.id)" class="pm-panel">
               <button v-if="!nativeScopeProjectID && nativeProjectEnabled" type="button" class="pm-button"
                 :disabled="saving" @click="nativeScopeProjectID = detailProject.id">原生委托范围变更</button>
@@ -3978,7 +3978,7 @@ onBeforeUnmount(() => {
               <button v-for="tab in detailTabs" :key="tab.key" type="button" class="pm-tab-pill" :class="{ active: detailTab === tab.key }" @click="detailTab = tab.key">{{ tab.label }}<span class="pm-tab-count">{{ tab.count }}</span></button>
             </section>
             <article v-if="detailTab === 'items'" class="pm-table-panel">
-              <div class="pm-table-scroll"><table class="pm-table"><thead><tr><th scope="col">服务项编号</th><th scope="col">场所 / 批次</th><th scope="col">检测类别</th><th scope="col">体系</th><th scope="col">特殊方法</th><th scope="col">状态</th><th scope="col">渗透专项</th><th scope="col">报告</th><th scope="col">计划窗口</th><th scope="col"></th></tr></thead><tbody>
+              <div class="pm-table-scroll"><table class="pm-table pm-detail-items"><thead><tr><th scope="col">服务项编号</th><th scope="col">场所 / 批次</th><th scope="col">检测类别</th><th scope="col">体系</th><th scope="col">特殊方法</th><th scope="col">状态</th><th scope="col">渗透专项</th><th scope="col">报告</th><th scope="col">计划窗口</th><th scope="col"></th></tr></thead><tbody>
                 <tr v-for="item in detailItems" :key="item.id"><td class="mono"><b>{{ item.id }}</b></td><td>{{ item.site }}<span class="pm-cell-sub">{{ item.batch }}</span></td><td>{{ item.category }}</td><td>{{ item.system || '—' }}</td><td><span class="pm-badge" :class="item.special === '是' ? '待确认' : 'neutral'">{{ item.special || '否' }}</span></td><td><span class="pm-badge" :class="statusTone(item.status)">{{ item.status }}</span></td><td><span v-if="isEmbeddedPenetrationItem(item)" class="pm-badge" :class="item.penetration_work_package?.decision_status === 'REQUIRED' ? '待确认' : 'neutral'">{{ penetrationPackageLabel(item) }}</span><span v-else>—</span></td><td>{{ item.report_status ? (reportStatusLabel[item.report_status] || item.report_status) : '—' }}</td><td>{{ item.planned_start ? `${formatBusinessDate(item.planned_start)} ~ ${formatBusinessDate(item.planned_end)}` : '待排期' }}</td><td><button class="pm-link" @click="navigate('implementation')">看板</button></td></tr>
                 <tr v-if="!detailItems.length"><td colspan="10" class="pm-empty-mini">该项目暂无服务项</td></tr>
               </tbody></table></div>
@@ -4013,6 +4013,7 @@ onBeforeUnmount(() => {
             <ProjectArchiveDirectory :key="detailProject.id" :project="detailProject" :items="detailItems"
               :events="detailEvents" :session="session" @view-service="detailTab='items';selectServiceItem($event)"
               @view-events="detailTab='events'" />
+            </div>
           </template>
         </template>
 
