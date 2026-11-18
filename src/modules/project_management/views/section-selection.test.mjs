@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs'
 import { computed, effectScope, nextTick, reactive, ref, watch } from 'vue'
 import { createMemoryHistory, createRouter } from 'vue-router'
 import { openNotificationTarget } from '../../shared/utils/notificationNavigation.js'
+import { projectApprovalTarget } from '../approvalTasks.js'
 
 const source = readFileSync(new URL('./ProjectManagementView.vue', import.meta.url), 'utf8')
 const start = source.indexOf('watch([activeSection, activeNodeItems')
@@ -35,7 +36,7 @@ test('栏目读取期间不清除选中服务项，稳定快照确认移出节�
 })
 
 // 用途：运行页面真实选中函数和监听器，隔离表单填充及远端证据读取。
-// 参数：options 指定栏目、通知坐标和服务端授权候选。
+// 参数：options 指定栏目、通知坐标、授权候选及可选的真实内存路由。
 // 返回值：响应式页面状态、表单与提示记录，以及作用域清理入口。
 function mountNotificationSelection({ section = 'methods', target = 'SI-2', items, router } = {}) {
   const scope = effectScope()
@@ -48,6 +49,7 @@ function mountNotificationSelection({ section = 'methods', target = 'SI-2', item
     sectionDataContext: ref('tenant:user:revision-1'),
     route: reactive({ name: 'project_management', query: { service_item_id: target } }),
     saving: ref(false),
+    navigation: ref({ sections: ['approvals'] }), mobileMenuOpen: ref(false),
     operationForm: ref({ deviationID: '' }), pendingDeviations: ref([]),
     fieldEvidenceSnapshot: ref({ itemID: 'stale' }), fieldEvidenceError: ref('old error'),
     projects: ref([]), decompositionProjects: ref([]), selectedDecompositionProjectID: ref(''),
@@ -63,18 +65,20 @@ function mountNotificationSelection({ section = 'methods', target = 'SI-2', item
     source.indexOf('const currentDecompositionItems', decompositionStart))
   const bindingStart = source.indexOf('useProjectNotifications({')
   const binding = source.slice(bindingStart, source.indexOf('\n})', bindingStart) + 3)
+  const approvalNavigation = source.match(/async function openApprovalTarget\([^]*?\n\}/)[0]
   const controls = scope.run(() => new Function('watch', ...Object.keys(state), 'fillOperationForm',
     'refreshSelectedFieldEvidence', 'showToast', 'nextTick', 'openNotificationTarget', 'router',
     'useProjectNotifications', 'getNotification', 'getUnreadCount', 'listNotificationInbox',
-    'markNotificationRead', 'formatUserError',
-    `${select}\n${declaration}\n${decompositionWatch}\n${targetWatch}
+    'markNotificationRead', 'formatUserError', 'projectApprovalTarget', 'window',
+    `${select}\n${declaration}\n${decompositionWatch}\n${approvalNavigation}\n${targetWatch}
     return { selectServiceItem, openTarget: ${binding}.openTarget }`)(
     watch, ...Object.values(state),
     (item) => { calls.forms.push(item.id); state.operationForm.value = { deviationID: '' } },
     () => { calls.evidenceReads += 1 },
     (message, tone) => calls.notices.push({ message, tone }),
     nextTick, openNotificationTarget, router, (dependencies) => dependencies,
-    () => {}, () => {}, () => {}, () => {}, () => {},
+    () => {}, () => {}, () => {}, () => {}, error => error.message,
+    projectApprovalTarget, { location: { origin: 'http://localhost:8081' } },
   ))
   return { ...state, ...controls, calls, stop: () => scope.stop() }
 }
@@ -281,5 +285,29 @@ test('同路径再点通知重选其真实服务项，相同目标保留草稿�
     await assert.rejects(state.openTarget(item), /保存|操作/)
     assert.deepEqual(state.selectedServiceItemIDs.value, ['SI-1'])
     assert.equal(router.currentRoute.value.fullPath, target)
+  } finally { state.stop() }
+})
+
+test('统一项目审批通知保留申请坐标与权限，守卫拒绝或引用不符不假报导航成功', async () => {
+  const router = createRouter({ history: createMemoryHistory(), routes: [
+    { path: '/project_management/:section?', name: 'project_management', component: {} },
+  ] })
+  await router.push('/project_management/notifications')
+  const state = mountNotificationSelection({ router })
+  const detail = { delivery_id: 'approval', source_application: 'project_management',
+    reference_type: 'PROJECT_APPROVAL', reference_id: 'request-1', category: 'ROLLBACK_REQUESTED',
+    target_url: '/project_management/approvals?request_id=request-1' }
+  try {
+    assert.equal(await state.openTarget(detail), true)
+    assert.equal(router.currentRoute.value.fullPath, detail.target_url)
+    state.navigation.value.sections = []
+    assert.equal(await state.openTarget(detail), false)
+    assert.match(state.calls.notices.at(-1)?.message, /无权/)
+    state.navigation.value.sections = ['approvals']
+    router.beforeEach(to => to.query.request_id === 'blocked' ? false : undefined)
+    assert.equal(await state.openTarget({ ...detail, reference_id: 'blocked',
+      target_url: '/project_management/approvals?request_id=blocked' }), false)
+    assert.equal(router.currentRoute.value.fullPath, detail.target_url)
+    await assert.rejects(state.openTarget({ ...detail, reference_id: 'different' }), /不一致/)
   } finally { state.stop() }
 })

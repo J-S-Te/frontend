@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict'
 import test, { afterEach } from 'node:test'
-import { createRenderer } from 'vue'
+import { createRenderer, h } from 'vue'
+import { createMemoryHistory, createRouter, RouterView } from 'vue-router'
 import { useProjectNotifications } from './useProjectNotifications.js'
 import { openNotificationTarget } from '../../shared/utils/notificationNavigation.js'
+import { projectApprovalTarget } from '../approvalTasks.js'
 
 // 计时器宿主桩：composable 内通过 window 调度自动收起，测试环境显式提供。
 const timers = { scheduled: [], cleared: [] }
@@ -14,6 +16,7 @@ const renderer = createRenderer({
 })
 afterEach(() => { for (const app of apps.splice(0)) app.unmount() })
 globalThis.window = {
+  location: { origin: 'http://localhost:8081' },
   setTimeout: (handler, delay) => {
     const id = timers.scheduled.length + 1
     timers.scheduled.push({ id, handler, delay })
@@ -26,8 +29,9 @@ globalThis.window = {
 // 参数：选项提供收件箱和详情响应，以及读取、已读或导航错误。
 // 返回值：组合式状态与可核对的外部调用记录。
 function harness({ unreadCount = { unread_count: 3 }, inboxItems = [], apiError = null,
-  detailItems = null, detailError = null, markError = null, navigationError = null } = {}) {
-  const calls = { counts: [], inbox: [], details: [], marks: [], toasts: [], navigations: [] }
+  detailItems = null, detailError = null, detailRead = null, markError = null,
+  navigationError = null, markRead = null, getContext = () => 'user-a' } = {}) {
+  const calls = { counts: [], inbox: [], details: [], marks: [], toasts: [], navigations: [], targets: [] }
   const deps = {
     getUnreadCount: async () => {
       calls.counts.push(true)
@@ -42,22 +46,27 @@ function harness({ unreadCount = { unread_count: 3 }, inboxItems = [], apiError 
     getNotification: async (deliveryID) => {
       calls.details.push(deliveryID)
       if (detailError) throw detailError
+      if (detailRead) return detailRead(deliveryID)
       const detail = (detailItems || inboxItems).find((item) => item.delivery_id === deliveryID)
       return detail ? { ...detail } : null
     },
     markNotificationRead: async (deliveryID) => {
       calls.marks.push(deliveryID)
       if (markError) throw markError
+      if (markRead) return markRead(deliveryID)
       return {}
     },
     formatUserError: (error, options) => options?.fallback || error.message,
     openTarget: (item) => openNotificationTarget(item, {
       push: async (target) => {
-        calls.navigations.push(target)
+        const visits = projectApprovalTarget(item, window.location.origin)
+          ? calls.targets : calls.navigations
+        visits.push(target)
         if (navigationError) throw navigationError
       },
     }),
     showToast: (message, tone) => calls.toasts.push({ message, tone }),
+    getContext,
   }
   let composable
   const app = renderer.createApp({ setup: () => {
@@ -79,6 +88,63 @@ test('refreshNotificationCount 成功回填未读数，失败时静默归零不�
   await failed.refreshNotificationCount()
   assert.equal(failed.notificationCount.value, 0)
   assert.equal(failed.notificationError.value, '')
+})
+
+test('通知已读等待期间切换账号或卸载，不把旧通知导航带到新上下文', async () => {
+  const item = { delivery_id: 'approval-1', source_application: 'project_management',
+    category: 'ROLLBACK_REQUESTED', reference_type: 'project_approval', reference_id: 'req-1',
+    target_url: '/project_management/approvals?request_id=req-1' }
+  for (const change of ['identity', 'dispose']) {
+    let identity = 'user-a', finish
+    const h = harness({ inboxItems: [item], getContext: () => identity,
+      markRead: () => new Promise(resolve => { finish = resolve }) })
+    const pending = h.openNotification(item)
+    await Promise.resolve()
+    if (change === 'identity') identity = 'user-b'
+    else h.disposeNotifications()
+    finish(); await pending
+    assert.deepEqual(h.calls.targets, [], change)
+    assert.deepEqual(h.calls.navigations, [], change)
+  }
+})
+
+test('审批通知点击直达具体申请，已读失败保留提醒且仍能进入审批', async () => {
+  const item = { delivery_id: 'approval-1', source_application: 'project_management',
+    category: 'REPORT_CORRECTION_REQUESTED', reference_type: 'PROJECT_APPROVAL',
+    reference_id: 'request-1', target_url: '/project_management/approvals?request_id=request-1' }
+  for (const markError of [null, new Error('read unavailable')]) {
+    const h = harness({ markError, inboxItems: [item] })
+    h.notificationItems.value = [item]; h.notificationCount.value = 1
+    await h.openNotification(item)
+    assert.deepEqual(h.calls.targets, ['/project_management/approvals?request_id=request-1'])
+    assert.equal(h.calls.navigations.length, 0)
+    assert.equal(h.notificationCount.value, markError ? 1 : 0)
+    if (markError) assert.match(h.calls.toasts[0].message, /已读/)
+  }
+})
+
+test('统一审批通知先读取当前详情，读取期间切换身份不导航或写已读', async () => {
+  const item = { delivery_id: 'approval-current', source_application: 'project_management',
+    category: 'ROLLBACK_REQUESTED', reference_type: 'PROJECT_APPROVAL', reference_id: 'old',
+    target_url: '/project_management/approvals?request_id=old' }
+  const current = { ...item, reference_id: 'current',
+    target_url: '/project_management/approvals?request_id=current' }
+  const h = harness({ inboxItems: [item], detailItems: [current] })
+  await h.openNotification(item)
+  assert.deepEqual(h.calls.details, ['approval-current'])
+  assert.deepEqual(h.calls.targets, ['/project_management/approvals?request_id=current'])
+  for (const change of ['identity', 'dispose']) {
+    let identity = 'user-a', finish
+    const late = harness({ getContext: () => identity,
+      detailRead: () => new Promise(resolve => { finish = resolve }) })
+    const pending = late.openNotification(item)
+    if (change === 'identity') identity = 'user-b'
+    else late.disposeNotifications()
+    finish(current)
+    await pending
+    assert.deepEqual(late.calls.targets, [], change)
+    assert.deepEqual(late.calls.marks, [], change)
+  }
 })
 
 test('loadUnreadNotifications 拉取未读列表并二次过滤已读；失败时清空列表并显式报错', async () => {
@@ -239,6 +305,34 @@ test('openNotification 导航成功但已读保存失败时保留真实未读详
   assert.equal(h.calls.toasts[0]?.tone, 'error')
   assert.match(h.calls.toasts[0]?.message, /已进入.*已读.*失败/)
   assert.equal(h.notificationActionID.value, '')
+})
+
+test('跨系统导航正常卸载项目页面后仍保存本人已读，但不回写已卸载页面状态', async () => {
+  const item = { delivery_id: 'cross-system', read_at: null,
+    target_url: '/contract_management/approvals?approval_id=approval-1' }
+  const boundary = harness({ inboxItems: [item], unreadCount: { unread_count: 1 } })
+  let state
+  const router = createRouter({ history: createMemoryHistory(), routes: [
+    { path: '/project_management/notifications', component: { setup: () => {
+      state = useProjectNotifications({ ...boundary.deps,
+        openTarget: detail => openNotificationTarget(detail, router) })
+      return () => null
+    } } },
+    { path: '/contract_management/approvals', component: { render: () => null } },
+  ] })
+  await router.push('/project_management/notifications')
+  const app = renderer.createApp({ render: () => h(RouterView) })
+  app.use(router)
+  app.mount({})
+  apps.push(app)
+  state.notificationCount.value = 1
+  state.notificationItems.value = [item]
+  await state.openNotification(item)
+  assert.equal(router.currentRoute.value.fullPath, item.target_url)
+  assert.deepEqual(boundary.calls.details, ['cross-system'])
+  assert.deepEqual(boundary.calls.marks, ['cross-system'])
+  assert.equal(state.notificationCount.value, 1)
+  assert.deepEqual(state.notificationItems.value, [item])
 })
 
 test('openNotification 缺失目标或导航被拒绝时保留未读提醒并明确提示', async () => {

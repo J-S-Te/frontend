@@ -59,7 +59,7 @@ test('CRM customer selector stays full width and only the clear button is narrow
   assert.match(css, /\.contract-opportunity-control>\.contract-opportunity-select\s*\{[^}]*flex:1/)
   assert.match(css, /\.contract-opportunity-control>\.contract-opportunity-clear\s*\{[^}]*width:36px/)
   // 拆分后：按钮 DOM 与类名不变，点击通过明确事件交回页面（页面保留目录读取与清空权限）。
-  assert.match(draftFieldsSource, /class="contract-opportunity-select" type="button" @click="\$emit\('open-customer-picker'\)"/)
+  assert.match(draftFieldsSource, /class="contract-opportunity-select" type="button" :disabled="busy" @click="\$emit\('open-customer-picker'\)"/)
   assert.match(viewSource, /@open-customer-picker="openCustomerPicker"/)
   assert.match(source, /class="contract-opportunity-clear" type="button" aria-label="清除 CRM 客户"/)
   assert.match(source, /class="contract-opportunity-clear" type="button" aria-label="清除关联商机"/)

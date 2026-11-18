@@ -3,20 +3,24 @@ import test from 'node:test'
 import { readFile } from 'node:fs/promises'
 import { formatUserError } from '../shared/utils/userError.js'
 import { notificationTarget, openNotificationTarget } from '../shared/utils/notificationNavigation.js'
+import { projectApprovalTarget } from './approvalTasks.js'
 
 const view = await readFile(new URL('./views/ProjectManagementView.vue', import.meta.url), 'utf8')
 const inbox = await readFile(new URL('./components/ProjectNotificationCenter.vue', import.meta.url), 'utf8')
 const popover = await readFile(new URL('./components/ProjectNotificationPopover.vue', import.meta.url), 'utf8')
 // 用途：执行真实项目通知组件，替换认证读取与路由外部边界。
 // 参数：api 为通知接口及导航替身。
-// 返回值：真实收件箱状态与动作。
+// 返回值：真实收件箱状态、动作、事件及卸载清理入口。
 function mountInbox(api) {
   const script = inbox.match(/<script setup>([\s\S]*?)<\/script>/)[1].replace(/^import .*$/gm, '')
   const ref = (value) => ({ value })
   const computed = (read) => ({ get value() { return read() } })
   const emitted = []
-  const context = { formatUserError, ref, computed, onMounted: () => {},
-    defineEmits: () => event => emitted.push(event), useConfirmDialog: () => ({
+  let cleanup = () => {}
+  const context = { formatUserError, projectApprovalTarget, ref, computed, onMounted: () => {},
+    onBeforeUnmount: callback => { cleanup = callback },
+    window: { location: { origin: 'http://localhost:8081' } },
+    defineEmits: () => (event, value) => emitted.push({ event, value }), useConfirmDialog: () => ({
       dialog: ref(null), askConfirm: async () => true, accept() {}, cancel() {},
     }), getNotification: api.getNotification, listInbox: api.listInbox,
     markNotificationRead: api.markNotificationRead,
@@ -24,9 +28,10 @@ function mountInbox(api) {
     useRouter: () => ({ push: api.push || (async () => {}) }), openNotificationTarget,
     notificationTarget: item => notificationTarget(item, 'http://localhost:8081'),
   }
-  return new Function(...Object.keys(context), `${script}\nreturn { items, total, page, unreadOnly, tab,
+  const state = new Function(...Object.keys(context), `${script}\nreturn { items, total, page, unreadOnly, tab,
     tabs, loading, error, detail, projectTarget, load, open, changeFilter, changePage, changeTab }`)(
     ...Object.values(context))
+  return { ...state, emitted, unmount: () => cleanup() }
 }
 test('项目系统挂载个人通知页面并提供侧栏和铃铛入口', () => {
   assert.match(view, /key: 'notifications', label: '个人通知中心'/)
@@ -110,4 +115,45 @@ test('项目通知的跨系统目标也通过统一校验并直接进入对应�
   await state.open({ delivery_id: 'cross' })
   assert.deepEqual(visits, ['/contract_management/approvals?approval_id=approval'])
   assert.equal(state.projectTarget.value, visits[0])
+})
+
+
+test('审批通知在个人中心直接进入对应申请，已读失败仍跳转并独立提醒', async () => {
+  const item = { delivery_id: 'approval-1', source_application: 'project_management',
+    reference_type: 'PROJECT_APPROVAL', reference_id: 'req-1', category: 'ROLLBACK_REQUESTED',
+    target_url: '/project_management/approvals?request_id=req-1', read_at: null }
+  for (const failRead of [false, true]) {
+    const state = mountInbox({ listInbox: async () => ({ items: [], total: 0 }),
+      getNotification: async () => item,
+      markNotificationRead: async () => { if (failRead) throw new Error('read unavailable') },
+    })
+    await state.open(item)
+    assert.ok(state.emitted.some(entry => entry.event === 'open-approval'
+      && entry.value === '/project_management/approvals?request_id=req-1'))
+    assert.equal(state.emitted.some(entry => entry.event === 'read-error'), failRead)
+    assert.equal(state.detail.value, null)
+  }
+})
+
+test('个人中心审批入口以详情为准，读取失败或卸载后不沿用摘要申请', async () => {
+  const item = { delivery_id: 'approval-1', source_application: 'project_management',
+    reference_type: 'PROJECT_APPROVAL', reference_id: 'old', category: 'ROLLBACK_REQUESTED',
+    target_url: '/project_management/approvals?request_id=old' }
+  const current = { ...item, reference_id: 'current', read_at: 'already-read',
+    target_url: '/project_management/approvals?request_id=current' }
+  const state = mountInbox({ getNotification: async () => current })
+  await state.open(item)
+  assert.ok(state.emitted.some(entry => entry.event === 'open-approval'
+    && entry.value === '/project_management/approvals?request_id=current'))
+  const failed = mountInbox({ getNotification: async () => { throw new Error('无权读取通知') } })
+  await failed.open(item)
+  assert.deepEqual(failed.emitted, [])
+  assert.match(failed.error.value, /无权读取通知/)
+  let finish
+  const late = mountInbox({ getNotification: () => new Promise(resolve => { finish = resolve }) })
+  const pending = late.open(item)
+  late.unmount()
+  finish(current)
+  await pending
+  assert.deepEqual(late.emitted, [])
 })

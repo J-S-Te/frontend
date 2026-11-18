@@ -62,6 +62,7 @@ import {
   getContractDashboard,
   getContract,
   getContractSession,
+  getMyCustomer,
   ensureContractCRMDirectorySession,
   openContractCRMLogin,
   waitForContractCRMDirectorySession,
@@ -69,6 +70,7 @@ import {
   getOpportunityIntake,
   listApprovals,
   listMyCustomers,
+  listMyCustomerContacts,
   listMyOpportunities,
   listSigningRecords,
   listApprovalRules,
@@ -138,6 +140,7 @@ import ContractAuditOutboxPanel from '@/modules/contract_management/components/C
 import { useSigningLedger } from '@/modules/contract_management/composables/useSigningLedger'
 import { useApprovalDetail } from '@/modules/contract_management/composables/useApprovalDetail'
 import { useContractDraftEditor } from '@/modules/contract_management/composables/useContractDraftEditor'
+import { useContractCRMPrefill } from '@/modules/contract_management/composables/useContractCRMPrefill'
 import { canEditContractDraft, saveContractDraft } from '@/modules/contract_management/utils/contractDraft'
 import { normalizePaymentTerms, paymentAmountMinor } from '@/modules/contract_management/utils/paymentTerms'
 import { contractSystemLevels, externalContractTypes, isContractDOCXFile, validateContractSourceFile, validateContractForm, localContractReferencePayload } from '@/modules/contract_management/utils/contractPayload'
@@ -533,6 +536,11 @@ const detectionCategoryLoading = ref(false)
 const detectionCategoryError = ref('')
 let detectionCategoryRequestID = 0
 const isExternalContractMode = computed(() => contractCreationMode.value === 'external')
+const { autofillCustomer, autofillOpportunity, clearCRMCustomerPrefill,
+  clearCRMOpportunityPrefill, crmPrefillLoading, crmPrefillError, crmPrefillNotice,
+} = useContractCRMPrefill({ newContract, selectedContractTemplate, createDialogOpen,
+  contractCreating, editingContract, listContacts: listMyCustomerContacts,
+  onError: recordCRMDirectoryError, formatError: formatUserError })
 const canSaveNewContract = computed(() => {
   if (contractCreating.value) return false
   if (draftEditConflict.value) return false
@@ -2284,18 +2292,29 @@ async function loadMoreCustomerOptions() {
   await loadCustomerOptions({ reset: false })
 }
 
-function selectCustomer(item) {
+// 用途：关联所选客户并补齐联系人，切换客户时清除旧商机自动值。
+// 参数：item为权限范围内选择的CRM客户。
+// 返回值：异步完成联系人读取；手填与提交中表单保持。
+async function selectCustomer(item) {
+  if (contractCreating.value || !createDialogOpen.value) return
   const customerID = String(item.id || item.customer_id || '')
   if (newContract.value.opportunity_id && String(newContract.value.customer_id) !== customerID) {
+    clearCRMOpportunityPrefill()
     newContract.value.opportunity_id = ''
     newContract.value.opportunity_name = ''
   }
   newContract.value.customer_id = customerID
   newContract.value.customer_name = item.name || item.customer_name || ''
   customerPickerOpen.value = false
+  await autofillCustomer(customerID)
 }
 
+// 用途：移除客户及商机关联，只清理由关联自动带入且未被手改的内容。
+// 参数：无。
+// 返回值：无。
 function clearCustomer() {
+  if (contractCreating.value) return
+  clearCRMCustomerPrefill()
   newContract.value.customer_id = ''
   newContract.value.customer_name = ''
   newContract.value.opportunity_id = ''
@@ -2387,7 +2406,9 @@ function ensureOpportunityOptions() {
   void loadOpportunityOptions()
 }
 
-// 表单展开时，CRM 会话已就绪则自动加载可关联商机，用户可直接在下拉框里选择。
+// 用途：把下拉选择转换为真实商机记录并补齐合同空白字段。
+// 参数：event为商机下拉框变更事件。
+// 返回值：异步完成商机关联及联系人读取。
 async function selectOpportunityById(event) {
   const id = String(event?.target?.value || '')
   if (!id) {
@@ -2395,7 +2416,7 @@ async function selectOpportunityById(event) {
     return
   }
   const item = opportunityOptions.value.find((option) => String(option.id || option.opportunity_id || '') === id)
-  if (item) selectOpportunity(item)
+  if (item) await selectOpportunity(item)
 }
 
 watch([selectedContractTemplate, isExternalContractMode], async ([template, external]) => {
@@ -2405,15 +2426,25 @@ watch([selectedContractTemplate, isExternalContractMode], async ([template, exte
   if (crmSessionState.value === 'ready') await loadOpportunityOptions()
 })
 
-function selectOpportunity(item) {
+// 用途：关联所选商机及客户，并带入可确定的合同空白信息。
+// 参数：item为权限范围内选择的CRM商机。
+// 返回值：异步完成关联客户的联系人读取。
+async function selectOpportunity(item) {
+  if (contractCreating.value || !createDialogOpen.value) return
   newContract.value.opportunity_id = String(item.id || item.opportunity_id || '')
   newContract.value.opportunity_name = item.name || item.title || item.opportunity_name || '未命名商机'
   newContract.value.customer_id = String(item.customer_id || item.customer?.id || '')
   newContract.value.customer_name = item.customer_name || item.customer?.name || ''
-  if (!newContract.value.amount && item.expected_amount) newContract.value.amount = item.expected_amount
+  autofillOpportunity(item)
+  await autofillCustomer(newContract.value.customer_id)
 }
 
+// 用途：取消商机关联，并清除仍保持自动值的商机字段。
+// 参数：无。
+// 返回值：无。
 function clearOpportunity() {
+  if (contractCreating.value) return
+  clearCRMOpportunityPrefill()
   newContract.value.opportunity_id = ''
   newContract.value.opportunity_name = ''
 }
@@ -2559,10 +2590,7 @@ async function refreshSelectedCRMAccess(form = newContract.value) {
   }
   await checkCRMDirectorySession()
   const customerID = String(form.customer_id || '')
-  const customers = await listMyCustomers({ keyword: form.customer_name, page: 1, page_size: 100 })
-  if (!customers.items.some((item) => String(item.id || item.customer_id || '') === customerID)) {
-    throw new Error('所选 CRM 客户已失效或不在当前权限范围内，请重新选择。')
-  }
+  await getMyCustomer(customerID)
   if (!form.opportunity_id) return
   const opportunityID = String(form.opportunity_id)
   const opportunities = await listMyOpportunities({ keyword: form.opportunity_name, page: 1, page_size: 100 })
@@ -3438,6 +3466,9 @@ onBeforeUnmount(() => {
           >
             <template #status>
               <p class="contract-form-wide contract-form-required-hint">带 <strong>*</strong> 的为必填项；输入框按字段类型限制长度、格式和数值范围。</p>
+              <p v-if="crmPrefillLoading" class="contract-info-banner contract-form-wide" role="status">正在读取客户联系人；已填写的内容会保留。</p>
+              <p v-if="crmPrefillNotice" class="contract-info-banner contract-form-wide" role="status">{{ crmPrefillNotice }}</p>
+              <p v-if="crmPrefillError" class="contract-session-error contract-form-wide" role="alert">{{ crmPrefillError }} <button type="button" :disabled="contractCreating || crmPrefillLoading" @click="autofillCustomer(newContract.customer_id)">重试带入联系人</button></p>
               <p v-if="editingContract && isExternalContractMode" class="contract-info-banner contract-form-wide">编辑结构化信息时保留原外部 DOCX，不替换合同文件；正文金额等条款如需改变，应创建与新文件一致的合同。</p>
               <p v-if="draftEditError" ref="draftErrorElement" tabindex="-1" class="contract-session-error contract-form-wide" role="alert">{{ draftEditError }} <button v-if="draftEditConflict" type="button" :disabled="contractCreating || draftEditLoading" @click="editContractDraft(editingContract)">重新载入草稿（放弃未保存修改）</button></p>
               <div v-if="crmConnectionRequired && !crmConnecting && !customerPickerOpen" class="contract-session-error contract-form-wide" role="status"><p>{{ crmConnectionMessage }}</p><button class="contract-button secondary" type="button" @click="connectCRM">连接 CRM</button></div>
@@ -3454,7 +3485,7 @@ onBeforeUnmount(() => {
 
 <div v-if="templateUploadDialogOpen" class="contract-modal-mask" @click.self="templateUploadDialogOpen = false"><form class="contract-detail-modal contract-template-upload-modal" @submit.prevent="submitTemplateUpload"><header><div><span class="contract-badge info">超级管理员</span><h2>{{ templateReplacementID ? '替换模板文件' : '上传合同模板' }}</h2><p><span v-if="templateReplacementID">保留模板标识和同名字段配置，已生成合同正文不变。请核对替换后的新字段。</span>上传不超过 10MB 的 DOCX，模板中使用 <code v-pre>{{field_name:字段名称}}</code> 标记填写项。</p></div><button type="button" aria-label="关闭" @click="templateUploadDialogOpen = false"><ConsoleIcon name="close" /></button></header><section><div class="contract-form-grid"><label><span>模板名称</span><input v-model="templateUploadForm.name" :readonly="Boolean(templateReplacementID)" required maxlength="160" placeholder="例如：标准服务合同" /></label><label><span>DOCX 文件</span><input required type="file" accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document" @change="selectTemplateFile" /></label></div><p v-if="templateUploadError" class="contract-template-preview-error" role="alert">{{ templateUploadError }}</p></section><footer><button class="contract-button secondary" type="button" :disabled="templateUploading" @click="templateUploadDialogOpen = false">取消</button><button class="contract-button primary" type="submit" :disabled="templateUploading">{{ templateUploading ? '正在上传…' : (templateReplacementID ? '替换模板' : '上传模板') }}</button></footer></form></div>
 
-    <div v-if="templateEditDialogOpen" class="contract-modal-mask" @click.self="templateEditDialogOpen = false"><form class="contract-detail-modal contract-template-edit-modal" @submit.prevent="saveTemplate"><header><div><span class="contract-badge info">超级管理员</span><h2>编辑合同模板</h2><p>可将需要统一控制的合同信息设为管理员预设；合同编号由系统级编号规则生成，格式字段仅作只读展示。</p></div><button type="button" aria-label="关闭" @click="templateEditDialogOpen = false"><ConsoleIcon name="close" /></button></header><section><div class="contract-template-base-fields"><label class="contract-template-name-field"><span>模板名称</span><input v-model="templateEditForm.name" required maxlength="160" /></label><label class="contract-template-name-field"><span>合同编号格式（只读）</span><input :value="templateEditForm.number_format" readonly maxlength="160" /><small>实际合同编号由系统级编号规则生成；此格式只保留用于展示历史/旧规则，修改后不会影响新合同编号。</small></label></div><div class="contract-template-editor-list"><div v-for="field in templateEditForm.fields" :key="field.name" class="contract-template-editor-row"><label><span>显示名称</span><input v-model="field.label" required maxlength="160" /></label><label><span>{{ field.locked ? '管理员预设值' : '默认值（可选）' }}</span><input v-model="field.default" :required="field.locked" maxlength="1000" :placeholder="field.locked ? '请输入固定值' : '新建合同时仍可修改'" /></label><label class="contract-check-label"><input v-model="field.locked" type="checkbox" /><span>由管理员预设</span></label></div><p v-if="!templateEditForm.fields.length" class="contract-session-error">该 DOCX 中没有可配置字段。</p></div></section><footer><button class="contract-button secondary" type="button" :disabled="templateSaving" @click="templateEditDialogOpen = false">取消</button><button class="contract-button primary" type="submit" :disabled="templateSaving">{{ templateSaving ? '正在保存…' : '保存模板' }}</button></footer></form></div>
+    <div v-if="templateEditDialogOpen" class="contract-modal-mask" @click.self="templateEditDialogOpen = false"><form class="contract-detail-modal contract-template-edit-modal" @submit.prevent="saveTemplate"><header><div><span class="contract-badge info">超级管理员</span><h2>编辑合同模板</h2><p>可将需要统一控制的合同信息设为管理员预设；实际合同编号由系统级编号规则生成。</p></div><button type="button" aria-label="关闭" @click="templateEditDialogOpen = false"><ConsoleIcon name="close" /></button></header><section><div class="contract-template-base-fields"><label class="contract-template-name-field"><span>模板名称</span><input v-model="templateEditForm.name" required maxlength="160" /></label></div><div class="contract-template-editor-list"><div v-for="field in templateEditForm.fields" :key="field.name" class="contract-template-editor-row"><label><span>显示名称</span><input v-model="field.label" required maxlength="160" /></label><label><span>{{ field.locked ? '管理员预设值' : '默认值（可选）' }}</span><input v-model="field.default" :required="field.locked" maxlength="1000" :placeholder="field.locked ? '请输入固定值' : '新建合同时仍可修改'" /></label><label class="contract-check-label"><input v-model="field.locked" type="checkbox" /><span>由管理员预设</span></label></div><p v-if="!templateEditForm.fields.length" class="contract-session-error">该 DOCX 中没有可配置字段。</p></div></section><footer><button class="contract-button secondary" type="button" :disabled="templateSaving" @click="templateEditDialogOpen = false">取消</button><button class="contract-button primary" type="submit" :disabled="templateSaving">{{ templateSaving ? '正在保存…' : '保存模板' }}</button></footer></form></div>
 
     <ConfirmDialog
       :open="Boolean(confirmDialog)"

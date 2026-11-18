@@ -140,6 +140,44 @@ test('队列搜索支持项目系统名称并保留编号场所检索及稳定�
   assert.equal(events[1][1].id, 'SI-ONE')
 })
 
+test('队列状态使用真实色调并带出报告阶段，搜索可定位报告编制项', async () => {
+  const reporting = { ...items[0], status: '现场实施完成', report_status: 'COMPILING' }
+  const exception = { ...items[1], status: '异常处理中', report_status: 'NONE' }
+  const html = await renderToString(Vue.createSSRApp(pickerComponent(), {
+    projects: [project], items: [reporting, exception], selectedIds: [],
+  }))
+  assert.match(html, /class="pm-badge processing"[^>]*>报告编制中<\/span>/)
+  assert.match(html, /class="pm-badge danger"[^>]*>异常处理中<\/span>/)
+  const props = Vue.reactive({ projects: [project], items: [reporting, exception],
+    selectedIds: [], multiple: false })
+  const state = pickerComponent(false).setup(props, { expose: () => {}, emit: () => {} })
+  state.keyword.value = '报告编制中'
+  assert.deepEqual(state.filteredItems.value.map(item => item.id), ['SI-ONE'])
+  props.items[0] = { ...reporting, report_status: 'ARCHIVED' }
+  assert.equal(state.filteredItems.value.length, 0)
+  state.keyword.value = '报告已归档'
+  assert.deepEqual(state.filteredItems.value.map(item => item.id), ['SI-ONE'])
+})
+
+test('操作台摘要与队列同步报告归档，回退后不展示历史报告完成', async () => {
+  for (const [status, reportStatus, expected, absent] of [
+    ['现场实施完成', 'ARCHIVED', '报告已归档', '报告编制中'],
+    ['现场实施完成', 'COMPILING', '报告编制中', '报告已归档'],
+    ['实施中', 'ARCHIVED', '实施中', '报告已归档'],
+    ['现场实施完成', 'FUTURE_PHASE', '未知', '未开始'],
+    ['现场实施完成', undefined, '未提供', '未开始'],
+  ]) {
+    const selected = { ...items[0], status, report_status: reportStatus }
+    const html = await renderFragment(findElement('pm-operation-summary').loc.source, {
+      activeSection: 'reports',
+      selectedServiceItem: selected, selectedServiceProject: project,
+      selectedServiceOwner: '合成人员', selectedServiceDue: '2026-11-19',
+    })
+    assert.ok(html.includes(expected), `${status}/${reportStatus}: ${html}`)
+    assert.ok(!html.includes(absent), `${status}/${reportStatus}: ${html}`)
+  }
+})
+
 test('缺少项目系统名称时诚实显示缺失说明，编号仍可追溯', async () => {
   const html = await renderToString(Vue.createSSRApp(pickerComponent(), {
     projects: [{ id: project.id, name: '  ' }],

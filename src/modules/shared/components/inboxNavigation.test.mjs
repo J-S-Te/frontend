@@ -5,6 +5,7 @@ import { parse, compileScript } from '@vue/compiler-sfc'
 import { ref } from 'vue'
 import { openNotificationTarget } from '../utils/notificationNavigation.js'
 import { formatUserError } from '../utils/userError.js'
+import { projectApprovalTarget } from '../../project_management/approvalTasks.js'
 
 const entries = [
   ['共享收件箱', './PlatformNotificationInbox.vue', 'open'],
@@ -21,12 +22,14 @@ function harness(entry, options = {}) {
   const [, file, name] = entry
   const { descriptor } = parse(readFileSync(new URL(file, import.meta.url), 'utf8'))
   const script = compileScript(descriptor, { id: file })
-  const node = script.scriptSetupAst.find((value) =>
-    value.type === 'FunctionDeclaration' && value.id.name === name)
+  const functions = script.scriptSetupAst.filter((value) =>
+    value.type === 'FunctionDeclaration' && [name, 'openApprovalNotification'].includes(value.id.name))
   const visits = [], reads = [], warnings = []
   const result = { delivery_id: 'delivery', target_url: '/reimbursement/approvals?claim_id=claim',
     title: '待审批', read_at: null, ...options.result }
   const state = {
+    disposed: false, projectApprovalTarget,
+    window: { location: { origin: 'http://localhost:8081' } },
     busy: ref(false), opening: ref(false), working: ref(false), actionID: ref(''),
     notificationOpening: ref(false), notificationMenuOpen: ref(true),
     error: ref(''), topbarNotificationsError: ref(''), detail: ref(null),
@@ -44,8 +47,10 @@ function harness(entry, options = {}) {
     normalize: (error) => error.message, emit: (...args) => warnings.push(args),
     showToast: (message) => warnings.push(message), activeSettingsTab: ref('iam'),
   }
+  const declarations = functions.map(node =>
+    descriptor.scriptSetup.content.slice(node.start, node.end)).join('\n')
   const action = new Function(...Object.keys(state),
-    `${descriptor.scriptSetup.content.slice(node.start, node.end)}\nreturn ${name};`)(
+    `${declarations}\nreturn ${name};`)(
     ...Object.values(state))
   return { action, visits, reads, warnings, result, state }
 }

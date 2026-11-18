@@ -122,6 +122,18 @@ test('字段双向绑定仍写回父层持有的同一份草稿对象', async ()
   assert.match(html, /value="甲方"/)
 })
 
+test('关联CRM后单位名称只读采用权威来源，未关联的模板合同仍可手填', async () => {
+  const initial = await fieldsHarness()
+  const editable = initial.html.match(/<label><span>单位名称<\/span>(<input[^>]*>)/)?.[1]
+  assert.ok(editable)
+  assert.doesNotMatch(editable, / readonly/)
+  initial.form.customer_id = '7'
+  const linked = await fieldsHarness({ newContract: initial.form })
+  const readonly = linked.html.match(/<label><span>单位名称<\/span>(<input[^>]*>)/)?.[1]
+  assert.match(readonly, / readonly/)
+  assert.match(readonly, /aria-readonly="true"/)
+})
+
 test('外部合同模式按既有能力显示文件类型限制与检测类别错误重试入口', async () => {
   const { html } = await fieldsHarness({
     contractCreationMode: 'external',

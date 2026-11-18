@@ -8,6 +8,19 @@ const routerSource = await readFile(new URL('../../../router/index.js', import.m
 const viteSource = await readFile(new URL('../../../../vite.config.js', import.meta.url), 'utf8')
 const nginxSource = await readFile(new URL('../../../../nginx/default.conf', import.meta.url), 'utf8')
 
+test('审批待办查询保留独立分页、申请精确引用并编码参数，接口失败向上传递', async () => {
+  const body = source.match(/export function listApprovalTasks\(params = \{\}\) \{[\s\S]*?\n\}/)?.[0]
+  assert.ok(body, '项目客户端应提供真实审批待办 API')
+  const urls = []
+  const api = new Function('request', `${body.replace('export ', '')}; return listApprovalTasks`)(
+    async url => { urls.push(url); return { items: [], total: 0 } })
+  await api({ page: 2, page_size: 20, view: 'submitted', request_id: 'request one', ignored: '' })
+  assert.equal(urls[0], '/approval-tasks?page=2&page_size=20&view=submitted&request_id=request+one')
+  const failed = new Function('request', `${body.replace('export ', '')}; return listApprovalTasks`)(
+    async () => { throw new Error('forbidden') })
+  await assert.rejects(failed(), /forbidden/)
+})
+
 test('项目管理客户端使用独立同源 API 和 Cookie 会话', () => {
   assert.match(source, /VITE_PROJECT_API_BASE_URL/)
   assert.match(source, /credentials: 'include'/)
