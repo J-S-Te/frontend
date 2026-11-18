@@ -57,6 +57,7 @@ import {
   uploadOpportunityAttachmentContent, completeOpportunityAttachmentUpload, downloadOpportunityAttachment,
 } from '../api/opportunity.js'
 import { createIdempotencyKey, getCRMSession, getCRMRuntimeCapabilities } from '../api/client.js'
+import { useAuthorizationRefresh } from '@/modules/shared/composables/useAuthorizationRefresh.js'
 import { createCreateMutationRetryState } from '../createMutationRetry.js'
 import { createContractTransferRetryState } from '../contractTransferRetry.js'
 import { createAttachmentUploadRetryState } from '../attachmentUploadRetry.js'
@@ -571,6 +572,10 @@ async function onReportOrganizationChange() {
   await loadReportFilterOptions()
 }
 const crmSession = ref(null)
+// 侧栏角色跟随服务端当前授权：页面重新可见或定时重读，避免历史角色残留。
+if (typeof useAuthorizationRefresh === 'function') useAuthorizationRefresh(async () => {
+  crmSession.value = await getCRMSession({ force: true })
+})
 const commercialRecordCommands = createCommercialRecordCommandStore()
 const commercialRecordCommandScope = computed(() => JSON.stringify([
   crmSession.value?.tenant_id || '', crmSession.value?.user_id || '',
