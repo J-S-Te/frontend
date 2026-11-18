@@ -158,5 +158,5 @@ onMounted(load)
 .shared-inbox-pagination{display:flex;align-items:center;gap:8px;color:#64748b}
 .shared-inbox-detail{padding:10px;border:1px solid #e2e8f0;border-radius:9px}
 .shared-inbox-detail header{display:flex;align-items:center;justify-content:space-between;gap:8px}
-.shared-inbox-detail h3{margin:0;font-size:14px}.shared-inbox-detail p{white-space:pre-wrap;overflow-wrap:anywhere;color:#475569}.shared-inbox-target{display:inline-flex;margin-top:6px;padding:5px 9px;border:1px solid #2563eb;border-radius:8px;color:#2563eb;text-decoration:none}
+.shared-inbox-detail h3{margin:0;font-size:14px}.shared-inbox-detail p{white-space:pre-wrap;overflow-wrap:anywhere;color:#475569}.shared-inbox-target{display:inline-flex;margin-top:6px;padding:5px 9px;border:1px solid var(--primary);border-radius:8px;color:var(--primary);text-decoration:none}
 </style>
