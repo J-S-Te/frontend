@@ -1136,7 +1136,7 @@ test('每个写操作入口都按服务端同款权限码门控', () => {
   assert.match(source, /selectedServiceItem && selectedServiceItem\.status === '实施中' && canExecuteField" class="pm-field-workflow"/)
   assert.match(source, /class="pm-form pm-operation-form"/)
   // BIZ-PROJECT-06：完成按钮除"待同步"外还必须受服务端缺项判定约束（判定未知即禁用）。
-  assert.match(source, /selectedServiceItem\.status === '实施中' && canCompleteField" class="pm-button" :disabled="saving \|\| pendingFieldSyncCount > 0 \|\| fieldEvidenceBlocksCompletion" @click="openResourceUsage\('usage', true\)"/)
+  assert.match(source, /selectedServiceItem\.status === '实施中' && canCompleteField" class="pm-button primary pm-field-complete" :disabled="saving \|\| pendingFieldSyncCount > 0 \|\| fieldEvidenceBlocksCompletion" @click="openResourceUsage\('usage', true\)"/)
   assert.match(source, /:disabled="saving \|\| !resourceUsageDialogItem \|\| !canCompleteField \|\| fieldEvidenceBlocksCompletion \|\| pendingFieldSyncCount > 0"/)
   assert.match(source, />现场测评结束<\/button>/)
   assert.match(source, /v-if="canReportDeviation" class="pm-button primary" :disabled="saving" @click="runOperation\('exception-report'\)"/)
