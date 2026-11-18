@@ -16,7 +16,7 @@
   padding: 14px 16px;
   margin-top: auto;
   border-top: 1px solid rgba(255, 255, 255, 0.08);
-  background: var(--sidebar, #0f172a);
+  background: var(--sidebar, #0b1526);
 }
 .settlement-sidebar-avatar {
   display: grid;
@@ -59,7 +59,7 @@
 }
 .settlement-sidebar-logout:hover {
   color: #fff;
-  background: var(--sidebar-hover, #1e293b);
+  background: var(--sidebar-hover, #111e33);
 }
 .settlement-sidebar-logout svg {
   width: 21px;
@@ -400,7 +400,7 @@
   height: 10px;
   overflow: hidden;
   border-radius: 99px;
-  background: var(--bg, #f1f5f9);
+  background: var(--bg, #f5f7fa);
 }
 .settlement-aging-row > i b {
   display: block;
@@ -659,13 +659,13 @@
 }
 .settlement-error {
   color: var(--danger-text, #b91c1c);
-  border-color: var(--danger-border, #fecaca);
-  background: var(--danger-soft, #fef2f2);
+  border-color: var(--danger-border, #f3b4b4);
+  background: var(--danger-soft, #fee2e2);
 }
 .settlement-message {
   color: var(--success-text, #15803d);
-  border-color: var(--success-border, #c7f0d6);
-  background: var(--success-soft, #ecfdf5);
+  border-color: var(--success-border, #bbe7cc);
+  background: var(--success-soft, #dcfce7);
 }
 @media (max-width: 980px) {
   /* 侧栏宽度/主区偏移已由共享 console.css 统一：≤820px 侧栏为完整 272px 抽屉。
@@ -912,11 +912,11 @@
   font-size: var(--fs-xs);
   font-weight: 700;
   border-radius: 50%;
-  background: var(--bg, #f1f5f9);
+  background: var(--bg, #f5f7fa);
 }
 .settlement-rank.top {
   color: var(--danger-text, #b91c1c);
-  background: var(--danger-soft, #fef2f2);
+  background: var(--danger-soft, #fee2e2);
 }
 .settlement-money {
   font-variant-numeric: tabular-nums;
@@ -1314,7 +1314,7 @@
   font-size: 12px;
   font-weight: 600;
   border-radius: 999px;
-  background: var(--bg, #f1f5f9);
+  background: var(--bg, #f5f7fa);
 }
 .settlement-task-list {
   display: grid;

@@ -108,7 +108,7 @@ defineProps({
   padding: 8px 10px;
   color: var(--muted, #64748b) !important;
   font-size: 12px !important;
-  background: var(--bg, #f1f5f9);
+  background: var(--bg, #f5f7fa);
   border-radius: 8px;
 }
 .settlement-timeline-empty {

@@ -1071,7 +1071,7 @@ function formatFileSize(bytes) {
   padding: 20px 28px 18px;
   color: var(--ink-4, #94a3b8);
   font-size: 12.5px;
-  border-bottom: 1px solid var(--line-2, #eef0f4);
+  border-bottom: 1px solid var(--line-2, #eef2f7);
   background: #fff;
 }
 .iam-batch-import-steps li {
@@ -1191,7 +1191,7 @@ function formatFileSize(bytes) {
 }
 
 .iam-batch-import-error {
-  background: var(--danger-soft, #fef2f2);
+  background: var(--danger-soft, #fee2e2);
   border: 1px solid #fecaca;
   color: #b91c1c;
   padding: 12px 14px;
@@ -1221,7 +1221,7 @@ function formatFileSize(bytes) {
   padding: 6px 9px;
   border-radius: 8px;
   background: var(--surface-raised, #fff);
-  border: 1px solid var(--danger-border, #fecaca);
+  border: 1px solid var(--danger-border, #f3b4b4);
   color: var(--ink-2, #374151);
   font-size: 12px;
 }
@@ -1407,7 +1407,7 @@ function formatFileSize(bytes) {
 }
 .iam-batch-import-table tbody td {
   padding: 10px 12px;
-  border-bottom: 1px solid var(--line-2, #e5e7eb);
+  border-bottom: 1px solid var(--line-2, #eef2f7);
   color: var(--ink-2, #374151);
   vertical-align: middle;
   overflow-wrap: anywhere;
@@ -1448,7 +1448,7 @@ function formatFileSize(bytes) {
 }
 .iam-batch-import-result-icon svg { width: 28px; height: 28px; }
 .iam-batch-import-result-icon.success { color: var(--ok-1, #047857); background: var(--ok-soft, #ecfdf5); }
-.iam-batch-import-result-icon.danger { color: var(--danger-1, #b91c1c); background: var(--danger-soft, #fef2f2); }
+.iam-batch-import-result-icon.danger { color: var(--danger-1, #b91c1c); background: var(--danger-soft, #fee2e2); }
 .iam-batch-import-result h4 { margin: 2px 0 6px; color: var(--ink-1, #0a0f1c); font-size: 16px; }
 .iam-batch-credential-actions { display: flex; gap: 10px; flex-wrap: wrap; margin: 12px 0; }
 .iam-batch-import-result .iam-batch-import-table-wrap { width: 100%; }

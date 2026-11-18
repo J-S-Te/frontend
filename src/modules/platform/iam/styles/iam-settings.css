@@ -1620,7 +1620,7 @@
   border-radius: var(--r-2);
   background: var(--warn-soft);
 }
-.iam-account-expiry-field input { border-color: var(--warning-border, #fcd34d); background: var(--surface); }
+.iam-account-expiry-field input { border-color: var(--warning-border, #fbd9a8); background: var(--surface); }
 
 @media (max-width: 760px) {
   .iam-account-editor-intro { grid-template-columns: 40px minmax(0, 1fr); }
@@ -2571,7 +2571,7 @@
 .iam-authorization-layer-duplicate {
   padding: 9px 12px;
   color: var(--warn-1);
-  border: 1px solid var(--warning-border, #fcd34d);
+  border: 1px solid var(--warning-border, #fbd9a8);
   border-radius: var(--r-2);
   background: var(--warn-soft);
 }

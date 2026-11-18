@@ -2531,13 +2531,13 @@ onBeforeUnmount(() => { disposed = true; generation++; documentGeneration++; exc
   overflow-wrap: anywhere;
   border-inline-start: 3px solid var(--danger, #dc2626);
   border-radius: 0 6px 6px 0;
-  background: var(--danger-soft, #fef2f2);
+  background: var(--danger-soft);
 }
 
 .contract-import-issue.is-retryable {
   color: var(--warning-ink, #92400e);
   border-inline-start-color: var(--warning, #d97706);
-  background: var(--warning-soft, #fef3c7);
+  background: var(--warning-soft);
 }
 
 /* ── CRM 开立计划 ───────────────────────────────────────────────────── */
@@ -2590,9 +2590,9 @@ onBeforeUnmount(() => { disposed = true; generation++; documentGeneration++; exc
   color: var(--danger-text, #b91c1c);
   font-size: 12px;
   line-height: 1.7;
-  border: 1px solid var(--danger-border, #fecaca);
+  border: 1px solid var(--danger-border);
   border-radius: 10px;
-  background: var(--danger-soft, #fef2f2);
+  background: var(--danger-soft);
 }
 
 .contract-import-alert .contract-import-hint { display: inline; color: var(--text-secondary, #475569); }
@@ -2600,8 +2600,8 @@ onBeforeUnmount(() => { disposed = true; generation++; documentGeneration++; exc
 /* 可恢复的待处理状态（例如 CRM 会话缺失）用警示色，危险色只留给真正的失败。 */
 .contract-import-alert--warn {
   color: var(--warning-ink, #92400e);
-  border-color: var(--warning-border, #fcd34d);
-  background: var(--warning-soft, #fef3c7);
+  border-color: var(--warning-border);
+  background: var(--warning-soft);
 }
 .contract-import-error-text { color: var(--danger-text, #b91c1c); font-size: 12px; }
 
@@ -2610,7 +2610,7 @@ onBeforeUnmount(() => { disposed = true; generation++; documentGeneration++; exc
   color: var(--warning-ink, #92400e);
   font-size: 12px;
   line-height: 1.7;
-  border: 1px solid var(--warning-border, #fcd34d);
+  border: 1px solid var(--warning-border);
   border-radius: 10px;
   background: var(--warning-soft-strong, #fffbeb);
 }
@@ -2634,9 +2634,9 @@ onBeforeUnmount(() => { disposed = true; generation++; documentGeneration++; exc
   color: var(--danger-ink, #7f1d1d);
   font-size: 12px;
   line-height: 1.6;
-  border: 1px solid var(--danger-border, #fecaca);
+  border: 1px solid var(--danger-border);
   border-radius: 10px;
-  background: var(--danger-soft, #fef2f2);
+  background: var(--danger-soft, #fee2e2);
 }
 
 .contract-import-excel-issues p { margin-block: 0 6px; color: inherit; font-size: inherit; }

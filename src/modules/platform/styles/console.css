@@ -1035,7 +1035,7 @@
   font-size: 13px;
   line-height: 1.55;
   border-radius: 8px;
-  background: var(--sidebar, #0f172a);
+  background: var(--sidebar, #0b1526);
   box-shadow: 0 14px 30px rgba(15, 23, 42, .24);
 }
 
@@ -1498,7 +1498,7 @@
 .type-登录失败,
 .type-账号锁定 {
   color: var(--danger-text, #b91c1c);
-  background: var(--danger-soft, #fef2f2);
+  background: var(--danger-soft, #fee2e2);
 }
 
 .type-退出登录 {
@@ -1527,7 +1527,7 @@
 
 .audit-result-success {
   color: var(--success-text, #15803d);
-  background: var(--success-soft, #ecfdf5);
+  background: var(--success-soft, #dcfce7);
 }
 
 .audit-result-success::before {
@@ -1536,7 +1536,7 @@
 
 .audit-result-denied {
   color: var(--warning-text, #b45309);
-  background: var(--warning-soft, #fef3c7);
+  background: var(--warning-soft, #fef3c6);
 }
 
 .audit-result-denied::before {
@@ -1545,7 +1545,7 @@
 
 .audit-result-error {
   color: var(--danger-text, #b91c1c);
-  background: var(--danger-soft, #fef2f2);
+  background: var(--danger-soft, #fee2e2);
 }
 
 .audit-result-error::before {
@@ -1618,7 +1618,7 @@
 
 .console-text-button.danger:hover {
   color: var(--danger-text, #b91c1c);
-  background: var(--danger-soft, #fef2f2);
+  background: var(--danger-soft, #fee2e2);
 }
 
 .console-button:disabled,
@@ -2243,7 +2243,7 @@
 
 .console-wizard-empty.error {
   color: var(--danger-text, #b91c1c);
-  border-color: var(--danger-border, #fecaca);
+  border-color: var(--danger-border, #f3b4b4);
   background: var(--danger-soft-strong, #fef7f7);
 }
 
@@ -2358,13 +2358,13 @@
 .console-status-dot--ok {
   color: var(--green);
   background: var(--green-bg);
-  border: 1px solid var(--success-border, #c7f0d6);
+  border: 1px solid var(--success-border, #bbe7cc);
 }
 
 .console-status-dot--error {
   color: var(--danger-ink, #dc2626);
-  background: var(--danger-soft, #fef2f2);
-  border: 1px solid var(--danger-border, #fecaca);
+  background: var(--danger-soft, #fee2e2);
+  border: 1px solid var(--danger-border, #f3b4b4);
 }
 
 .console-status-dot--pending {
@@ -2394,7 +2394,7 @@
 
 .console-tag--error {
   color: var(--danger-text, #b91c1c);
-  background: var(--danger-soft, #fef2f2);
+  background: var(--danger-soft, #fee2e2);
 }
 
 .console-tag--pending {
@@ -2407,11 +2407,11 @@
 }
 
 .console-prereq-card[data-ready='true'] {
-  border-color: var(--success-border, #c7f0d6);
+  border-color: var(--success-border, #bbe7cc);
 }
 
 .console-prereq-card[data-ready='false'] {
-  border-color: var(--danger-border, #fecaca);
+  border-color: var(--danger-border, #f3b4b4);
 }
 
 .console-prereq-card-head {
@@ -2454,7 +2454,7 @@
 
 .console-prereq-card[data-ready='false'] .console-prereq-count {
   color: var(--danger-text, #b91c1c);
-  background: var(--danger-soft, #fef2f2);
+  background: var(--danger-soft, #fee2e2);
 }
 
 .console-prereq-card-foot {
@@ -2526,7 +2526,7 @@
   color: var(--danger-text, #b91c1c);
   font-size: 12px;
   line-height: 1.55;
-  border: 1px solid var(--danger-border, #fecaca);
+  border: 1px solid var(--danger-border, #f3b4b4);
   border-left: 3px solid var(--danger, #dc2626);
   border-radius: 8px;
   background: var(--danger-soft-strong, #fef7f7);
