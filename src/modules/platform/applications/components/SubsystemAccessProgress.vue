@@ -176,14 +176,14 @@ const alertTitle = computed(() => {
   --sap-accent: var(--sa-accent, #2563eb);
   --sap-accent-soft: var(--sa-accent-soft, rgba(37, 99, 235, 0.1));
   --sap-ok: var(--success-text, #15803d);
-  --sap-ok-soft: var(--success-soft, #ecfdf5);
-  --sap-ok-border: var(--success-border, #86c99a);
+  --sap-ok-soft: var(--success-soft, #dcfce7);
+  --sap-ok-border: var(--success-border, #bbe7cc);
   --sap-warn: var(--sa-warn, #b45309);
   --sap-warn-soft: var(--sa-warn-soft, rgba(180, 83, 9, 0.1));
-  --sap-warn-border: var(--warning-border, #fde68a);
+  --sap-warn-border: var(--warning-border, #fbd9a8);
   --sap-danger: var(--sa-danger, #b91c1c);
   --sap-danger-soft: var(--sa-danger-soft, rgba(185, 28, 28, 0.08));
-  --sap-danger-border: var(--danger-border, #fecaca);
+  --sap-danger-border: var(--danger-border, #f3b4b4);
   --sap-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
 
   display: grid;

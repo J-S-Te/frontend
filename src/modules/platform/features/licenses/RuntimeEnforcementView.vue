@@ -231,7 +231,7 @@ button:focus-visible, select:focus-visible, input:focus-visible, summary:focus-v
 .runtime-live, .runtime-subtle { color: var(--runtime-muted); font-size: 12px; }
 .runtime-live { display: inline-flex; align-items: center; gap: 6px; }
 .runtime-live i { width: 6px; height: 6px; border-radius: 50%; background: #22c55e; }
-.runtime-caveat { margin: 16px 0 0; padding: 10px 14px; border: 1px solid var(--warning-border, #fde68a); border-radius: 10px; background: #fffbeb; color: var(--warning-ink, #92400e); font-size: 12px; line-height: 1.7; }
+.runtime-caveat { margin: 16px 0 0; padding: 10px 14px; border: 1px solid var(--warning-border, #fbd9a8); border-radius: 10px; background: #fffbeb; color: var(--warning-ink, #92400e); font-size: 12px; line-height: 1.7; }
 .runtime-facts-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0; margin: 18px 0 0; padding: 0; }
 .runtime-fact { display: grid; align-content: start; gap: 8px; min-width: 0; padding: 0 24px; border-left: 1px solid var(--runtime-border); }
 .runtime-fact:first-child { padding-left: 0; border-left: 0; }

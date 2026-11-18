@@ -178,7 +178,7 @@
 .login-target-module__error {
   margin: 0;
   padding: 10px 12px;
-  border: 1px solid var(--danger-border, #fecaca);
+  border: 1px solid var(--danger-border, #f3b4b4);
   border-radius: 8px;
   background: var(--danger-soft);
   color: var(--danger-text);

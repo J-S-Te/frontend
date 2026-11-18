@@ -9,14 +9,15 @@ defineProps({
   description: { type: String, default: '' },
   icon: { type: String, default: 'info' },
   compact: { type: Boolean, default: false },
+  variant: { type: String, default: 'default' },
 })
 </script>
 
 <template>
-  <div class="ui-state" :class="{ 'ui-state--compact': compact }">
-    <ConsoleIcon :name="icon" class="ui-state__icon" />
+  <div class="ui-state" :class="{ 'ui-state--compact': compact, 'ui-state--table': variant === 'table' }">
+    <span class="ui-state__icon-wrap"><ConsoleIcon :name="icon" class="ui-state__icon" /></span>
     <b class="ui-state__title">{{ title }}</b>
     <span v-if="description" class="ui-state__description">{{ description }}</span>
-    <slot />
+    <div v-if="$slots.default" class="ui-state__actions"><slot /></div>
   </div>
 </template>

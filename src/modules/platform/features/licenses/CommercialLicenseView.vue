@@ -827,9 +827,9 @@ onBeforeUnmount(() => {
   box-shadow: var(--shadow-card);
 }
 .license-hero::before { content: ''; position: absolute; inset: 0 auto 0 0; width: 4px; background: var(--hero-tone); }
-.license-hero[data-tone="success"] { --hero-tone: var(--success, #16a34a); --hero-soft: var(--success-soft, #ecfdf5); --hero-ink: var(--success-text, #15803d); }
+.license-hero[data-tone="success"] { --hero-tone: var(--success, #16a34a); --hero-soft: var(--success-soft, #dcfce7); --hero-ink: var(--success-text, #15803d); }
 .license-hero[data-tone="warning"] { --hero-tone: var(--warning, #d97706); --hero-soft: var(--warning-soft); --hero-ink: var(--warning-text, #b45309); }
-.license-hero[data-tone="danger"] { --hero-tone: var(--danger, #dc2626); --hero-soft: var(--danger-soft, #fef2f2); --hero-ink: var(--danger-text, #b91c1c); }
+.license-hero[data-tone="danger"] { --hero-tone: var(--danger, #dc2626); --hero-soft: var(--danger-soft, #fee2e2); --hero-ink: var(--danger-text, #b91c1c); }
 .license-hero[data-tone="info"] { --hero-tone: var(--primary, #2563eb); --hero-soft: var(--primary-soft, #eff6ff); --hero-ink: var(--primary-ink, var(--primary-dark, #1d4ed8)); }
 .license-hero[data-tone="neutral"] { --hero-tone: var(--text-faint, #94a3b8); --hero-soft: var(--surface-muted, #f8fafc); --hero-ink: var(--text-secondary, #475569); }
 .license-hero .license-eyebrow { color: var(--hero-ink); }
@@ -846,7 +846,7 @@ onBeforeUnmount(() => {
 .license-steps { display: flex; flex-wrap: wrap; gap: 12px 0; margin: 0; padding: 14px 0 0; border-top: 1px dashed var(--license-border); list-style: none; }
 .license-steps li { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 2px 8px; flex: 1 1 170px; min-width: 0; padding-right: 16px; }
 .license-steps li i { grid-row: span 2; display: grid; place-items: center; width: 22px; height: 22px; border: 1px solid var(--license-border); border-radius: 999px; background: var(--surface-card, #fff); color: var(--license-muted); font-size: 11px; font-style: normal; font-weight: 700; }
-.license-steps li.is-done i { border-color: transparent; background: var(--success-soft, #ecfdf5); color: var(--success-text, #15803d); }
+.license-steps li.is-done i { border-color: transparent; background: var(--success-soft, #dcfce7); color: var(--success-text, #15803d); }
 .license-steps li.is-current i { border-color: transparent; background: var(--primary, #2563eb); color: #fff; }
 .license-step-label { font-size: 12.5px; font-weight: 600; color: var(--license-ink); }
 .license-steps li.is-todo .license-step-label { color: var(--license-muted); font-weight: 500; }
@@ -875,17 +875,17 @@ onBeforeUnmount(() => {
 
 /* 状态徽标 */
 .license-badge { display: inline-flex; align-items: center; padding: 2px 9px; border-radius: 999px; font-size: 11.5px; font-weight: 650; white-space: nowrap; color: var(--text-secondary, #475569); background: var(--surface-muted, #f8fafc); }
-.license-badge[data-tone="success"] { color: var(--success-text, #15803d); background: var(--success-soft, #ecfdf5); }
+.license-badge[data-tone="success"] { color: var(--success-text, #15803d); background: var(--success-soft, #dcfce7); }
 .license-badge[data-tone="info"] { color: var(--primary-ink, var(--primary-dark, #1d4ed8)); background: var(--primary-soft, #eff6ff); }
 .license-badge[data-tone="warning"] { color: var(--warning-text, #b45309); background: var(--warning-soft); }
-.license-badge[data-tone="danger"] { color: var(--danger-text, #b91c1c); background: var(--danger-soft, #fef2f2); }
+.license-badge[data-tone="danger"] { color: var(--danger-text, #b91c1c); background: var(--danger-soft, #fee2e2); }
 .license-badge[data-tone="neutral"] { color: var(--text-secondary, #475569); background: var(--surface-muted, #f8fafc); }
 .license-chip { display: inline-flex; align-items: center; padding: 2px 9px; border: 1px solid var(--license-border); border-radius: 999px; color: var(--license-muted); background: var(--surface-card, #fff); font-size: 11.5px; white-space: nowrap; }
 .license-flag { display: inline-flex; align-items: center; padding: 3px 11px; border-radius: 999px; font-size: 12px; font-weight: 650; white-space: nowrap; color: var(--text-secondary, #475569); background: var(--surface-muted, #f8fafc); }
-.license-flag[data-tone="success"] { color: var(--success-text, #15803d); background: var(--success-soft, #ecfdf5); }
+.license-flag[data-tone="success"] { color: var(--success-text, #15803d); background: var(--success-soft, #dcfce7); }
 .license-flag[data-tone="info"] { color: var(--primary-ink, var(--primary-dark, #1d4ed8)); background: var(--primary-soft, #eff6ff); }
 .license-flag[data-tone="warning"] { color: var(--warning-text, #b45309); background: var(--warning-soft); }
-.license-flag[data-tone="danger"] { color: var(--danger-text, #b91c1c); background: var(--danger-soft, #fef2f2); }
+.license-flag[data-tone="danger"] { color: var(--danger-text, #b91c1c); background: var(--danger-soft, #fee2e2); }
 
 /* 六类状态说明：文字为主，颜色只是辅助 */
 .license-legend { display: flex; flex-wrap: wrap; gap: 6px 20px; margin: 0; padding: 10px 12px; border: 1px solid var(--license-border); border-radius: 10px; background: var(--surface-muted, #f8fafc); list-style: none; }
@@ -919,9 +919,9 @@ onBeforeUnmount(() => {
 .license-pending-list strong { font-size: 13px; font-weight: 650; }
 
 /* 时钟保护与恢复面板：一次性凭据的写操作，风险说明先于输入框出现 */
-.license-clock { border-color: var(--danger-border, #fecaca); }
+.license-clock { border-color: var(--danger-border, #f3b4b4); }
 .license-clock-body { display: grid; gap: 12px; padding-top: 14px; border-top: 1px dashed var(--license-border); }
-.license-clock-risks { display: grid; gap: 6px; max-width: 760px; margin: 0; padding: 10px 14px 10px 30px; border: 1px solid var(--warning-border, #fde68a); border-radius: 10px; background: var(--warning-soft); color: var(--warning-text, #b45309); font-size: 12px; line-height: 1.65; }
+.license-clock-risks { display: grid; gap: 6px; max-width: 760px; margin: 0; padding: 10px 14px 10px 30px; border: 1px solid var(--warning-border, #fbd9a8); border-radius: 10px; background: var(--warning-soft); color: var(--warning-text, #b45309); font-size: 12px; line-height: 1.65; }
 .license-clock-risks li::marker { color: var(--warning, #d97706); }
 
 
@@ -949,11 +949,11 @@ onBeforeUnmount(() => {
 .license-preview-head { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
 .license-changes { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
 .license-changes li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 10px; padding: 9px 12px; border: 1px solid var(--license-border); border-radius: 8px; background: var(--surface-muted, #f8fafc); font-size: 12.5px; }
-.license-changes li.risky { border-color: var(--danger-border, #fecaca); background: var(--danger-soft, #fef2f2); color: var(--danger-text, #b91c1c); }
+.license-changes li.risky { border-color: var(--danger-border, #f3b4b4); background: var(--danger-soft, #fee2e2); color: var(--danger-text, #b91c1c); }
 .license-changes em { color: var(--warning-text, #b45309); font-size: 11.5px; font-style: normal; font-weight: 600; }
 .license-check { display: flex; align-items: flex-start; gap: 8px; padding: 10px 12px; border-radius: 8px; color: var(--license-body); font-size: 12.5px; line-height: 1.6; cursor: pointer; }
 .license-check input { flex: 0 0 auto; width: 15px; height: 15px; margin: 2px 0 0; accent-color: var(--primary, #2563eb); }
-.license-check-risk { border: 1px solid var(--danger-border, #fecaca); background: var(--danger-soft, #fef2f2); color: var(--danger-text, #b91c1c); }
+.license-check-risk { border: 1px solid var(--danger-border, #f3b4b4); background: var(--danger-soft, #fee2e2); color: var(--danger-text, #b91c1c); }
 
 /* 授权事件：页内只留最近几条单行摘要，行本身（LicenseEventRow）自带样式。
    这里不再有 max-height / overflow / 页内分页：完整列表搬到右侧抽屉。 */
@@ -967,7 +967,7 @@ onBeforeUnmount(() => {
 /* 运行详情锚点：从“去激活”跳转过来时承接焦点。 */
 .license-runtime-anchor { scroll-margin-top: 12px; outline: none; }
 
-.license-alert { margin: 0; padding: 12px 14px; border: 1px solid var(--danger-border, #fecaca); border-radius: 10px; background: var(--danger-soft, #fef2f2); color: var(--danger-text, #b91c1c); font-size: 13px; }
+.license-alert { margin: 0; padding: 12px 14px; border: 1px solid var(--danger-border, #f3b4b4); border-radius: 10px; background: var(--danger-soft, #fee2e2); color: var(--danger-text, #b91c1c); font-size: 13px; }
 
 /* 卡片网格自己负责列数，这里只剩顶部摘要卡在中等宽度下的对齐调整。 */
 @media (max-width: 1080px) {

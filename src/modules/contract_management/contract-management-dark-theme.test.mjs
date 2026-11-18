@@ -166,16 +166,16 @@ test('模块令牌改成全局令牌别名，浅色回退到改造前的字面�
     '--cm-primary': ['--primary', '#2563eb'],
     '--cm-primary-dark': ['--primary-dark', '#1d4ed8'],
     '--cm-primary-soft': ['--primary-soft', '#eff6ff'],
-    '--cm-text': ['--text', '#0f172a'],
+    '--cm-text': ['--text', '#1e293b'],
     '--cm-secondary': ['--text-secondary', '#475569'],
     '--cm-muted': ['--text-muted', '#64748b'],
     '--cm-placeholder': ['--text-faint', '#94a3b8'],
     '--cm-border': ['--border', '#e2e8f0'],
-    '--cm-green-soft': ['--success-soft', '#ecfdf5'],
+    '--cm-green-soft': ['--success-soft', '#dcfce7'],
     '--cm-green-text': ['--success-text', '#15803d'],
-    '--cm-orange-soft': ['--warning-soft', '#fef3c7'],
+    '--cm-orange-soft': ['--warning-soft', '#fef3c6'],
     '--cm-orange-text': ['--warning-text', '#b45309'],
-    '--cm-red-soft': ['--danger-soft', '#fef2f2'],
+    '--cm-red-soft': ['--danger-soft', '#fee2e2'],
     '--cm-red-text': ['--danger-text', '#b91c1c'],
     '--cm-purple-soft': ['--violet-soft', '#f5f3ff'],
     '--cm-purple-text': ['--violet-ink', '#6d28d9'],
@@ -206,10 +206,10 @@ test('模块令牌改成全局令牌别名，浅色回退到改造前的字面�
 
 test('外壳：侧栏、顶栏、页头、筛选栏与「建设中」角标都有深色落点', () => {
   // 侧栏在浅色里本来就是深蓝，深色下再压深一档并沿用侧栏墨色 token。
-  assertAlias(CONTRACT, '.contract-sidebar', 'background', '--sidebar', '#0f172a')
+  assertAlias(CONTRACT, '.contract-sidebar', 'background', '--sidebar', '#0b1526')
   assertAlias(CONTRACT, '.contract-sidebar', 'color', '--sidebar-text', '#cbd5e1')
   assertAlias(CONTRACT, '.contract-nav button', 'color', '--sidebar-text', '#cbd5e1')
-  assertAlias(CONTRACT, '.contract-nav button:hover', 'background', '--sidebar-hover', '#1e293b')
+  assertAlias(CONTRACT, '.contract-nav button:hover', 'background', '--sidebar-hover', '#111e33')
   assertAlias(CONTRACT, '.contract-nav button > em', 'color', '--sidebar-label', '#64748b')
 
   // 顶栏浅色是半透明白，深色块换成不透明卡片底。
@@ -369,9 +369,9 @@ test('操作结果条、空/载入/错误态与滚动容器都不留浅色孤岛
   assert.match(styleOf(TOAST), /\.shared-operation-toast \{[^}]*background: #0f172a/)
 
   // 空态 / 载入 / 错误条：文字走 --cm-muted / --cm-placeholder，底色走语义浅底。
-  assertAlias(CONTRACT, '.contract-session-error', 'background', '--danger-soft', '#fef2f2')
+  assertAlias(CONTRACT, '.contract-session-error', 'background', '--danger-soft', '#fee2e2')
   assertAlias(CONTRACT, '.contract-session-error', 'color', '--danger-text', '#b91c1c')
-  assertAlias(CONTRACT, '.contract-template-preview-error', 'background', '--danger-soft', '#fef2f2')
+  assertAlias(CONTRACT, '.contract-template-preview-error', 'background', '--danger-soft', '#fee2e2')
   assertContains(CONTRACT, '.contract-empty', 'color', 'var(--cm-placeholder)')
 
   // 共享表格右缘渐隐：第一层是 --surface-card，深色下跟着卡片底色，不出现白边。
@@ -391,7 +391,7 @@ test('操作结果条、空/载入/错误态与滚动容器都不留浅色孤岛
 test('组件内嵌样式：导入/报表/本地目录/来源选择/PDF 预览的浅色字面量都带 token 回退', () => {
   assertContains(styleOf(IMPORT_PANEL), '.contract-import-panel', 'background', 'var(--surface-card, #fff)')
   assertContains(styleOf(IMPORT_PANEL), '.contract-import-excel-summary', 'background', 'var(--primary-soft, #eff6ff)')
-  assertContains(styleOf(IMPORT_PANEL), '.contract-import-excel-issues', 'background', 'var(--danger-soft, #fef2f2)')
+  assertContains(styleOf(IMPORT_PANEL), '.contract-import-excel-issues', 'background', 'var(--danger-soft, #fee2e2)')
   assertContains(styleOf(IMPORT_PANEL), '.contract-import-warning', 'background', 'var(--warning-soft-strong, #fffbeb)')
   assertContains(styleOf(IMPORT_PANEL), '.contract-import-dropzone', 'background', 'var(--surface-tint, #f8fbff)')
   assertContains(styleOf(IMPORT_PANEL), '.contract-import-drawer textarea', 'border', 'var(--border, #e2e8f0)')

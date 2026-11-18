@@ -71,14 +71,14 @@ onBeforeUnmount(() => { if (resetTimer) clearTimeout(resetTimer) })
   align-items: flex-start;
   gap: 12px;
   padding: 14px 16px;
-  border: 1px solid var(--danger-border, #fecaca);
+  border: 1px solid var(--danger-border, #f3b4b4);
   border-left: 3px solid var(--danger, #dc2626);
   border-radius: 10px;
-  background: var(--danger-soft, #fef2f2);
+  background: var(--danger-soft, #fee2e2);
   color: var(--danger-text, #b91c1c);
 }
 .license-problem[data-tone="warning"] {
-  border-color: var(--warning-border, #fde68a);
+  border-color: var(--warning-border, #fbd9a8);
   border-left-color: var(--warning, #d97706);
   background: var(--warning-soft);
   color: var(--warning-text, #b45309);

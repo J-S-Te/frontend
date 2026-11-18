@@ -7,57 +7,52 @@
    使用 :root + :is(...) 提高优先级，覆盖异步加载的模块 CSS。
    ========================================================================== */
 :root {
-  --ui-canvas: #f5f5f5;
-  --ui-card: #ffffff;
-  --ui-card-soft: #fafafa;
-  --ui-line: #f0f0f0;
-  --ui-line-strong: #d9d9d9;
-  --ui-text: rgba(0, 0, 0, .88);
-  --ui-text-secondary: rgba(0, 0, 0, .65);
-  --ui-muted: rgba(0, 0, 0, .45);
-  --ui-primary: #1677ff;
-  --ui-primary-ink: #1677ff;
-  --ui-primary-hover: #4096ff;
-  --ui-primary-active: #0958d9;
-  --ui-primary-soft: #e6f4ff;
-  --ui-primary-border: #91caff;
-  --ui-success: #52c41a;
-  --ui-warning: #faad14;
-  --ui-danger: #ff4d4f;
-  --ui-success-soft: #f6ffed;
-  --ui-warning-soft: #fffbe6;
-  --ui-danger-soft: #fff2f0;
-  --ui-table-head: #fafafa;
-  --ui-hover: #fafafa;
-  --ui-radius-card: 8px;
-  --ui-radius-control: 6px;
-  --ui-shadow-card: 0 1px 2px rgba(0, 0, 0, .03), 0 1px 6px -1px rgba(0, 0, 0, .02);
-  --ui-shadow-hover: 0 6px 16px rgba(0, 0, 0, .08);
-  --ui-shadow-modal: 0 6px 16px rgba(0, 0, 0, .08), 0 3px 6px -4px rgba(0, 0, 0, .12);
+  --ui-canvas: var(--surface-content);
+  --ui-card: var(--surface-card);
+  --ui-card-soft: var(--surface-muted);
+  --ui-line: var(--line);
+  --ui-line-strong: var(--line-strong);
+  --ui-text: var(--text-1);
+  --ui-text-secondary: var(--text-2);
+  --ui-muted: var(--text-3);
+  --ui-primary: var(--primary-600);
+  --ui-primary-ink: var(--primary-600);
+  --ui-primary-hover: var(--primary-700);
+  --ui-primary-active: var(--primary-700);
+  --ui-primary-soft: var(--primary-50);
+  --ui-primary-border: var(--primary-200);
+  --ui-success: var(--success);
+  --ui-warning: var(--warning);
+  --ui-danger: var(--danger);
+  --ui-success-soft: var(--success-soft);
+  --ui-warning-soft: var(--warning-soft);
+  --ui-danger-soft: var(--danger-soft);
+  --ui-table-head: var(--surface-muted);
+  --ui-hover: var(--primary-50);
+  --ui-radius-card: var(--radius-card);
+  --ui-radius-control: var(--radius-control);
+  --ui-shadow-card: var(--shadow-card);
+  --ui-shadow-hover: var(--shadow-hover);
+  --ui-shadow-modal: var(--shadow-popover);
 }
 
 :root[data-theme="dark"] {
-  --ui-canvas: #141414;
-  --ui-card: #1f1f1f;
-  --ui-card-soft: #1a1a1a;
-  --ui-line: #303030;
-  --ui-line-strong: #424242;
-  --ui-text: rgba(255, 255, 255, .85);
-  --ui-text-secondary: rgba(255, 255, 255, .65);
-  --ui-muted: rgba(255, 255, 255, .45);
-  --ui-primary: #1668dc;
-  --ui-primary-ink: #3c89e8;
-  --ui-primary-hover: #3c89e8;
-  --ui-primary-active: #1554ad;
-  --ui-primary-soft: #111a2c;
-  --ui-primary-border: #15325b;
-  --ui-success-soft: #162312;
-  --ui-warning-soft: #2b2111;
-  --ui-danger-soft: #2a1215;
-  --ui-table-head: #1d1d1d;
-  --ui-hover: #262626;
-  --ui-shadow-card: 0 1px 2px rgba(0, 0, 0, .28);
-  --ui-shadow-modal: 0 6px 16px rgba(0, 0, 0, .48);
+  --ui-canvas: var(--surface-content);
+  --ui-card: var(--surface-card);
+  --ui-card-soft: var(--surface-muted);
+  --ui-line: var(--line);
+  --ui-line-strong: var(--line-strong);
+  --ui-text: var(--text-1);
+  --ui-text-secondary: var(--text-2);
+  --ui-muted: var(--text-3);
+  --ui-primary: var(--primary-600);
+  --ui-primary-ink: var(--primary-500);
+  --ui-primary-hover: var(--primary-500);
+  --ui-primary-active: var(--primary-700);
+  --ui-primary-soft: var(--primary-soft);
+  --ui-primary-border: var(--primary-border);
+  --ui-table-head: var(--surface-head);
+  --ui-hover: var(--surface-hover);
 }
 
 html,
@@ -72,14 +67,17 @@ body {
   background: var(--ui-canvas);
 }
 :root :is(.console-sidebar, .contract-sidebar, .pm-sidebar, .crm-sidebar, .da-sidebar, .settlement-sidebar, .portal-sidebar) {
-  color: rgba(255, 255, 255, .65);
+  width: var(--shell-sidebar);
+  color: var(--text-4);
   border-right: 0;
-  background: #001529;
-  box-shadow: 2px 0 8px rgba(0, 0, 0, .15);
+  background: var(--sidebar);
+  box-shadow: none;
 }
 :root :is(.console-topbar, .contract-topbar, .pm-topbar, .crm-topbar, .da-topbar, .settlement-topbar, .portal-topbar) {
+  height: var(--shell-topbar);
+  min-height: var(--shell-topbar);
   color: var(--ui-text);
-  border-bottom: 1px solid var(--ui-line);
+  border-bottom: 1px solid var(--line-2);
   background: var(--ui-card);
   box-shadow: none;
 }
@@ -115,10 +113,10 @@ body {
 /* Typography / PageHeader：Ant 的 20px 标题和 14px 描述。 */
 :root :is(.console-page-head, .contract-page-head, .crm-page-head, .da-page-head, .pm-page-head, .portal-title, .expense-head) h1 {
   color: var(--ui-text);
-  font-size: 20px;
-  font-weight: 600;
+  font-size: var(--fs-title);
+  font-weight: 700;
   letter-spacing: 0;
-  line-height: 1.4;
+  line-height: var(--lh-title);
 }
 :root :is(.console-page-head, .contract-page-head, .crm-page-head, .da-page-head, .pm-page-head, .portal-title, .expense-head) p {
   margin-top: 4px;
@@ -152,16 +150,19 @@ body {
 
 /* Button：Ant 四个状态；主按钮 #1677ff，默认/危险边界明确。 */
 :root :is(.console-button, .contract-button, .pm-button, .da-button, .expense-button) {
-  min-height: 32px;
-  padding: 4px 15px;
+  min-height: 36px;
+  padding: 0 16px;
   color: var(--ui-text);
-  font-size: 14px;
+  font-size: var(--fs-body);
   font-weight: 400;
-  border: 1px solid var(--ui-line-strong);
-  border-radius: var(--ui-radius-control);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
   background: var(--ui-card);
   box-shadow: none;
-  transition: color .2s ease, border-color .2s ease, background-color .2s ease, box-shadow .2s ease;
+  transition: color var(--motion-fast) var(--ease-out), border-color var(--motion-fast) var(--ease-out), background-color var(--motion-fast) var(--ease-out), box-shadow var(--motion-fast) var(--ease-out), transform var(--motion-fast) var(--ease-out);
+}
+:root :is(.console-button, .contract-button, .pm-button, .da-button, .expense-button):active:not(:disabled) {
+  transform: scale(.98);
 }
 :root :is(.console-button, .contract-button, .pm-button, .da-button, .expense-button):hover:not(:disabled) {
   color: var(--ui-primary);
@@ -171,7 +172,7 @@ body {
   color: #fff;
   border-color: var(--ui-primary);
   background: var(--ui-primary);
-  box-shadow: 0 2px 0 rgba(5, 145, 255, .1);
+  box-shadow: none;
 }
 :root :is(.console-button, .contract-button, .pm-button, .da-button, .expense-button).primary:hover:not(:disabled) {
   color: #fff;
@@ -193,29 +194,25 @@ body {
   background: var(--ui-card);
 }
 :root :is(.console-button, .contract-button, .pm-button, .da-button, .expense-button).danger {
-  color: #fff;
-  border-color: var(--ui-danger);
-  background: var(--ui-danger);
+  color: var(--danger-text);
+  border-color: var(--danger-border);
+  background: var(--ui-card);
 }
 :root :is(.console-button, .contract-button, .pm-button, .da-button, .expense-button).danger:hover:not(:disabled) {
-  border-color: #ff7875;
-  background: #ff7875;
+  color: var(--danger-text);
+  border-color: var(--danger);
+  background: var(--danger-soft);
 }
 :root :is(.console-button, .contract-button, .pm-button, .da-button, .expense-button).small {
-  min-height: 24px;
-  padding: 0 7px;
-  font-size: 14px;
+  min-height: 30px;
+  padding: 0 12px;
+  font-size: 13px;
 }
 :root :is(.console-button, .contract-button, .pm-button, .da-button, .expense-button):disabled {
-  color: rgba(0, 0, 0, .25);
-  border-color: var(--ui-line-strong);
-  background: rgba(0, 0, 0, .04);
+  color: var(--text-4);
+  border-color: var(--line);
+  background: var(--neutral-soft);
   box-shadow: none;
-}
-:root[data-theme="dark"] :is(.console-button, .contract-button, .pm-button, .da-button, .expense-button):disabled {
-  color: rgba(255, 255, 255, .25);
-  border-color: var(--ui-line-strong);
-  background: rgba(255, 255, 255, .08);
 }
 
 /* Input / Select / Form：32px 控件、6px 圆角、Ant 的蓝色 focus ring。 */
@@ -224,14 +221,14 @@ body {
   .contract-signing-review, .crm-customer-dialog, .crm-opportunity-dialog, .crm-credit-apply-form,
   .pm-dialog, .da-modal, .console-detail-modal, .portal-dialog)
   form :is(input:not([type="checkbox"]):not([type="radio"]):not([type="file"]):not([type="hidden"]), select, textarea) {
-  min-height: 32px;
-  padding: 4px 11px;
+  min-height: 36px;
+  padding: 0 12px;
   color: var(--ui-text);
-  font-size: 14px;
-  border: 1px solid var(--ui-line-strong);
-  border-radius: var(--ui-radius-control);
+  font-size: var(--fs-body);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
   background: var(--ui-card);
-  transition: border-color .2s ease, box-shadow .2s ease;
+  transition: border-color var(--motion-fast) var(--ease-out), box-shadow var(--motion-fast) var(--ease-out);
 }
 :root :is(.console-content, .contract-content, .pm-page, .crm-content, .portal-content,
   .settlement-content, .da-page, .expense-canvas, .contract-create-modal, .contract-rule-modal,
@@ -246,7 +243,7 @@ body {
   .pm-dialog, .da-modal, .console-detail-modal, .portal-dialog)
   form :is(input, select, textarea):focus {
   border-color: var(--ui-primary);
-  box-shadow: 0 0 0 2px rgba(5, 145, 255, .1);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, .12);
   outline: 0;
 }
 :root :is(.console-filter-bar, .contract-filter-bar, .pm-filter-bar, .crm-filter-bar, .da-filters) {
@@ -277,19 +274,26 @@ body {
 :root :is(.console-data-table, .contract-data-table, .crm-data-table, .crm-light-table,
   .pm-table, .da-table, .settlement-plan-table, .settlement-invoice-table table,
   .metric-facts-table, .expense-table-body table) th {
-  height: 47px;
-  padding: 12px 16px;
-  color: var(--ui-text);
-  font-size: 14px;
-  font-weight: 600;
-  border-bottom: 1px solid var(--ui-line);
+  height: 44px;
+  padding: 0 16px;
+  color: var(--text-3);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 18px;
+  border-bottom: 1px solid var(--line);
   background: var(--ui-table-head);
 }
 :root :is(.console-data-table, .contract-data-table, .crm-data-table, .crm-light-table,
   .pm-table, .da-table, .settlement-plan-table, .settlement-invoice-table table,
   .metric-facts-table, .expense-table-body table) td {
-  padding: 12px 16px;
-  border-bottom: 1px solid var(--ui-line);
+  height: 56px;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--line-2);
+}
+:root :is(.console-data-table, .contract-data-table, .crm-data-table, .crm-light-table,
+  .pm-table, .da-table, .settlement-plan-table, .settlement-invoice-table table,
+  .metric-facts-table, .expense-table-body table) tbody tr:nth-child(even) td {
+  background: #f8fafc;
 }
 :root :is(.console-data-table, .contract-data-table, .crm-data-table, .crm-light-table,
   .pm-table, .da-table, .settlement-plan-table, .settlement-invoice-table table,
@@ -371,18 +375,22 @@ body {
 
 /* Tag / Badge：子系统统一胶囊几何（999px 满圆角）+ 语义底色。 */
 :root :is(.contract-badge, .settlement-badge, .console-badge, .crm-badge, .pm-badge, .da-badge, .expense-badge) {
-  padding: 1px 8px;
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 0 10px;
   font-size: 12px;
-  font-weight: 400;
-  border-radius: var(--radius-pill, 999px);
+  font-weight: 500;
+  line-height: 18px;
+  border-radius: var(--radius-pill);
 }
 
 /* Modal：Ant 8px 圆角、轻阴影。 */
 :root :is(.console-modal, .contract-detail-modal, .pm-dialog, .da-modal, .settlement-modal, .crm-detail) {
-  border: 1px solid var(--ui-line);
-  border-radius: var(--ui-radius-card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
   background: var(--ui-card);
-  box-shadow: var(--ui-shadow-modal);
+  box-shadow: var(--shadow-popover);
 }
 
 @media (prefers-reduced-motion: reduce) {

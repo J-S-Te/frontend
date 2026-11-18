@@ -64,7 +64,7 @@
 .expense-head h1 {
   margin: 0;
   color: var(--exp-ink);
-  font-size: var(--fs-title, 22px);
+  font-size: var(--fs-title, 24px);
   font-weight: 700;
   line-height: 1.25;
   letter-spacing: -.01em;
@@ -253,10 +253,10 @@
   white-space: normal;
   overflow-wrap: anywhere;
   cursor: pointer;
-  transition: color var(--duration-fast, 140ms) var(--ease-out),
-    border-color var(--duration-fast, 140ms) var(--ease-out),
-    background var(--duration-fast, 140ms) var(--ease-out),
-    box-shadow var(--duration-fast, 140ms) var(--ease-out);
+  transition: color var(--duration-fast, 150ms) var(--ease-out),
+    border-color var(--duration-fast, 150ms) var(--ease-out),
+    background var(--duration-fast, 150ms) var(--ease-out),
+    box-shadow var(--duration-fast, 150ms) var(--ease-out);
 }
 
 .expense-button svg {
@@ -358,8 +358,8 @@
   color: var(--exp-ink);
   font: inherit;
   font-size: var(--fs-sm, 13px);
-  transition: border-color var(--duration-fast, 140ms) var(--ease-out),
-    box-shadow var(--duration-fast, 140ms) var(--ease-out);
+  transition: border-color var(--duration-fast, 150ms) var(--ease-out),
+    box-shadow var(--duration-fast, 150ms) var(--ease-out);
 }
 
 .expense-panel input:not([type="checkbox"]):not([type="radio"]):hover,
@@ -458,7 +458,7 @@
   gap: 4px;
   margin: 2px;
   padding: 2px 8px;
-  border-radius: var(--radius-sm, 6px);
+  border-radius: var(--radius-sm, 8px);
   background: var(--exp-purple-soft);
   color: var(--exp-purple);
   font-size: var(--fs-xs, 12px);
@@ -482,7 +482,7 @@
   align-items: center;
   gap: 5px;
   padding: 2px 8px;
-  border-radius: var(--radius-sm, 6px);
+  border-radius: var(--radius-sm, 8px);
   background: var(--exp-inset);
   color: var(--exp-muted);
   font-size: var(--fs-xs, 12px);
@@ -738,7 +738,7 @@
 }
 
 .expense-table tbody tr {
-  transition: background var(--duration-fast, 140ms) var(--ease-out);
+  transition: background var(--duration-fast, 150ms) var(--ease-out);
 }
 
 .expense-table tbody tr:hover {
@@ -818,7 +818,7 @@
   gap: 2px;
   max-width: 100%;
   padding: 6px 10px;
-  border-radius: var(--radius-sm, 6px);
+  border-radius: var(--radius-sm, 8px);
   background: var(--exp-card);
 }
 
@@ -875,8 +875,8 @@
   font-variant-numeric: tabular-nums;
   text-align: left;
   overflow: hidden;
-  transition: border-color var(--duration-fast, 140ms) var(--ease-out),
-    box-shadow var(--duration-fast, 140ms) var(--ease-out);
+  transition: border-color var(--duration-fast, 150ms) var(--ease-out),
+    box-shadow var(--duration-fast, 150ms) var(--ease-out);
 }
 
 .expense-metric::before {
@@ -1126,7 +1126,7 @@
   flex-wrap: wrap;
   margin: 0;
   color: var(--exp-ink);
-  font-size: var(--fs-title, 22px);
+  font-size: var(--fs-title, 24px);
   font-weight: 700;
 }
 
@@ -1380,7 +1380,7 @@
   margin-top: 6px;
   padding: 8px 10px;
   border-left: 2px solid var(--exp-line);
-  border-radius: var(--radius-sm, 6px);
+  border-radius: var(--radius-sm, 8px);
   background: var(--exp-inset);
   color: var(--exp-ink-soft);
   font-size: var(--fs-xs, 12px);
@@ -1404,8 +1404,8 @@
   color: var(--exp-ink-soft);
   text-align: center;
   cursor: pointer;
-  transition: border-color var(--duration-fast, 140ms) var(--ease-out),
-    background var(--duration-fast, 140ms) var(--ease-out);
+  transition: border-color var(--duration-fast, 150ms) var(--ease-out),
+    background var(--duration-fast, 150ms) var(--ease-out);
 }
 
 .expense-upload-zone:hover,
@@ -1460,7 +1460,7 @@
 .expense-progress {
   height: 8px;
   overflow: hidden;
-  border-radius: var(--radius-sm, 6px);
+  border-radius: var(--radius-sm, 8px);
   background: var(--exp-accent-soft);
 }
 
@@ -1561,7 +1561,7 @@
 .expense-donut__value {
   position: relative;
   color: var(--exp-ink);
-  font-size: var(--fs-title, 22px);
+  font-size: var(--fs-title, 24px);
   font-weight: 700;
   font-variant-numeric: tabular-nums;
 }
@@ -1720,7 +1720,7 @@
   width: 100%;
   padding: 8px 10px;
   border: 0;
-  border-radius: var(--radius-sm, 6px);
+  border-radius: var(--radius-sm, 8px);
   background: transparent;
   color: var(--exp-ink);
   font: inherit;
@@ -1781,7 +1781,7 @@
   gap: 5px;
   max-width: 100%;
   padding: 3px 8px;
-  border-radius: var(--radius-sm, 6px);
+  border-radius: var(--radius-sm, 8px);
   background: var(--exp-accent-soft);
   color: var(--exp-accent);
   font-size: var(--fs-xs, 12px);
@@ -1886,7 +1886,7 @@
   text-align: left;
   text-transform: uppercase;
   cursor: pointer;
-  border-radius: var(--radius-sm, 6px);
+  border-radius: var(--radius-sm, 8px);
 }
 
 .console-sidebar .console-nav-label--toggle:hover {
@@ -1902,7 +1902,7 @@
   border-right: 2px solid currentColor;
   border-bottom: 2px solid currentColor;
   transform: rotate(45deg);
-  transition: transform var(--duration-fast, 140ms) var(--ease-out);
+  transition: transform var(--duration-fast, 150ms) var(--ease-out);
 }
 
 .console-sidebar .console-nav-label--toggle[aria-expanded="false"]::after {
