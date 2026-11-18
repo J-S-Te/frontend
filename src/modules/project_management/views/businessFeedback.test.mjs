@@ -66,7 +66,7 @@ for (const operation of ['revokeSelectedAssignment', 'returnSelectedToDecomposit
         loadWorkspace: async () => { loads++ }, formatUserError,
         showToast: (message, tone) => messages.push({ message, tone }),
       }
-      await functions([operation], context)[operation]('team')
+      await functions([operation], context)[operation](...(operation === 'revokeSelectedAssignment' ? ['team'] : []))
       assert.deepEqual(writes, ['SI-1', 'SI-2'], '不能继续或自动重发未知项')
       assert.equal(loads, 1, '部分完成后仍需读取权威状态')
       assert.deepEqual([...context.selectedServiceItemIDs.value], ['SI-2', 'SI-3'])
