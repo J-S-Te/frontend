@@ -1,5 +1,6 @@
 <script setup>
 import { ref } from 'vue'
+import SystemAttribution from '@/modules/shared/components/SystemAttribution.vue'
 import { loginWithPassword } from '@/modules/platform/auth/api/auth'
 import { resolveSameOriginRedirect, resolveServerApprovedRedirect } from '@/modules/platform/auth/utils/navigation'
 import { clearRememberedAccount, readRememberedAccount, writeRememberedAccount } from '@/modules/platform/auth/utils/rememberedAccount'
@@ -328,8 +329,11 @@ function clearCapsLockState() {
         </form>
       </div>
 
-      <footer class="form-footer">
-        <span>统一身份认证</span><i></i><span>权限管控</span><i></i><span>安全审计</span>
+      <footer class="form-footer form-footer--with-attribution">
+        <div class="form-footer-capabilities">
+          <span>统一身份认证</span><i></i><span>权限管控</span><i></i><span>安全审计</span>
+        </div>
+        <SystemAttribution />
       </footer>
     </section>
   </main>

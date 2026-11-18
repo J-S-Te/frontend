@@ -204,7 +204,7 @@ test('高密度工作台在桌面与窄屏下保持可导航和可理解', () =>
   assert.doesNotMatch(source, /style="width: 90px; min-width: 90px;"/)
   assert.match(styles, /\.pm-col-actions \{ width: 90px; min-width: 90px; text-align: right; \}/)
   assert.match(source, /class="pm-table pm-responsive-list"/)
-  assert.match(source, /data-label="项目 \/ 客户"/)
+  assert.match(source, /data-label="客户"/)
   assert.match(styles, /@media \(max-width: 760px\) \{[\s\S]*?\.pm-responsive-list tbody tr \{ display: grid;/)
 
   // 仪表盘 KPI 最多保留标签、数值、说明三层。
@@ -417,7 +417,7 @@ test('服务项操作台的负责人从人员资质库选择而不是填写用�
 test('待分配阶段支持带原因的受控撤销，且只向具备撤销权限的角色显示入口', () => {
   assert.match(source, /const canRevokeTeam = computed\(\(\) => permissionSet\.value\.has\('project\.team\.revoke'\)\)/)
   assert.match(source, /const canRevokeExecution = computed\(\(\) => permissionSet\.value\.has\('project\.execution\.revoke'\)\)/)
-  assert.match(source, /async function revokeSelectedAssignment\(kind\)/)
+  assert.match(source, /async function revokeSelectedAssignment\(kind, itemID = ''\)/)
   assert.match(source, /item\.status === '待分配'/)
   assert.match(source, /请输入撤销\$\{label\}的原因/)
   assert.match(source, /expected_version: Number\(item\.version\) \|\| 0/)
@@ -431,18 +431,19 @@ test('待分配阶段支持带原因的受控撤销，且只向具备撤销权�
 
 test('待分配服务项可按拆解管理权限退回拆解确认', () => {
   assert.match(source, /^\s+returnServiceItemToDecomposition,$/m)
-  assert.match(source, /async function returnSelectedToDecomposition\(\)/)
+  assert.match(source, /async function returnSelectedToDecomposition\(itemID = ''\)/)
   assert.match(source, /item\.status !== '待分配'/)
   assert.match(source, /请输入退回拆解确认的原因/)
   assert.match(source, /returnServiceItemToDecomposition\(item\.id, \{ reason: String\(reason\)\.trim\(\), expected_version: Number\(item\.version\) \|\| 0 \}\)/)
-  assert.match(source, /v-if="canManageDecomposition"[^>]*@click="returnSelectedToDecomposition"[^>]*>退回拆解确认/)
+  assert.match(source, /v-if="canManageDecomposition"[^>]*@click="returnSelectedToDecomposition\(\)"[^>]*>退回拆解确认/)
   assert.match(displaySource, /DECOMPOSITION_RETURNED: '服务项已退回拆解确认'/)
   assert.match(pmApiSource, /service-items\/\$\{encodeURIComponent\(itemID\)\}\/decomposition-return/)
 })
 
 test('退回拆解确认的项目整体退出任务分配列表', () => {
   assert.match(source, /const projectStatusForItem = \(item\) => projectByID\.value\.get\(item\?\.project_id\)\?\.status \|\| ''/)
-  assert.match(source, /const allocationItems = computed\(\(\) => serviceItems\.value\.filter\(\(item\) => item\.status === '待分配' && projectAllowsNode\(item, 'allocation'\)\)\)/)
+  assert.match(source, /const allocationCandidates = computed\(\(\) => serviceItems\.value\.filter\(\(item\) => item\.status === '待分配' && projectAllowsNode\(item, 'allocation'\)\)\)/)
+  assert.match(source, /const allocationItems = computed\(\(\) => allocationCandidates\.value\.filter\([\s\S]*?isAllocationPending\(item, canExecutionAssign\.value, canAssignTeam\.value\)/)
   assert.match(source, /allocation: allocationItems\.value\.map/)
   assert.match(source, /activeSection === 'allocation'" :items="allocationItems"/)
   assert.match(source, /watch\(\[activeSection, activeNodeItems, loading, sectionExtrasLoading, workspaceReady\],[\s\S]*selectedServiceItemIDs\.value = selectedServiceItemIDs\.value\.filter/)
@@ -453,7 +454,7 @@ test('所有业务节点只展示当前归属项目并在回退后清除原节�
   assert.match(source, /IMPLEMENTATION_PLAN_REVOKED/)
   assert.match(source, /PREPARATION_REVOKED/)
   assert.match(source, /event\.payload\?\.kind === 'FIELD_TO_PREPARATION'/)
-  assert.match(source, /import \{ implementationPlanReady, projectAllowsWorkflowNode \} from '@\/modules\/project_management\/workflowNode'/)
+  assert.match(source, /implementationPlanReady, isAllocationPending, projectAllowsWorkflowNode,\s*\} from '@\/modules\/project_management\/workflowNode'/)
   assert.match(workflowNodeSource, /export function implementationPlanReady\(item\)/)
   assert.match(workflowNodeSource, /Boolean\(item\.team_lead_id && item\.project_manager_id && \(item\.engineer_ids \|\| \[\]\)\.length\)/)
   assert.match(workflowNodeSource, /item\.conflict_status === 'PASSED'/)
@@ -1185,9 +1186,9 @@ test('拆解调整入口按 project.decomposition.manage 门控并调用真实�
   assert.match(pmApiSource, /decomposition-adjustments/)
 })
 
-test('资源分配页明确区分当前阶段数量与分配进度', () => {
-  assert.match(source, /activeSection === 'allocation' \? '当前阶段服务项' : '待处理'/)
-  assert.match(source, /含已分配、待补齐执行团队的服务项/)
+test('资源分配页只统计未完成分配项并显示分配进度', () => {
+  assert.match(source, /activeSection === 'allocation' \? '待分配服务项' : '待处理'/)
+  assert.match(source, /仅显示未完成分配或能力校验的服务项/)
   assert.match(source, /activeSection === 'allocation' \? '分配进度' : '完成度'/)
 })
 
@@ -1604,7 +1605,7 @@ test('现场证据通过统一文件网关上传并以回执提交', () => {
 test('现场实施支持 GPS、电子签名与可重放离线队列', async () => {
   const offlineQueueSource = await readFile(new URL('./offlineFieldQueue.js', import.meta.url), 'utf8')
   const signaturePadSource = await readFile(new URL('./components/SignaturePad.vue', import.meta.url), 'utf8')
-  assert.match(source, /navigator\.geolocation\.getCurrentPosition/)
+  assert.match(source, /acquireFieldPosition\(\{ signal, onProgress \}\)/)
   assert.match(source, /newFieldOperationID\('checkin'\)/)
   assert.match(source, /newFieldOperationID\('record'\)/)
   assert.match(source, /newFieldOperationID\('signature'\)/)

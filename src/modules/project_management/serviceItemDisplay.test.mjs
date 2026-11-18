@@ -7,6 +7,7 @@ import { baseParse, compile } from '@vue/compiler-dom'
 import { compileScript, parse } from '@vue/compiler-sfc'
 import { renderToString } from '@vue/server-renderer'
 import * as display from './projectDisplay.js'
+import * as workflow from './workflowNode.js'
 
 const source = readFileSync(new URL('./views/ProjectManagementView.vue', import.meta.url), 'utf8')
 const { descriptor } = parse(source)
@@ -89,6 +90,28 @@ test('服务项队列以项目和系统名称呈现，编号保留为次要信�
   assert.match(html, /<small[^>]*class="[^"]*pm-service-code[^"]*"[^>]*>[^<]*SI-ONE<\/small>/)
   assert.doesNotMatch(html, /<b[^>]*>SI-/)
   assert.match(html, /class="pm-picker-card selected"[^>]*aria-selected="true"/)
+})
+
+test('完成分配项在项目详情保留授权纠错入口，后续阶段和无权限时隐藏', async () => {
+  const item = { ...items[0], status: '待分配', team_lead_id: 'LEAD',
+    project_manager_id: 'MANAGER', engineer_ids: ['ENGINEER'], conflict_status: 'PASSED' }
+  const values = { detailItems: [item], specialMethodLabel: {},
+    isEmbeddedPenetrationItem: () => false, canRevokeTeam: true,
+    canRevokeExecution: true, canManageDecomposition: true, saving: false,
+    projectAllowsNode: (_item, node) => workflow.projectAllowsWorkflowNode('待分配', node) }
+  const fragment = findElement('pm-detail-items').loc.source
+  const html = await renderFragment(fragment, values)
+  for (const label of ['撤销执行团队', '撤销团队负责人', '退回拆解确认']) {
+    assert.match(html, new RegExp(`>${label}</button>`))
+  }
+  for (const override of [
+    { canRevokeTeam: false, canRevokeExecution: false, canManageDecomposition: false },
+    { detailItems: [{ ...item, status: '待实施' }] },
+    { projectAllowsNode: () => false },
+  ]) {
+    const hidden = await renderFragment(fragment, { ...values, ...override })
+    assert.doesNotMatch(hidden, /撤销执行团队|撤销团队负责人|退回拆解确认/)
+  }
 })
 
 test('队列搜索支持项目系统名称并保留编号场所检索及稳定选择载荷', () => {
@@ -243,4 +266,50 @@ test('操作事项行使用同一服务项名称并保持其他类型事项原�
   assert.match(html, /<b>合成展示项目 · 档案系统<\/b>/)
   assert.match(html, /<small[^>]*class="[^"]*pm-service-code[^"]*"[^>]*>[^<]*SI-ONE<\/small>/)
   assert.match(html, /<b>其他事项<\/b>/)
+})
+
+test('项目列表系统名称按项目汇总去重，忽略空名称并保留原顺序', () => {
+  const result = display.projectSystemNamesByProject?.([
+    ...items, { ...items[0], system: ' 档案系统 ' },
+    { ...items[0], system: ' ' },
+    { ...items[0], project_id: 'P-OTHER', system: '其他项目系统' },
+  ])
+  assert.deepEqual(Array.from(result || []), [
+    ['P-DISPLAY', '档案系统、办公系统'], ['P-OTHER', '其他项目系统'],
+  ])
+})
+
+test('项目列表原合同列主显示项目系统名称，合同号保留为次要小字', async () => {
+  const start = source.indexOf('<tr v-for="project in pagedProjects"')
+  const row = baseParse(source.slice(start, source.indexOf('</tr>', start) + 5)).children[0]
+  const cell = row.children.filter(node => node.tag === 'td')[2]
+  const html = await renderFragment(cell.loc.source, {
+    project, projectSystemsByProject: display.projectSystemNamesByProject?.(items) || new Map(),
+  })
+  assert.match(html, /<b>合成展示项目 · 档案系统、办公系统<\/b>/)
+  assert.match(html, /<small[^>]*class="[^"]*pm-service-code[^"]*"[^>]*>合同编号：HT-DISPLAY<\/small>/)
+  assert.doesNotMatch(html, /<b[^>]*>HT-DISPLAY/)
+})
+
+test('项目列表名称不可见或空白时明确提示，合同号为空时显示空值', async () => {
+  const start = source.indexOf('<tr v-for="project in pagedProjects"')
+  const row = baseParse(source.slice(start, source.indexOf('</tr>', start) + 5)).children[0]
+  const cell = row.children.filter(node => node.tag === 'td')[2]
+  const html = await renderFragment(cell.loc.source, {
+    project: { ...project, name: ' ', contract: '' }, projectSystemsByProject: new Map(),
+  })
+  assert.match(html, /<b>未提供项目名称 · 暂无可见系统名称<\/b>/)
+  assert.match(html, /合同编号：—/)
+  assert.doesNotMatch(html, /undefined|null/)
+})
+
+test('分配队列显示真实分配子阶段及冲突色调，原业务状态保持不变', async () => {
+  const item = { ...items[0], status: '待分配', team_lead_id: 'lead',
+    project_manager_id: 'manager', engineer_ids: ['engineer'], conflict_status: 'CONFLICT' }
+  const html = await renderToString(Vue.createSSRApp(pickerComponent(), {
+    projects: [project], items: [item], selectedIds: [],
+    statusLabel: entry => workflow.allocationState?.(entry)?.label || '',
+  }))
+  assert.match(html, /class="pm-badge danger">能力冲突<\/span>/)
+  assert.equal(item.status, '待分配')
 })

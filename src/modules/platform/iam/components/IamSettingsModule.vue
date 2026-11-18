@@ -1153,9 +1153,18 @@ function onPersonalExceptionApplicationChange(payload) {
   onApplicationSelectionChange(event)
 }
 
+/**
+ * 用途：个人例外写入后刷新有效总览，保留正在读取的完整应用集合。
+ * 参数：applicationCode 为本次个人例外变更所属的应用编码。
+ * 返回值：刷新成功返回 true；最新授权读取失败返回 false。
+ */
 async function refreshPersonalExceptionOverview(applicationCode) {
   const userId = detail.value?.kind === 'user' ? detail.value?.item?.user_id : ''
   if (!userId || !applicationCode) return true
+  if (userAuthorizationPreviewLoading.value) {
+    await refreshUserAuthorizationPreview()
+    return !userAuthorizationPreviewUnavailable.value
+  }
   const entries = userAuthorizationPreviewEntries.value
   if (Array.isArray(entries) && entries.some((entry) => String(entry?.application?.code || '') === applicationCode)) {
     await retryUserAuthorizationPreview(applicationCode)
@@ -1180,6 +1189,8 @@ function performPersonalExceptionSave({ payload, summary, title = '确认保存�
   const subjectType = authorizationSubjectType.value
   const applicationCode = selectedApplicationCode.value
   if (!payload || !Array.isArray(payload.roles) || subjectType !== 'USER' || !subjectId || !applicationCode || applicationAccessSaving.value) return
+  // 确认期间的只读刷新不能给旧提交集合补上新版本，避免覆盖并发新增的角色。
+  const expectedRevision = applicationAccessEditRevision.value
   openConfirm({
     title,
     description: summary + '\n\n确认提交这次个人例外授权变更吗？',
@@ -1197,7 +1208,7 @@ function performPersonalExceptionSave({ payload, summary, title = '确认保存�
         applicationCode: selectedApplicationCode.value,
       })
       try {
-        const access = await updateApplicationAccess(subjectId, applicationCode, { roles: payload.roles, expectedRevision: applicationAccessEditRevision.value })
+        const access = await updateApplicationAccess(subjectId, applicationCode, { roles: payload.roles, expectedRevision })
         if (!isCurrentSubject()) {
           emitToast('个人例外授权已保存；当前已切换到其他主体，本次结果不会覆盖当前草稿。')
           return true
@@ -1251,6 +1262,7 @@ function revokeAllPersonalExceptions({ count = 0, inheritedCount = 0 } = {}) {
   const subjectType = authorizationSubjectType.value
   const applicationCode = selectedApplicationCode.value
   if (subjectType !== 'USER' || !subjectId || !applicationCode || applicationAccessRevoking.value) return
+  const expectedRevision = applicationAccessEditRevision.value
   const inheritedNote = inheritedCount
     ? '岗位/组织继承来源不会被删除，仍按原规则生效。'
     : '本次只删除该应用下的个人例外，不会新增或删除岗位/组织继承来源。'
@@ -1264,7 +1276,7 @@ function revokeAllPersonalExceptions({ count = 0, inheritedCount = 0 } = {}) {
       applicationAccessRevoking.value = true
       applicationAccessError.value = ''
       try {
-        await deleteApplicationAccess(subjectId, applicationCode, { expectedRevision: applicationAccessEditRevision.value })
+        await deleteApplicationAccess(subjectId, applicationCode, { expectedRevision })
         if (isCurrentApplicationAccessSubject(subjectType, subjectId, applicationCode)) {
           personalExceptionDirty.value = false
           await loadApplicationAuthorization(applicationCode)
@@ -2306,6 +2318,21 @@ function onGlobalKeydown(event) {
   }
 }
 
+/**
+ * 用途：模板或任职变更后刷新用户有效授权，并安全重读个人例外快照。
+ * 参数：无；读取当前用户详情、应用选择及草稿和写入状态。
+ * 返回值：无；等待各读取完成，未保存草稿和在途个人例外写入不被重置。
+ */
+async function refreshRelatedUserAuthorization() {
+  if (detail.value?.kind !== 'user' || !canReadApplicationAuthorization.value) return
+  const requests = [refreshUserAuthorizationPreview()]
+  if (selectedApplicationCode.value && !personalExceptionDirty.value && !confirmDialog.value
+    && !applicationAccessSaving.value && !applicationAccessRevoking.value) {
+    requests.push(loadApplicationAuthorization(selectedApplicationCode.value))
+  }
+  await Promise.all(requests)
+}
+
 // 关联数据失效订阅：本组件与其他管理入口（人员异动中心、员工入职向导、应用接入）
 // 写入组织 / 岗位 / 人员 / 任职后，立即重载对应面板，不再要求整页刷新。
 // 面板读取保留原有权限判断和请求序号保护，无读取权限的账号不会因此产生越权请求。
@@ -2322,18 +2349,23 @@ useRelatedDataInvalidation((event) => {
   }
   if (kinds.has(RELATED_DATA.PEOPLE)) loadUsers()
   if (kinds.has(RELATED_DATA.MEMBERSHIPS)) loadMemberships()
+  if (kinds.has(RELATED_DATA.AUTHORIZATION_TEMPLATES) || kinds.has(RELATED_DATA.MEMBERSHIPS)) {
+    void refreshRelatedUserAuthorization()
+  }
 }, {
   kinds: [
     RELATED_DATA.ORGANIZATIONS,
     RELATED_DATA.POSITIONS,
     RELATED_DATA.PEOPLE,
     RELATED_DATA.MEMBERSHIPS,
+    RELATED_DATA.AUTHORIZATION_TEMPLATES,
   ],
 })
 
 onMounted(async () => {
   if (typeof window !== 'undefined') {
     window.addEventListener('keydown', onGlobalKeydown)
+    window.addEventListener('focus', refreshRelatedUserAuthorization)
   }
   // 先获取 permission_codes，再只加载当前账号具有对应 read 权限的目录，
   // 避免角色绑定管理员因为缺少 user:read 等无关权限产生一组 403。
@@ -2343,6 +2375,7 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   if (typeof window !== 'undefined') {
     window.removeEventListener('keydown', onGlobalKeydown)
+    window.removeEventListener('focus', refreshRelatedUserAuthorization)
   }
 })
 </script>

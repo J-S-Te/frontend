@@ -16,6 +16,20 @@ export function serviceItemLabel(item, project) {
   return `${projectName} · ${systemName}`
 }
 
+// 用途：按项目汇总当前可见服务项的系统名称，避免列表重复展示同名系统。
+// 参数：items 为已通过当前用户数据范围校验的服务项快照。
+// 返回值：项目编号到去重系统名称文本的映射，仅包含非空名称。
+export function projectSystemNamesByProject(items = []) {
+  const systems = new Map()
+  for (const item of items) {
+    const name = String(item?.system || '').trim()
+    if (!item?.project_id || !name) continue
+    if (!systems.has(item.project_id)) systems.set(item.project_id, new Set())
+    systems.get(item.project_id).add(name)
+  }
+  return new Map([...systems].map(([id, names]) => [id, [...names].join('、')]))
+}
+
 export function startOfWeek(date) {
   const d = new Date(date.getFullYear(), date.getMonth(), date.getDate())
   d.setDate(d.getDate() - ((d.getDay() + 6) % 7))

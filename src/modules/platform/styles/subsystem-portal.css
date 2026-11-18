@@ -426,9 +426,10 @@
   margin-top: var(--space-3);
 }
 
-.subsystem-portal__footer { position: relative; z-index: 1; display: flex; flex: 0 0 auto; justify-content: space-between; gap: var(--space-4); padding: 0 clamp(24px, 3vw, 52px) 24px; color: var(--portal-text-faint); font-size: var(--fs-sm); }
+.subsystem-portal__footer { position: relative; z-index: 1; display: flex; flex: 0 0 auto; flex-wrap: wrap; justify-content: space-between; gap: var(--space-4); padding: 0 clamp(24px, 3vw, 52px) 24px; color: var(--portal-text-faint); font-size: var(--fs-sm); }
 .subsystem-portal__footer-note { margin-right: auto; }
 .subsystem-portal__footer-copyright { margin-left: auto; }
+.subsystem-portal__developer { width: 100%; }
 
 
 

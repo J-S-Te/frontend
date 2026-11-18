@@ -69,8 +69,12 @@ import SearchableSelect from '@/modules/project_management/components/Searchable
 import ServiceItemPicker from '@/modules/project_management/components/ServiceItemPicker.vue'
 import SignaturePad from '@/modules/project_management/components/SignaturePad.vue'
 import SupplementClosureDialog from '@/modules/project_management/components/SupplementClosureDialog.vue'
-import { implementationPlanReady, projectAllowsWorkflowNode } from '@/modules/project_management/workflowNode'
-import { countFieldOperations, listFieldOperations, processFieldQueue, removeFieldOperation, saveFieldOperation } from '@/modules/project_management/offlineFieldQueue'
+import {
+  allocationState, implementationPlanReady, isAllocationPending, projectAllowsWorkflowNode,
+} from '@/modules/project_management/workflowNode'
+import { listFieldOperations, processFieldQueue, removeFieldOperation, removeRejectedFieldOperation, saveFieldOperation } from '@/modules/project_management/offlineFieldQueue'
+import { acquireFieldPosition } from '@/modules/project_management/fieldGeolocation.js'
+import { resolveFieldCheckInState } from '@/modules/project_management/fieldCheckInState.js'
 import {
   PROJECT_ROLE_CODES,
   capabilityCodeKey,
@@ -113,6 +117,7 @@ import {
   planPersonnelFor,
   planPersonnelRows,
   projectReportStageLabel,
+  projectSystemNamesByProject,
   reportStageLabel,
   reportStatusLabel,
   reportTechReviewLabel,
@@ -592,6 +597,7 @@ const concentratedTeam = computed(() => {
 function resetProjectFilters() { keyword.value = ''; statusFilter.value = ''; reportStageFilter.value = ''; categoryFilter.value = ''; teamFilter.value = ''; projectCardFilter.value = '' }
 
 const serviceItems = ref([])
+const projectSystemsByProject = computed(() => projectSystemNamesByProject(serviceItems.value))
 // 项目本身的 team/manager 是建项时的展示快照，不能代表后续资源分配结果。
 // 列表中的“团队 / 项目经理”必须按服务项上的真实指派关系聚合，且同一人员只显示一次。
 const projectAssignmentIDsByProject = computed(() => {
@@ -640,6 +646,10 @@ const signaturePadKey = ref(0)
 const operationForm = ref({ teamLeadID: '', projectManagerID: '', engineerIDs: '', plannedStart: '', plannedEnd: '', sitePlan: '', penetrationTestPlan: '', authDocNo: '', authStart: '', authEnd: '', authScope: '', testScope: '', testWindow: '', emergencyContact: '', rollbackPlan: '', reviewComment: '', personnel: [], equipment: [], travelMode: '', travelReferenceEventID: '', noTravelReason: '', travelOrigin: '', travelDestination: '', travelDepartureDate: '', travelReturnDate: '', travelTransport: '', travelAccommodationNeed: '', travelTravelerIDs: [], rawData: '', environment: '', fieldEvidenceFile: null, fieldSignatureFile: null, checkInDeviationReason: '', fieldIncompleteReason: '', reportFile: null, reportCorrectionReason: '', reportCorrectionComment: '', deviationDescription: '', deviationEvidenceFile: null, severity: 'MEDIUM', decision: 'RELEASE', comment: '' })
 const pendingFieldSyncCount = ref(0)
 const fieldSyncing = ref(false)
+const pendingFieldOperations = ref([])
+const fieldQueueError = ref('')
+const fieldCheckInState = ref(null)
+let fieldLocationController = null
 const deviationSeverityOptions = Object.freeze([
   { value: 'LOW', label: '低' },
   { value: 'MEDIUM', label: '中' },
@@ -1283,7 +1293,10 @@ const projectAllowsNode = (item, node) => projectAllowsWorkflowNode(projectStatu
 // 任务分配只接收“项目和服务项都处于待分配”的记录。任一服务项退回拆解后，服务端会把
 // 项目派生状态降为“待拆解确认”；此时即使同项目其它服务项仍残留待分配状态，也必须整体
 // 退出任务分配，避免在拆解范围尚未重新确认时继续下达人员。
-const allocationItems = computed(() => serviceItems.value.filter((item) => item.status === '待分配' && projectAllowsNode(item, 'allocation')))
+const allocationCandidates = computed(() => serviceItems.value.filter((item) => item.status === '待分配' && projectAllowsNode(item, 'allocation')))
+// 收件箱与能力处理继续使用阶段候选；任务分配再按当前账号待办缩小。
+const allocationItems = computed(() => allocationCandidates.value.filter((item) =>
+  isAllocationPending(item, canExecutionAssign.value, canAssignTeam.value)))
 const selectedServiceItems = computed(() => {
   const candidates = activeNodeItems.value
   return candidates.filter((item) => selectedServiceItemIDs.value.includes(item.id))
@@ -1294,13 +1307,17 @@ const selectedServiceOwner = computed(() => selectedServiceItem.value ? personLa
 const selectedServiceDue = computed(() => formatBusinessDate(selectedServiceItem.value?.planned_end
   || selectedServiceItem.value?.implementation_plan?.planned_end) || '待排期')
 const selectedReportStage = computed(() => serviceItemReportStage(selectedServiceItem.value))
+const selectedPendingCheckIn = computed(() => pendingFieldOperations.value.find(operation =>
+  operation.kind === 'check-in' && operation.itemID === selectedServiceItem.value?.id && operation.ownerKey === fieldQueueOwner()))
+const selectedCheckInState = computed(() => resolveFieldCheckInState({ itemID: selectedServiceItem.value?.id, ownerKey: fieldQueueOwner(),
+  state: fieldCheckInState.value, pending: selectedPendingCheckIn.value, snapshot: fieldEvidenceSnapshot.value, error: fieldEvidenceError.value }))
 // 现场缺项判定（BIZ-PROJECT-06）：口径来自服务端 GET /service-items/:id/field-evidence，
 // 不再从 deliveryEvents（租户最近 500 条窗口）里挑事件推导。判定不可用即"未知"，
 // 未知不等于齐全——完成动作必须被拦下。
 const selectedFieldEvidence = computed(() => resolveFieldEvidenceVerdict({
   itemID: selectedServiceItem.value?.id || '',
   snapshot: fieldEvidenceSnapshot.value,
-  error: fieldEvidenceError.value,
+  error: fieldQueueError.value || fieldEvidenceError.value,
   pendingSyncCount: pendingFieldSyncCount.value,
   loading: fieldEvidenceLoading.value,
 }))
@@ -1377,7 +1394,7 @@ const latestWorkflowEventByItem = computed(() => {
   return new Map([...latest].map(([id, value]) => [id, value.event]))
 })
 const latestWorkflowEvent = (item) => latestWorkflowEventByItem.value.get(item?.id)
-const inboxItems = computed(() => allocationItems.value.filter((item) => item.team_lead_id && (!item.project_manager_id || !(item.engineer_ids || []).length)))
+const inboxItems = computed(() => allocationCandidates.value.filter((item) => item.team_lead_id && (!item.project_manager_id || !(item.engineer_ids || []).length)))
 const planningItems = computed(() => serviceItems.value.filter((item) => {
   // “实施计划”是分配完成后的下一节点。仅有待分配状态远远不够，必须与后端
   // CheckImplementationPlanPrecondition 的责任链、能力校验和特殊方法前置保持一致。
@@ -1415,7 +1432,7 @@ const exceptionItems = computed(() => serviceItems.value.filter((item) => item.s
 const exceptionItemIDs = computed(() => new Set(exceptionItems.value.map((item) => item.id)))
 const pendingDeviations = computed(() => deliveryEvents.value.filter((event) => event.type === 'DEVIATION_REPORTED' && exceptionItemIDs.value.has(event.service_item_id) && !reviewedDeviationIDs.value.has(event.payload?.deviation_id)))
 const methodItems = computed(() => serviceItems.value.filter((item) => projectAllowsNode(item, 'methods') && item.status === '待分配' && item.special === '是' && ['PENDING', 'REJECTED'].includes(item.tech_review_status)))
-const assignmentItems = computed(() => allocationItems.value.filter((item) => item.team_lead_id && item.conflict_status !== 'PASSED'))
+const assignmentItems = computed(() => allocationCandidates.value.filter((item) => item.team_lead_id && item.conflict_status !== 'PASSED'))
 const activeNodeItems = computed(() => ({
   allocation: allocationItems.value,
   inbox: inboxItems.value,
@@ -1708,7 +1725,7 @@ const implementationKanbanColumns = computed(() =>
 
 const operationRows = computed(() => ({
   monitoring: projects.value.slice(0, 5).map((p) => ({ id: p.id, name: `${p.id} · ${p.customer}`, detail: p.category, owner: p.manager, state: p.status, progress: p.progress, due: p.due })),
-  allocation: allocationItems.value.map((s) => ({ id: s.id, name: `${s.id} · ${s.category}`, detail: `${s.site} / ${s.batch}`, warning: stampedContractStateByProject.value.get(s.project_id) === false ? '未上传盖章合同' : '', owner: personLabel(s.team_lead_id, '待分配团队负责人'), state: s.conflict_status === 'CONFLICT' ? '能力冲突' : s.team_lead_id ? '已分配' : '待分配', progress: s.project_manager_id ? 100 : s.team_lead_id ? 50 : 0, due: formatBusinessDate(s.planned_end) || '待排期' })),
+  allocation: allocationItems.value.map((s) => ({ id: s.id, name: `${s.id} · ${s.category}`, detail: `${s.site} / ${s.batch}`, warning: stampedContractStateByProject.value.get(s.project_id) === false ? '未上传盖章合同' : '', owner: personLabel(s.team_lead_id, '待分配团队负责人'), state: allocationState(s).label, progress: allocationState(s).progress, due: formatBusinessDate(s.planned_end) || '待排期' })),
   inbox: inboxItems.value.map((s) => ({ id: s.id, name: `${s.id} · ${projectByID.value.get(s.project_id)?.customer || s.site}`, detail: s.project_manager_id ? '实施工程师待指派' : '项目经理待指派', owner: personLabel(s.team_lead_id, '—'), state: '待处理', progress: s.project_manager_id ? 50 : 0, due: formatBusinessDate(s.planned_start) || '待排期' })),
   planning: planningItems.value.map((s) => ({ id: s.id, name: `${s.id} · ${s.site}`, detail: s.test_mode === 'PENETRATION' ? '渗透测试专项计划' : '现场实施计划', owner: personLabel(s.project_manager_id, '待指派项目经理'), state: latestWorkflowEvent(s)?.type === 'IMPLEMENTATION_PLAN_REVOKED' ? '待重新制定' : '待制定计划',
     priorState: latestWorkflowEvent(s)?.type === 'IMPLEMENTATION_PLAN_REVOKED' ? '已撤销' : '', progress: 0, due: '待排期' })),
@@ -2222,10 +2239,11 @@ function refreshWorkspace() {
   return loadWorkspace({ background: workspaceReady.value })
 }
 
-// refreshSelectedFieldEvidence 拉取当前服务项的现场证据判定（BIZ-PROJECT-06）。
-// 现场操作同步成功后必须重新拉取：本地队列与事件流都是判定输入，旧结论不能沿用。
-// 拉取失败时清空快照并记录原因——界面据此显示"未知"，完成动作按 fail-closed 拒绝。
+// 用途：拉取当前服务项的服务端现场证据，拒绝跨账号或过期请求回填。
+// 参数：reportError 控制是否向用户展示读取失败提示。
+// 返回值：无；失败清空证据并记录原因，完成门禁仍按未知处理。
 async function refreshSelectedFieldEvidence({ reportError = false } = {}) {
+  const ownerKey = fieldQueueOwner()
   const itemID = selectedServiceItem.value?.id || ''
   const ticket = fieldEvidenceScope.begin(`FIELD_EVIDENCE:${itemID}`)
   if (!itemID) {
@@ -2245,7 +2263,8 @@ async function refreshSelectedFieldEvidence({ reportError = false } = {}) {
       fieldEvidenceError.value = '服务端未返回有效的缺项判定'
       return
     }
-    fieldEvidenceSnapshot.value = snapshot
+    if (ownerKey !== fieldQueueOwner()) return
+    fieldEvidenceSnapshot.value = { ...snapshot, ownerKey }
     fieldEvidenceError.value = ''
   } catch (error) {
     if (!fieldEvidenceScope.isCurrent(ticket)) return
@@ -2937,32 +2956,64 @@ function fieldQueueOwner() {
   return tenantID && userID ? `${tenantID}:${userID}` : ''
 }
 
+// 用途：读取当前账号的离线作业和数量，供签到状态与完成门禁使用。
+// 参数：无，归属取自当前登录会话。
+// 返回值：无；读取失败保留已知队列，避免把未同步误报为已清空。
 async function refreshFieldQueueCount() {
-  try { pendingFieldSyncCount.value = await countFieldOperations(fieldQueueOwner()) } catch { pendingFieldSyncCount.value = 0 }
+  const ownerKey = fieldQueueOwner()
+  try {
+    const operations = await listFieldOperations(ownerKey)
+    if (ownerKey !== fieldQueueOwner()) return
+    pendingFieldOperations.value = operations
+    pendingFieldSyncCount.value = operations.length
+    fieldQueueError.value = ''
+  } catch (error) {
+    if (ownerKey === fieldQueueOwner()) fieldQueueError.value = formatUserError(error, { fallback: '无法读取本机现场作业队列，请检查浏览器存储权限后重试' })
+  }
 }
 
+// 用途：先保存现场证据，再核验本次作业是否真正被服务端确认。
+// 参数：operation 为带稳定编号、原始采集时间和业务载荷的现场作业。
+// 返回值：synced 表示本项已确认，pending 表示仍待同步；明确的签到输入拒绝抛出原因。
 async function persistAndSyncFieldOperation(operation) {
   const ownerKey = fieldQueueOwner()
   if (!ownerKey) throw new Error('当前登录身份不可用，无法安全保存离线作业')
+  if (operation.ownerKey && operation.ownerKey !== ownerKey) throw new Error('离线作业归属与当前账号不一致')
   await saveFieldOperation({ ...operation, ownerKey, createdAt: operation.createdAt || new Date().toISOString() })
   await refreshFieldQueueCount()
+  if (ownerKey !== fieldQueueOwner()) throw new Error('登录账号已变化，原账号的现场作业已保存，需切回原账号同步')
   if (!navigator.onLine) {
     showToast('当前离线，现场作业已安全保存；联网后将自动补传。', 'warning')
-    return false
+    return { status: 'pending', message: '当前离线，签到已保存在本机；联网同步确认后才算签到成功。' }
   }
+  let syncResult
   try {
-    await flushFieldOperations(true)
+    syncResult = await flushFieldOperations(true)
   } catch (error) {
     // 本地队列已落盘（client_operation_id 幂等）：同步阶段异常不得说成“操作未完成”，
     // 也不得让用户以为记录丢失而重复录入；联网或手动“立即重试”都会继续补传。
     showToast(`现场作业已安全保存到本地队列，但自动同步未完成：${formatUserError(error, { fallback: '请稍后点击立即重试' })}`, 'warning')
   }
-  return true
+  const outcome = syncResult?.outcomes?.find(current => current.operation.id === operation.id)
+  if (outcome?.status === 'synced') return { status: 'synced' }
+  const remaining = (await listFieldOperations(ownerKey)).find(current => current.id === operation.id)
+  const rejected = outcome?.status === 'failed' ? outcome.operation : remaining
+  if (rejected?.kind === 'check-in' && rejected.lastErrorStatus === 422 && !rejected.resultUncertain && !remaining?.resultUncertain) {
+    // 本次输入明确未受理：保留表单让用户补正，避免无效签到永久卡住离线队列。
+    const removed = await removeRejectedFieldOperation(rejected.id)
+    await refreshFieldQueueCount()
+    if (removed) throw Object.assign(new Error(rejected.lastError || '签到信息未通过校验，请修正后重新签到'), { status: 422 })
+  }
+  if (!remaining) throw new Error('尚未取得本次签到的确认回执，请刷新核对服务端记录后继续')
+  return { status: 'pending', message: remaining.lastError || '签到已保存在本机，尚未确认成功；请重试同步。' }
 }
 
 // holder.current 始终指向已经带上最新上传回执的那份操作对象：
 // 失败时调用方必须用它回写，不能用循环里取到的旧快照，否则会覆盖回执，
 // 导致重试重新上传、同一 client_operation_id 对应不同载荷而被服务端拒绝。
+// 用途：提交单项现场证据，上传回执成功后立即保留，签到还需核对业务回执。
+// 参数：operation 为队列作业，holder.current 保存最新文件回执以供失败重试。
+// 返回值：服务端业务回执；归属、上传或提交失败时抛出错误且不伪造确认。
 async function submitStoredFieldOperation(operation, holder = { current: operation }) {
   if (!operation.ownerKey || operation.ownerKey !== fieldQueueOwner()) throw new Error('离线作业归属与当前账号不一致')
   let current = operation
@@ -2973,19 +3024,31 @@ async function submitStoredFieldOperation(operation, holder = { current: operati
     holder.current = current
     await saveFieldOperation(current)
   }
+  if (current.ownerKey !== fieldQueueOwner()) throw new Error('登录账号已变化，请切回原账号同步现场作业')
   const payload = { ...current.payload, client_operation_id: current.id, captured_at: current.capturedAt }
-  if (current.kind === 'check-in') return checkInField(current.itemID, payload)
+  if (current.kind === 'check-in') {
+    const result = await checkInField(current.itemID, payload)
+    if (result?.status !== 'CHECKED_IN') throw new Error('服务端未返回签到确认，请刷新核对后重试同步')
+    if (current.ownerKey === fieldQueueOwner()) fieldCheckInState.value = { itemID: current.itemID, ownerKey: current.ownerKey,
+      phase: 'confirmed', message: '签到成功，服务端已确认。',
+      position: { coords: { latitude: payload.latitude, longitude: payload.longitude, accuracy: payload.accuracy_meters }, timestamp: Date.parse(current.capturedAt) } }
+    return result
+  }
   if (current.kind === 'record') return submitFieldRecord(current.itemID, { ...payload, evidence_files: current.artifact ? [current.artifact] : [] })
   if (current.kind === 'signature') return captureFieldSignature(current.itemID, { ...payload, signature_file: current.artifact })
   throw new Error('未知的现场离线作业类型')
 }
 
+// 用途：按当前账号逐条补传现场证据，区分失败项和已确认项。
+// 参数：announce 为 true 时展示同步结果。
+// 返回值：本轮每项作业的真实同步结果；忙碌或离线时无结果，队列读写异常抛出。
 async function flushFieldOperations(announce = false) {
   const ownerKey = fieldQueueOwner()
   if (fieldSyncing.value || !navigator.onLine || !ownerKey) return
   fieldSyncing.value = true
   let synced = 0
   let failed = 0
+  const outcomes = []
   try {
     const result = await processFieldQueue({
       operations: await listFieldOperations(ownerKey),
@@ -2993,6 +3056,7 @@ async function flushFieldOperations(announce = false) {
       remove: removeFieldOperation,
       save: saveFieldOperation,
       formatError: (error) => formatUserError(error, { fallback: '同步失败' }),
+      onResult: outcome => outcomes.push(outcome),
     })
     synced = result.synced
     failed = result.failed
@@ -3007,15 +3071,67 @@ async function flushFieldOperations(announce = false) {
     if (announce) showToast(`已同步 ${synced} 条现场作业`)
     await refreshAfterWrite()
   }
+  return { outcomes }
 }
 
-function currentPosition() {
-  return new Promise((resolve, reject) => {
-    if (!navigator.geolocation) { reject(new Error('当前设备不支持定位')); return }
-    navigator.geolocation.getCurrentPosition(resolve, () => reject(new Error('无法获取定位，请检查浏览器定位权限')), {
-      enableHighAccuracy: true, timeout: 15000, maximumAge: 30000,
-    })
-  })
+// 用途：为手机与电脑浏览器采集本次新位置，避免缓存和粗定位直接签到。
+// 参数：signal 用于取消当前定位，onProgress 接收最佳位置以显示精度。
+// 返回值：有效设备位置的 Promise；失败时保留可操作的中文原因。
+function currentPosition(signal, onProgress) {
+  return acquireFieldPosition({ signal, onProgress })
+}
+
+// 用途：绑定当前服务项完成定位和签到，重试时复用尚未确认的原作业。
+// 参数：item 为本次服务项，form 为该服务项偏离说明表单。
+// 返回值：无；仅确认后清空说明，失败时保留输入并抛出原因。
+async function runFieldCheckIn(item, form) {
+  const ownerKey = fieldQueueOwner(), section = activeSection.value, version = item.version
+  const isCurrent = () => ownerKey === fieldQueueOwner() && activeSection.value === section
+    && selectedServiceItem.value?.id === item.id && selectedServiceItem.value?.version === version
+    && selectedServiceItem.value?.status === '实施中' && canExecuteField.value
+  if (!ownerKey || !isCurrent()) throw new Error('当前服务项或权限已变化，请重新选择后签到')
+  const controller = new AbortController()
+  fieldLocationController = controller
+  let position
+  try {
+    let operation = (await listFieldOperations(ownerKey)).find(current => current.itemID === item.id && current.kind === 'check-in')
+    if (operation?.lastErrorStatus === 422 && !operation.resultUncertain) {
+      const removed = await removeRejectedFieldOperation(operation.id)
+      await refreshFieldQueueCount()
+      if (removed) operation = null
+      else {
+        operation = (await listFieldOperations(ownerKey)).find(current => current.id === operation.id)
+        if (!operation) throw new Error('签到队列状态已变化，请刷新核对服务端记录后继续')
+      }
+    }
+    if (!isCurrent()) throw new Error('操作对象已变化，请重新选择后签到')
+    if (!operation) {
+      fieldCheckInState.value = { itemID: item.id, ownerKey, phase: 'locating', message: '正在获取精确位置，最多等待 20 秒，请保持页面打开。' }
+      position = await currentPosition(controller.signal, current => {
+        if (isCurrent()) fieldCheckInState.value = { itemID: item.id, ownerKey, phase: 'locating', position: current,
+          message: `当前定位误差约 ${Math.ceil(current.coords.accuracy)} 米，正在继续提高精度…` }
+      })
+      if (!isCurrent() || controller.signal.aborted) throw new Error('定位期间操作对象已变化，请重新选择后签到')
+      operation = { id: newFieldOperationID('checkin'), kind: 'check-in', itemID: item.id, capturedAt: new Date(position.timestamp).toISOString(),
+        payload: { latitude: position.coords.latitude, longitude: position.coords.longitude, accuracy_meters: position.coords.accuracy,
+          deviation_reason: form.checkInDeviationReason, expected_version: 0 } }
+    } else position = { coords: { latitude: operation.payload.latitude, longitude: operation.payload.longitude, accuracy: operation.payload.accuracy_meters }, timestamp: Date.parse(operation.capturedAt) }
+    fieldCheckInState.value = { itemID: item.id, ownerKey, phase: 'submitting', position, message: '正在提交签到，等待服务端确认…' }
+    const result = await persistAndSyncFieldOperation(operation)
+    // 同步成功会刷新服务项版本；返回后只核对操作身份，不能把正常版本更新误判为失败。
+    if (ownerKey !== fieldQueueOwner() || activeSection.value !== section || selectedServiceItem.value?.id !== item.id) {
+      if (fieldCheckInState.value?.itemID === item.id && fieldCheckInState.value.ownerKey === ownerKey) fieldCheckInState.value = null
+      return
+    }
+    fieldCheckInState.value = { itemID: item.id, ownerKey, position,
+      phase: result.status === 'synced' ? 'confirmed' : 'pending', message: result.status === 'synced' ? '签到成功，服务端已确认。' : result.message }
+    if (result.status === 'synced') form.checkInDeviationReason = ''
+  } catch (error) {
+    if (isCurrent()) fieldCheckInState.value = { itemID: item.id, ownerKey, phase: 'error', position,
+      message: formatUserError(error, { fallback: '签到未完成，请检查定位后重试' }) }
+    else if (fieldCheckInState.value?.itemID === item.id && fieldCheckInState.value.ownerKey === ownerKey) fieldCheckInState.value = null
+    throw error
+  } finally { if (fieldLocationController === controller) fieldLocationController = null }
 }
 
 // 用途：固定原因输入前的服务项、选择范围与当前会话，防止等待期间串写。
@@ -3084,21 +3200,36 @@ async function runOperation(kind) {
   if (!items.length) { showToast(kind === 'allocation' ? '请至少选择一个服务项' : '当前没有可操作的服务项'); return }
   const form = operationForm.value
   const completedAssignmentIDs = []
+  const savedAssignmentIDs = []
+  const conflictedAssignments = []
   let fieldCompletionConfirmed = false
   saving.value = true
   try {
     if (kind === 'allocation') {
       // 设备清单在「实施准备」阶段确定；此处只编排团队负责人和执行团队指派。
       for (const selected of items) {
-        await assignServiceItemTeams({
+        const result = await assignServiceItemTeams({
           item: selected, teamLeadID: form.teamLeadID, projectManagerID: form.projectManagerID,
           engineerIDs: selectedIDs(form.engineerIDs), executionAllowed: canExecutionAssign.value,
           assignTeam, assignExecutionTeam, listServiceItemsSnapshot,
           onTeamAssigned: (id) => { selected.team_lead_id = id },
         })
-        completedAssignmentIDs.push(selected.id)
+        savedAssignmentIDs.push(selected.id)
+        if (result.capabilityCheck?.passed === false) {
+          conflictedAssignments.push({ id: selected.id, conflicts: result.capabilityCheck.conflicts })
+        } else completedAssignmentIDs.push(selected.id)
       }
-      showToast(canExecutionAssign.value ? `已批量保存 ${items.length} 个服务项并完成能力校验` : `已批量分配 ${items.length} 个服务项的团队负责人`)
+      const completed = new Set(completedAssignmentIDs)
+      selectedServiceItemIDs.value = selectedServiceItemIDs.value.filter(id => !completed.has(id))
+      if (conflictedAssignments.length) {
+        const reasons = conflictedAssignments.flatMap(entry =>
+          Array.isArray(entry.conflicts) ? entry.conflicts : []).slice(0, 2).join('；').slice(0, 180)
+        showToast(`已保存 ${savedAssignmentIDs.length} 个服务项，其中 ${conflictedAssignments.length} 个服务项能力校验未通过，仍需调整。${reasons}`, 'warning')
+      } else {
+        showToast(canExecutionAssign.value
+          ? `已完成 ${items.length} 个服务项的分配并通过能力校验`
+          : `已批量分配 ${items.length} 个服务项的团队负责人`)
+      }
     } else if (kind === 'planning') {
       // 操作台用的是 div 而非 <form>，浏览器不会执行 required 校验，这里显式前置拦截。
       if (planningBlocked.value) { showToast(planningBlocked.value.reason); return }
@@ -3170,13 +3301,7 @@ async function runOperation(kind) {
       await startFieldExecution(item.id, { expected_version: Number(item.version) || 0 })
       showToast('已进入实施中，可以提交现场记录')
     } else if (kind === 'field-check-in') {
-      const position = await currentPosition()
-      const operation = {
-        id: newFieldOperationID('checkin'), kind: 'check-in', itemID: item.id, capturedAt: new Date(position.timestamp || Date.now()).toISOString(),
-        payload: { latitude: position.coords.latitude, longitude: position.coords.longitude, accuracy_meters: position.coords.accuracy, deviation_reason: form.checkInDeviationReason, expected_version: 0 },
-      }
-      await persistAndSyncFieldOperation(operation)
-      form.checkInDeviationReason = ''
+      await runFieldCheckIn(item, form)
     } else if (kind === 'field') {
       if (!String(form.rawData || '').trim() || !String(form.environment || '').trim()) { showToast('请填写现场原始数据与环境条件', 'warning'); return }
 	  if (!(form.fieldEvidenceFile instanceof File)) { showToast('请上传至少一份现场证据', 'warning'); return }
@@ -3226,7 +3351,7 @@ async function runOperation(kind) {
     }
     await refreshAfterWrite()
   } catch (error) {
-    const partialAssignment = kind === 'allocation' && (completedAssignmentIDs.length > 0 || error?.partialCompletion?.teamAssigned === true)
+    const partialAssignment = kind === 'allocation' && (savedAssignmentIDs.length > 0 || error?.partialCompletion?.teamAssigned === true)
     let message = formatUserError(error?.cause || error, { fallback: '操作未完成，请核对当前状态后继续。' })
     if (fieldCompletionConfirmed) message = `现场完成已保存，工作区刷新未完成。请刷新核对，勿重复结束。${message}`
     // 为已完成事实预留提示长度，避免长业务原因被 Toast 的安全长度限制整体替换。
@@ -3235,6 +3360,9 @@ async function runOperation(kind) {
     // NETWORK_ERROR / TIMEOUT 分类把“负责人已成功分配”覆盖成整次操作结果未知。
     if (kind === 'allocation' && error?.partialCompletion?.teamAssigned === true) {
       message = `当前服务项的团队负责人已分配；执行团队分配未确认完成。${message}`
+    }
+    if (kind === 'allocation' && conflictedAssignments.length) {
+      message = `本批次已保存 ${savedAssignmentIDs.length} 个服务项，其中 ${conflictedAssignments.length} 个能力校验未通过，仍需修正。${message}`
     }
     if (kind === 'allocation' && completedAssignmentIDs.length) {
       const completed = new Set(completedAssignmentIDs)
@@ -3254,13 +3382,24 @@ async function runOperation(kind) {
   return fieldCompletionConfirmed
 }
 
-// 用途：按原选择撤销分配，区分已完成、拒绝、未知和未执行项。
-// 参数：kind 为 team（负责人）或 execution（执行团队）。
+// 用途：从当前项目详情中解析仍允许纠正分配的服务项。
+// 参数：itemID 为详情行中的目标编号，不接受其他项目或阶段的目标。
+// 返回值：目标服务项数组；范围或父项目阶段失效时为空。
+function detailAssignmentActionItems(itemID) {
+  if (activeSection.value !== 'project_detail') return []
+  return detailItems.value.filter((item) => item.id === itemID
+    && item.status === '待分配' && projectAllowsNode(item, 'allocation'))
+}
+
+// 用途：按原选择或详情行撤销分配，区分已完成、拒绝、未知和未执行项。
+// 参数：kind 为 team（负责人）或 execution（执行团队）；itemID 为可选详情目标。
 // 返回值：无；只取消已确认完成项勾选，失败后先刷新核对。
-async function revokeSelectedAssignment(kind) {
-  const permitted = () => kind === 'team' ? canRevokeTeam.value : kind === 'execution' && canRevokeExecution.value
+async function revokeSelectedAssignment(kind, itemID = '') {
+  const permitted = () => (kind === 'team' ? canRevokeTeam.value
+    : kind === 'execution' && canRevokeExecution.value)
+    && (!itemID || detailAssignmentActionItems(itemID).length === 1)
   if (saving.value || promptDialog.value || !permitted()) return
-  const items = selectedServiceItems.value
+  const items = itemID ? detailAssignmentActionItems(itemID) : selectedServiceItems.value
   if (!items.length) { showToast('请至少选择一个服务项', 'warning'); return }
   const eligible = items.filter((item) => item.status === '待分配' && (kind === 'team' ? item.team_lead_id : item.project_manager_id))
   if (eligible.length !== items.length) { showToast('仅可撤销处于待分配状态且已有对应分配的服务项', 'warning'); return }
@@ -3301,18 +3440,20 @@ async function revokeSelectedAssignment(kind) {
 }
 
 // 用途：逐项退回拆解确认，保留部分完成和未知结果边界。
-// 参数：无。
+// 参数：itemID 为可选的当前项目详情目标；未指定时使用操作台选择。
 // 返回值：无；只清除已确认完成项选择，未确认项先核对且不自动重发。
-async function returnSelectedToDecomposition() {
-  if (saving.value || promptDialog.value || !canManageDecomposition.value) return
-  const items = selectedServiceItems.value
+async function returnSelectedToDecomposition(itemID = '') {
+  const permitted = () => canManageDecomposition.value
+    && (!itemID || detailAssignmentActionItems(itemID).length === 1)
+  if (saving.value || promptDialog.value || !permitted()) return
+  const items = itemID ? detailAssignmentActionItems(itemID) : selectedServiceItems.value
   if (!items.length) { showToast('请至少选择一个服务项', 'warning'); return }
   if (items.some((item) => item.status !== '待分配')) { showToast('仅可将待分配服务项退回拆解确认', 'warning'); return }
   const context = captureReasonContext(items)
   const reason = await askOperationReason({
     title: '退回拆解确认', confirmText: '退回拆解确认', label: '退回原因', danger: true,
     description: '请输入退回拆解确认的原因。原分配与能力校验结果将清除。',
-  }, context, () => canManageDecomposition.value)
+  }, context, permitted)
   if (reason === null) return
   saving.value = true
   const completed = []
@@ -3604,6 +3745,11 @@ function retryEquipmentPanel() { equipmentPanel.value = createEquipmentPanel() }
 onMounted(loadWorkspace)
 watch(() => fieldQueueOwner(), (ownerKey) => {
   pendingFieldSyncCount.value = 0
+  pendingFieldOperations.value = []
+  fieldQueueError.value = ''
+  fieldCheckInState.value = null
+  fieldEvidenceSnapshot.value = null
+  fieldLocationController?.abort()
   if (ownerKey && session.value?.permissions?.includes('project.read')) {
     refreshFieldQueueCount(); flushFieldOperations(false)
   }
@@ -3653,10 +3799,14 @@ watch([activeSection, activeNodeItems, loading, sectionExtrasLoading, workspaceR
 watch(selectedServiceItem, (item) => {
   if (activeSection.value === 'preparation') void loadEquipmentReservations(item)
 })
+watch([() => selectedServiceItem.value?.id, activeSection, canExecuteField], () => {
+  fieldLocationController?.abort()
+})
 watch(canExecutionAssign, (allowed) => {
   if (allowed && ['allocation', 'inbox', 'assignments'].includes(activeSection.value)) loadPersonnel()
 })
 onBeforeUnmount(() => {
+  fieldLocationController?.abort()
   window.clearTimeout(toastTimer)
   // 合同搜索防抖计时器随组件销毁一起取消，避免卸载后再发请求。
   if (approvedContractSearchTimer) window.clearTimeout(approvedContractSearchTimer)
@@ -3923,8 +4073,15 @@ onBeforeUnmount(() => {
           </FilterBar>
           <p v-if="reportStageListError" class="pm-inline-alert danger" role="alert">{{ reportStageListError }}</p>
           <section class="pm-table-panel">
-            <div class="pm-table-scroll"><table class="pm-table pm-responsive-list"><thead><tr><th scope="col"></th><th scope="col">项目 / 客户</th><th scope="col">合同编号</th><th scope="col">服务项</th><th scope="col">检测类别</th><th scope="col">团队 / 项目经理</th><th scope="col">状态</th><th scope="col">交付进度</th><th scope="col">计划完成</th><th scope="col"></th></tr></thead><tbody>
-              <tr v-for="project in pagedProjects" :key="project.id" :class="{ selected: selectedRows.includes(project.id), risk: project.risk }"><td class="pm-card-select" data-label="选择"><input type="checkbox" :checked="selectedRows.includes(project.id)" :aria-label="`选择 ${project.id}`" @change="toggleRow(project.id)" /></td><td class="pm-card-title" data-label="项目 / 客户"><button class="pm-project-link" @click="openProject(project)"><b>{{ project.id }}</b><span>{{ project.customer }}</span></button></td><td class="mono" data-label="合同编号">{{ project.contract }}</td><td data-label="服务项">{{ project.services }}</td><td data-label="检测类别">{{ project.category }}</td><td data-label="团队 / 项目经理"><b>团队负责人：{{ projectAssignmentPeople(project.id).teamLeads }}</b><span class="pm-cell-sub">项目经理：{{ projectAssignmentPeople(project.id).projectManagers }}</span></td><td data-label="状态"><span class="pm-badge-stack"><span class="pm-badge" :class="statusTone(project.status)">{{ project.status }}</span><span v-if="projectReportStageLabel(project)" class="pm-badge" :class="statusTone(project.report_stage)">报告编制 · {{ projectReportStageLabel(project) }}</span></span></td><td data-label="交付进度"><ProgressCell :percent="project.progress" /></td><td data-label="计划完成" :class="{ 'pm-text-danger': project.due.includes('超期') }">{{ project.due }}</td><td class="pm-card-action" data-label="操作"><button class="pm-link" @click="openProject(project)">详情</button></td></tr>
+            <div class="pm-table-scroll"><table class="pm-table pm-responsive-list"><thead><tr><th scope="col"></th><th scope="col">客户</th><th scope="col">项目 / 系统名称</th><th scope="col">服务项</th><th scope="col">检测类别</th><th scope="col">团队 / 项目经理</th><th scope="col">状态</th><th scope="col">交付进度</th><th scope="col">计划完成</th><th scope="col"></th></tr></thead><tbody>
+              <tr v-for="project in pagedProjects" :key="project.id" :class="{ selected: selectedRows.includes(project.id), risk: project.risk }"><td class="pm-card-select" data-label="选择"><input type="checkbox" :checked="selectedRows.includes(project.id)" :aria-label="`选择 ${project.id}`" @change="toggleRow(project.id)" /></td><td class="pm-card-title" data-label="客户">
+                <button class="pm-project-link" @click="openProject(project)">
+                  <b>{{ project.customer?.trim() || '未提供客户名称' }}</b>
+                </button>
+              </td><td data-label="项目 / 系统名称">
+                <b>{{ project.name?.trim() || '未提供项目名称' }} · {{ projectSystemsByProject.get(project.id) || '暂无可见系统名称' }}</b>
+                <small class="pm-service-code mono">合同编号：{{ project.contract || '—' }}</small>
+              </td><td data-label="服务项">{{ project.services }}</td><td data-label="检测类别">{{ project.category }}</td><td data-label="团队 / 项目经理"><b>团队负责人：{{ projectAssignmentPeople(project.id).teamLeads }}</b><span class="pm-cell-sub">项目经理：{{ projectAssignmentPeople(project.id).projectManagers }}</span></td><td data-label="状态"><span class="pm-badge-stack"><span class="pm-badge" :class="statusTone(project.status)">{{ project.status }}</span><span v-if="projectReportStageLabel(project)" class="pm-badge" :class="statusTone(project.report_stage)">报告编制 · {{ projectReportStageLabel(project) }}</span></span></td><td data-label="交付进度"><ProgressCell :percent="project.progress" /></td><td data-label="计划完成" :class="{ 'pm-text-danger': project.due.includes('超期') }">{{ project.due }}</td><td class="pm-card-action" data-label="操作"><button class="pm-link" @click="openProject(project)">详情</button></td></tr>
               <tr v-if="!pagedProjects.length"><td colspan="10">
                 <ListState
                   :loading="reportStageListLoading"
@@ -3997,7 +4154,19 @@ onBeforeUnmount(() => {
             </section>
             <article v-if="detailTab === 'items'" class="pm-table-panel">
               <div class="pm-table-scroll"><table class="pm-table pm-detail-items"><thead><tr><th scope="col">服务项</th><th scope="col">类别 / 体系</th><th scope="col">技术要求</th><th scope="col">状态</th><th scope="col">报告 / 计划</th><th scope="col">操作</th></tr></thead><tbody>
-                <tr v-for="item in detailItems" :key="item.id"><td class="mono" data-label="服务项"><b>{{ item.id }}</b><span class="pm-cell-sub">{{ item.site }} · {{ item.batch }}</span></td><td data-label="类别 / 体系">{{ item.category }}<span v-if="item.system" class="pm-cell-sub">{{ item.system }}</span></td><td data-label="技术要求">{{ specialMethodLabel[item.special_method] || item.special || '—' }}</td><td data-label="状态"><span class="pm-badge" :class="statusTone(item.status)">{{ item.status }}</span><span v-if="isEmbeddedPenetrationItem(item)" class="pm-cell-sub">{{ penetrationPackageLabel(item) }}</span></td><td data-label="报告 / 计划"><span>{{ item.report_status ? (reportStatusLabel[item.report_status] || item.report_status) : '—' }}</span><span class="pm-cell-sub">{{ item.planned_start ? formatBusinessDate(item.planned_start) + ' ~ ' + formatBusinessDate(item.planned_end) : '待排期' }}</span></td><td data-label="操作"><button class="pm-link" type="button" @click="navigate('implementation')">看板</button></td></tr>
+                <tr v-for="item in detailItems" :key="item.id"><td class="mono" data-label="服务项"><b>{{ item.id }}</b><span class="pm-cell-sub">{{ item.site }} · {{ item.batch }}</span></td><td data-label="类别 / 体系">{{ item.category }}<span v-if="item.system" class="pm-cell-sub">{{ item.system }}</span></td><td data-label="技术要求">{{ specialMethodLabel[item.special_method] || item.special || '—' }}</td><td data-label="状态"><span class="pm-badge" :class="statusTone(item.status)">{{ item.status }}</span><span v-if="isEmbeddedPenetrationItem(item)" class="pm-cell-sub">{{ penetrationPackageLabel(item) }}</span></td><td data-label="报告 / 计划"><span>{{ item.report_status ? (reportStatusLabel[item.report_status] || item.report_status) : '—' }}</span><span class="pm-cell-sub">{{ item.planned_start ? formatBusinessDate(item.planned_start) + ' ~ ' + formatBusinessDate(item.planned_end) : '待排期' }}</span></td><td data-label="操作"><button class="pm-link" type="button" @click="navigate('implementation')">看板</button>
+                  <template v-if="item.status === '待分配' && projectAllowsNode(item, 'allocation')">
+                    <button v-if="canRevokeExecution && item.project_manager_id" class="pm-link"
+                      type="button" :disabled="saving"
+                      @click="revokeSelectedAssignment('execution', item.id)">撤销执行团队</button>
+                    <button v-if="canRevokeTeam && item.team_lead_id" class="pm-link danger"
+                      type="button" :disabled="saving"
+                      @click="revokeSelectedAssignment('team', item.id)">撤销团队负责人</button>
+                    <button v-if="canManageDecomposition" class="pm-link danger"
+                      type="button" :disabled="saving"
+                      @click="returnSelectedToDecomposition(item.id)">退回拆解确认</button>
+                  </template>
+                </td></tr>
                 <tr v-if="!detailItems.length"><td colspan="6" class="pm-empty-mini">该项目暂无服务项</td></tr>
               </tbody></table></div>
             </article>
@@ -4191,7 +4360,18 @@ onBeforeUnmount(() => {
             <PenetrationWorkPackageCard v-if="selectedServiceItem && isEmbeddedPenetrationItem(selectedServiceItem)" :item="selectedServiceItem" :session="session" :engineer-options="penetrationEngineerOptions" @updated="updatePenetrationPackage" @notify="notifyFromPenetration" />
             <button v-if="selectedServiceItem && selectedServiceItem.status === '实施准备中' && canExecuteField" class="pm-button primary" :disabled="saving" @click="runOperation('field-start')">进入实施中</button>
             <div v-if="selectedServiceItem && selectedServiceItem.status === '实施中' && canExecuteField" class="pm-field-workflow">
-              <section class="pm-field-step pm-field-checkin"><header><span>01</span><div><b>GPS 现场签到</b><small>记录设备定位、精度与采集时间；离线时安全排队。</small></div></header><label><span>偏离说明（定位与现场不一致时填写）</span><input v-model.trim="operationForm.checkInDeviationReason" placeholder="例如 客户临时安排在同园区备用机房"  maxlength="1000"/></label><button class="pm-button" :disabled="saving" @click="runOperation('field-check-in')">获取定位并签到</button></section>
+              <section class="pm-field-step pm-field-checkin">
+                <header><span>01</span><div><b>GPS 现场签到</b><small>手机、电脑均可定位；误差不超过 100 米时提交，服务端确认后才算成功。</small></div></header>
+                <label><span>偏离说明（定位与现场不一致时填写）</span><input v-model.trim="operationForm.checkInDeviationReason" placeholder="例如 客户临时安排在同园区备用机房" maxlength="1000" :disabled="saving || fieldSyncing" /></label>
+                <button class="pm-button" :disabled="saving || fieldSyncing" @click="runOperation('field-check-in')">{{ selectedCheckInState?.phase === 'locating' ? '正在获取精确位置…' : selectedCheckInState?.phase === 'submitting' ? '正在提交签到…' : selectedPendingCheckIn ? '重试签到同步' : '获取定位并签到' }}</button>
+                <div class="pm-field-location" :class="selectedCheckInState?.phase" role="status" aria-live="polite">
+                  <b v-if="selectedCheckInState">{{ selectedCheckInState.message }}</b>
+                  <b v-if="fieldQueueError" role="alert">{{ fieldQueueError }}</b>
+                  <small v-if="selectedCheckInState?.position">经度 {{ selectedCheckInState.position.coords.longitude.toFixed(6) }} · 纬度 {{ selectedCheckInState.position.coords.latitude.toFixed(6) }} · 定位误差约 {{ Math.ceil(selectedCheckInState.position.coords.accuracy) }} 米 · 采集于 {{ formatDateTime(selectedCheckInState.position.timestamp) }}</small>
+                  <small v-else-if="selectedCheckInState?.capturedAt">上次签到采集于 {{ formatDateTime(selectedCheckInState.capturedAt) }}</small>
+                  <small v-else>请允许系统和浏览器使用精确位置；电脑定位较粗或室内信号不足时，可使用手机移至开阔处重试。</small>
+                </div>
+              </section>
               <section class="pm-field-step"><header><span>02</span><div><b>填写现场记录</b><small>原始数据、环境条件与文件回执绑定同一采集时间。</small></div></header><div class="pm-form pm-operation-form"><label><span>现场原始数据 <em>*</em></span><textarea v-model.trim="operationForm.rawData" rows="3" placeholder="记录现场实测数据与依据" maxlength="2000"></textarea></label><label><span>环境条件 <em>*</em></span><textarea v-model.trim="operationForm.environment" rows="3" placeholder="记录现场环境条件" maxlength="500"></textarea></label><label><span>现场证据 <em>*</em></span><input type="file" accept="application/pdf,image/png,image/jpeg" @change="operationForm.fieldEvidenceFile = $event.target.files?.[0] || null" /><small>文件通过统一文件网关上传、校验并以 SHA-256 回执存证。</small></label><button class="pm-button" :disabled="saving" @click="runOperation('field')">保存现场记录</button></div></section>
               <section class="pm-field-step"><header><span>03</span><div><b>电子签名</b><small>签名图像经文件网关存证，并绑定当前账号与时间戳。</small></div></header><SignaturePad :key="signaturePadKey" @signed="operationForm.fieldSignatureFile = $event" @cleared="operationForm.fieldSignatureFile = null" /><button class="pm-button" :disabled="saving || !operationForm.fieldSignatureFile" @click="runOperation('field-signature')">提交电子签名</button></section>
             </div>
@@ -4363,13 +4543,13 @@ onBeforeUnmount(() => {
         </template>
 
         <template v-else>
-          <section class="pm-operational-stats"><article><span>{{ activeSection === 'allocation' ? '当前阶段服务项' : '待处理' }}</span><strong>{{ operationRows.length }}</strong><small>{{ activeSection === 'allocation' ? '含已分配、待补齐执行团队的服务项' : '来自当前工作区' }}</small></article><article><span>服务项总数</span><strong>{{ serviceItems.length }}</strong><small>以最新流程状态为准</small></article><article><span>已完成项目</span><strong>{{ completedProjectCount }}</strong><small>当前租户累计</small></article></section>
+          <section class="pm-operational-stats"><article><span>{{ activeSection === 'allocation' ? '待分配服务项' : '待处理' }}</span><strong>{{ operationRows.length }}</strong><small>{{ activeSection === 'allocation' ? '仅显示未完成分配或能力校验的服务项' : '来自当前工作区' }}</small></article><article><span>服务项总数</span><strong>{{ serviceItems.length }}</strong><small>以最新流程状态为准</small></article><article><span>已完成项目</span><strong>{{ completedProjectCount }}</strong><small>当前租户累计</small></article></section>
           <section v-if="['allocation', 'inbox', 'planning', 'preparation', 'assignments', 'methods', 'exceptions', 'reports'].includes(activeSection)" class="pm-panel pm-operation-panel">
             <header><div><p class="pm-panel-kicker">现场操作</p><h2>服务项操作台</h2></div><span class="pm-operation-panel-hint">选择服务项后在右侧处理当前阶段</span></header>
             <div class="pm-operation-workspace">
               <aside class="pm-operation-queue" aria-label="服务项队列">
                 <div class="pm-operation-queue-head"><b>服务项队列</b><span>{{ activeSection === 'allocation' ? allocationItems.length : activeNodeItems.length }} 项</span></div>
-                <ServiceItemPicker v-if="activeSection === 'allocation'" :items="allocationItems" :projects="projects" :selected-ids="selectedServiceItemIDs" multiple empty-text="暂无可分配服务项" hint="仅显示已完成拆解确认、当前处于待分配的项目；可多选批量分配。" @toggle="toggleServiceItem" />
+                <ServiceItemPicker v-if="activeSection === 'allocation'" :items="allocationItems" :projects="projects" :status-label="item => allocationState(item).label" :selected-ids="selectedServiceItemIDs" multiple empty-text="暂无可分配服务项" hint="仅显示当前仍需分配的服务项；完成项保存后自动移出，可多选批量分配。" @toggle="toggleServiceItem" />
                 <ServiceItemPicker v-else :items="activeNodeItems" :projects="projects" :selected-ids="selectedServiceItem ? [selectedServiceItem.id] : []" empty-text="当前节点暂无可操作服务项" @select="selectServiceItem" />
               </aside>
               <div class="pm-operation-detail">
@@ -4409,7 +4589,7 @@ onBeforeUnmount(() => {
                 </section>
             <PenetrationWorkPackageCard v-if="activeSection !== 'allocation' && selectedServiceItem && isEmbeddedPenetrationItem(selectedServiceItem)" :item="selectedServiceItem" :session="session" :engineer-options="penetrationEngineerOptions" :auto-ensure="activeSection === 'planning'" @updated="updatePenetrationPackage" @notify="notifyFromPenetration" />
             <div v-if="activeSection === 'allocation' && selectedServiceItems.length" class="pm-panel-actions">
-              <button v-if="canManageDecomposition" type="button" class="pm-button" :disabled="saving" @click="returnSelectedToDecomposition">退回拆解确认</button>
+              <button v-if="canManageDecomposition" type="button" class="pm-button" :disabled="saving" @click="returnSelectedToDecomposition()">退回拆解确认</button>
               <button v-if="canRevokeExecution" type="button" class="pm-button" :disabled="saving" @click="revokeSelectedAssignment('execution')">撤销执行团队</button>
               <button v-if="canRevokeTeam" type="button" class="pm-button danger" :disabled="saving" @click="revokeSelectedAssignment('team')">撤销团队负责人</button>
             </div>

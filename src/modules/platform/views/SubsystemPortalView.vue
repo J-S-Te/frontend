@@ -6,6 +6,7 @@ import { AUTHORIZATION_REFRESHED_EVENT } from '@/modules/platform/auth/utils/aut
 import { listPortalApplications } from '@/modules/platform/applications/api/applications'
 import ConsoleIcon from '@/modules/platform/shared/components/ConsoleIcon.vue'
 import PaginationBar from '@/modules/shared/components/PaginationBar.vue'
+import SystemAttribution from '@/modules/shared/components/SystemAttribution.vue'
 import { buildPortalSubsystems } from '@/modules/registry/moduleRegistry.js'
 import {
   PORTAL_PAGE_SIZE,
@@ -942,6 +943,7 @@ onBeforeUnmount(() => {
     <footer class="subsystem-portal__footer">
       <span class="subsystem-portal__footer-note">建议分辨率：1920×1080 · 主流浏览器：Chrome / Edge / Firefox / Safari 最新版</span>
       <span class="subsystem-portal__footer-copyright">© 2026 V2.1.0</span>
+      <SystemAttribution class="subsystem-portal__developer" />
     </footer>
 
     <Transition name="portal-toast">

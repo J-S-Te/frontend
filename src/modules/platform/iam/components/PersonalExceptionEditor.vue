@@ -10,6 +10,7 @@ import {
   roleCodeOf,
   roleNameOf,
   scopeTextOf,
+  validityStateOf,
   validityTextOf,
 } from '@/modules/platform/iam/utils/personalExceptionAuthorization'
 
@@ -22,6 +23,8 @@ const props = defineProps({
   environments: { type: Array, default: () => [] },
   existingManualRoles: { type: Array, default: () => [] },
   inheritedRoles: { type: Array, default: () => [] },
+  authorizationState: { type: String, default: '' },
+  now: { type: Date, default: () => new Date() },
   fieldErrors: { type: Object, default: () => ({}) },
   blockers: { type: Array, default: () => [] },
   warnings: { type: Array, default: () => [] },
@@ -45,12 +48,20 @@ const submitText = computed(() => {
 })
 const existingRoleCodes = computed(() => new Set(props.existingManualRoles.map((role) => roleCodeOf(role)).filter(Boolean)))
 const inheritedRoleCodes = computed(() => new Set(props.inheritedRoles.map((role) => roleCodeOf(role)).filter(Boolean)))
+const templateRoleCodes = computed(() => {
+  if (String(props.authorizationState || '').trim().toUpperCase() !== 'GRANTED') return new Set()
+  return new Set(props.inheritedRoles
+    .filter((role) => String(role?.grant_origin || '').trim().toUpperCase() === 'TEMPLATE'
+      && validityStateOf(role, props.now) === 'ACTIVE')
+    .map((role) => roleCodeOf(role)).filter(Boolean))
+})
 const allRoleOptions = computed(() => assignableActiveCatalogRoles(props.catalog))
 const roleOptions = computed(() => {
   const query = roleQuery.value.trim().toLowerCase()
   return allRoleOptions.value.filter((role) => {
     const code = roleCodeOf(role)
-    if (isCreate.value && existingRoleCodes.value.has(code)) return false
+    const alreadyAssigned = existingRoleCodes.value.has(code) || templateRoleCodes.value.has(code)
+    if (isCreate.value && alreadyAssigned) return false
     if (!query) return true
     return code.toLowerCase().includes(query) || String(roleNameOf(role, props.catalog)).toLowerCase().includes(query)
   })
@@ -170,12 +181,15 @@ onMounted(() => {
         <span>角色 *</span>
         <input v-model="roleQuery" type="search" maxlength="100" placeholder="按角色名称或编码搜索" :disabled="busy || !catalogReady" aria-describedby="personal-exception-role-error" />
         <select ref="roleSelect" :value="draft.roleCode" :disabled="busy || !catalogReady" @change="onField('roleCode', $event)">
-          <option value="">{{ roleOptions.length ? '请选择角色' : (catalogReady ? '目录中没有可分配角色' : '角色目录未就绪') }}</option>
+          <option value="">{{ roleOptions.length ? '请选择角色' : (catalogReady ? '当前没有可新增的角色' : '角色目录未就绪') }}</option>
           <option v-for="role in roleOptions" :key="roleCodeOf(role)" :value="roleCodeOf(role)">{{ roleNameOf(role, catalog) }} · {{ roleCodeOf(role) }}</option>
         </select>
         <small v-if="roleQuery && !roleOptions.length">没有匹配的角色；清空搜索可查看全部可分配角色。</small>
         <small v-else-if="!catalogReady">角色目录未同步，暂不能新增或修改。</small>
-        <small v-else>同一角色已有个人例外时不会出现在新增选项中；请修改已有授权。</small>
+        <small v-else>
+          已通过岗位模板获得的角色和已有个人例外已从新增选项中隐藏；
+          已有例外请在列表中修改。
+        </small>
         <small v-if="fieldErrors.roleCode" id="personal-exception-role-error" class="iam-personal-exception-error">{{ fieldErrors.roleCode }}</small>
       </label>
       <div v-else class="iam-personal-exception-field">

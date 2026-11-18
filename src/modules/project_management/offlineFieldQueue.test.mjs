@@ -40,3 +40,33 @@ test('one permanently failing queue item does not block the next', async () => {
   assert.equal(calls, 2)
   assert.deepEqual(result, { synced: 0, failed: 2 })
 })
+
+test('签到同步失败保留服务端拒绝状态，网络未知结果不误记为拒绝', async () => {
+  const saved = []
+  await processFieldQueue({
+    operations: [{ id: 'rejected' }, { id: 'unknown' }],
+    submit: async operation => { throw Object.assign(new Error('签到未确认'), operation.id === 'rejected' ? { status: 422 } : {}) },
+    remove: async () => {},
+    save: async operation => saved.push(operation),
+  })
+  assert.equal(saved[0].lastErrorStatus, 422)
+  assert.equal(saved[1].lastErrorStatus, 0)
+})
+
+test('二百响应损坏和请求超时的未知结果标记不能因状态码丢失', async () => {
+  for (const status of [200, 201, 408]) {
+    const saved = []
+    await processFieldQueue({ operations: [{ id: 'unknown-' + status }],
+      submit: async () => { throw Object.assign(new Error('结果未知'), { status, outcomeUnknown: true }) },
+      remove: async () => {}, save: async operation => saved.push(operation) })
+    assert.equal(saved[0].resultUncertain, true)
+  }
+})
+
+test('升级前只存失败文本的签到继续按结果未知处理', async () => {
+  const saved = []
+  await processFieldQueue({ operations: [{ id: 'legacy', lastError: '旧版网络同步失败' }],
+    submit: async () => { throw Object.assign(new Error('输入已不满足当前规则'), { status: 422 }) },
+    remove: async () => {}, save: async operation => saved.push(operation) })
+  assert.equal(saved[0].resultUncertain, true)
+})

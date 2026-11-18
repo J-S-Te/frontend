@@ -9,26 +9,32 @@ const viewSource = await readFile(new URL('./views/ProjectManagementView.vue', i
 // 用途：执行真实分配页面及提示，隔离外部请求并保留完成事实。
 // 参数：items 为当前服务项，配置为本用例的请求及刷新依赖。
 // 返回值：真实页面状态、执行入口与刷新计数。
-function allocationPage(items, { assignTeam = async () => {}, assignExecutionTeam = async () => {}, listServiceItemsSnapshot = async () => ({ items: items.map(row => ({ ...row, version: row.version + 5 })), total: items.length, truncated: false }), refreshed = async () => {} } = {}) {
+function allocationPage(items, { assignTeam = async () => {}, assignExecutionTeam = async () => ({ passed: true, conflicts: [] }), listServiceItemsSnapshot = async () => ({ items: items.map(row => ({ ...row, version: row.version + 5 })), total: items.length, truncated: false }), refreshed = async () => {} } = {}) {
   const ref = value => ({ value })
   const state = {
     selectedServiceItemIDs: ref(items.map(row => row.id)), operationForm: ref({ teamLeadID: 'lead-1', projectManagerID: 'manager-1', engineerIDs: 'engineer-1' }),
     saving: ref(false), canExecutionAssign: ref(true), toastMessage: ref(''), toastType: ref(''),
+    refreshWarning: ref(''),
   }
   const selectedServiceItems = { get value() { return items.filter(row => state.selectedServiceItemIDs.value.includes(row.id)) } }
   const selectedServiceItem = { get value() { return selectedServiceItems.value[0] || null } }
   const operation = viewSource.slice(viewSource.indexOf('async function runOperation(kind)'), viewSource.indexOf('\nasync function revokeSelectedAssignment('))
   const toast = viewSource.slice(viewSource.indexOf('function showToast(message'), viewSource.indexOf('\nfunction projectEvents('))
+  const refresh = viewSource.slice(viewSource.indexOf('async function refreshAfterWrite()'),
+    viewSource.indexOf('\nfunction retryAfterWrite()'))
   let refreshCount = 0
-  const run = new Function(...Object.keys(state), 'selectedServiceItems', 'selectedServiceItem', 'formatUserError', 'assignServiceItemTeams', 'assignTeam', 'assignExecutionTeam', 'listServiceItemsSnapshot', 'selectedIDs', 'loadWorkspace', 'refreshAfterWrite', 'window',
-    `let toastTimer; ${toast}; ${operation}\n; return runOperation;`)(...Object.values(state), selectedServiceItems, selectedServiceItem, formatUserError, assignServiceItemTeams, assignTeam, assignExecutionTeam, listServiceItemsSnapshot, text => text.split(','), async () => { refreshCount++; await refreshed() }, async () => { refreshCount++; await refreshed() }, { clearTimeout: () => {}, setTimeout: () => 1 })
+  const run = new Function(...Object.keys(state), 'selectedServiceItems', 'selectedServiceItem', 'formatUserError', 'assignServiceItemTeams', 'assignTeam', 'assignExecutionTeam', 'listServiceItemsSnapshot', 'selectedIDs', 'loadWorkspace', 'window',
+    `let toastTimer; ${toast}; ${refresh}; ${operation}\n; return runOperation;`)(...Object.values(state), selectedServiceItems, selectedServiceItem, formatUserError, assignServiceItemTeams, assignTeam, assignExecutionTeam, listServiceItemsSnapshot, text => text.split(','), async () => { refreshCount++; await refreshed() }, { clearTimeout: () => {}, setTimeout: () => 1 })
   return { ...state, run, refreshCount: () => refreshCount }
 }
 
 const item = { id: 'item-1', project_id: 'project-1', version: 12, status: '待分配', team_lead_id: '' }
+// 用途：构造符合真实分配回执契约的独立命令输入。
+// 参数：overrides 为本用例需要替换的服务项、人员或外部边界。
+// 返回值：含有效能力校验回执的分配输入与请求替身。
 function inputs(overrides = {}) {
   return { item: { ...item }, teamLeadID: 'lead-1', projectManagerID: 'manager-1', engineerIDs: ['engineer-1'], executionAllowed: true,
-    assignTeam: async () => ({ status: 'TEAM_ASSIGNED' }), listServiceItemsSnapshot: async () => ({ items: [{ ...item, team_lead_id: 'lead-1', version: 37 }], total: 1, truncated: false }), assignExecutionTeam: async () => ({}), ...overrides }
+    assignTeam: async () => ({ status: 'TEAM_ASSIGNED' }), listServiceItemsSnapshot: async () => ({ items: [{ ...item, team_lead_id: 'lead-1', version: 37 }], total: 1, truncated: false }), assignExecutionTeam: async () => ({ passed: true, conflicts: [] }), ...overrides }
 }
 
 test('团队分配后重新读取真实版本再指派执行团队，不猜版本增量', async () => {
@@ -36,14 +42,19 @@ test('团队分配后重新读取真实版本再指派执行团队，不猜版�
   const result = await assignServiceItemTeams(inputs({
     assignTeam: async (id, payload) => { commands.push(['team', id, payload]); return { status: 'TEAM_ASSIGNED' } },
     listServiceItemsSnapshot: async projectID => { commands.push(['read', projectID]); return { items: [{ ...item, team_lead_id: 'lead-1', version: 37 }], total: 1, truncated: false } },
-    assignExecutionTeam: async (id, payload) => commands.push(['execution', id, payload]),
+    assignExecutionTeam: async (id, payload) => {
+      commands.push(['execution', id, payload])
+      return { passed: true, conflicts: [] }
+    },
   }))
   assert.deepEqual(commands, [
     ['team', 'item-1', { team_lead_id: 'lead-1', expected_version: 12 }],
     ['read', 'project-1'],
     ['execution', 'item-1', { project_manager_id: 'manager-1', engineer_ids: ['engineer-1'], expected_version: 37 }],
   ])
-  assert.deepEqual(result, { teamAssigned: true, executionAssigned: true })
+  assert.deepEqual(result, {
+    teamAssigned: true, executionAssigned: true, capabilityCheck: { passed: true, conflicts: [] },
+  })
 })
 
 test('负责人被并发修改、阶段改变或响应缺少权威版本时禁止第二步', async () => {
@@ -99,7 +110,7 @@ test('第二步失败保留部分完成和原始诊断，刷新后继续不会�
   assert.equal(teamCalls, 1)
   assert.equal(executionCalls, 1)
   // 这是用户读取最新记录后显式继续操作，不是自动重试。
-  await assignServiceItemTeams(inputs({ item: { ...selected, version: 40 }, assignTeam: async () => { teamCalls++ }, assignExecutionTeam: async (_id, payload) => { executionCalls++; assert.equal(payload.expected_version, 40) } }))
+  await assignServiceItemTeams(inputs({ item: { ...selected, version: 40 }, assignTeam: async () => { teamCalls++ }, assignExecutionTeam: async (_id, payload) => { executionCalls++; assert.equal(payload.expected_version, 40); return { passed: true, conflicts: [] } } }))
   assert.equal(teamCalls, 1)
   assert.equal(executionCalls, 2)
 })
@@ -161,7 +172,10 @@ test('真实批量操作首项完成、次项 403 后显示完成数并刷新，
   let blockSecond = true
   const page = allocationPage(rows, {
     assignTeam: async id => { calls.push(['team', id]); if (id === 'second' && blockSecond) throw Object.assign(new Error('当前账号无权分配此服务项'), { status: 403, code: 'PM_FORBIDDEN' }) },
-    assignExecutionTeam: async id => calls.push(['execution', id]),
+    assignExecutionTeam: async id => {
+      calls.push(['execution', id])
+      return { passed: true, conflicts: [] }
+    },
   })
   await page.run('allocation')
   assert.deepEqual(calls, [['team', 'first'], ['execution', 'first'], ['team', 'second']])
@@ -203,4 +217,62 @@ test('长业务原因或失败后的刷新中断不会让 Toast 抹掉已完成�
   assert.doesNotMatch(page.toastMessage.value, /Failed to fetch/)
   assert.ok(page.toastMessage.value.length <= 400)
   assert.equal(page.saving.value, false)
+})
+
+test('执行团队的能力冲突回执被保留，不能冒充校验通过', async () => {
+  const check = { passed: false, conflicts: ['缺少能力：CISP'] }
+  const result = await assignServiceItemTeams(inputs({ assignExecutionTeam: async () => check }))
+  assert.deepEqual(result.capabilityCheck, check)
+  assert.equal(result.executionAssigned, true)
+})
+
+test('执行团队缺少能力校验回执时结果未知并要求刷新，不冒充已完成', async () => {
+  await assert.rejects(assignServiceItemTeams(inputs({
+    item: { ...item, team_lead_id: 'lead-1' }, assignExecutionTeam: async () => ({}),
+  })), error => error.requiresReload === true && error.outcomeUnknown === true)
+})
+
+test('真实页面保存成功后取消完成项勾选并刷新，不再重复提交已完成项', async () => {
+  const page = allocationPage([{ ...item }], {
+    assignExecutionTeam: async () => ({ passed: true, conflicts: [] }),
+  })
+  await page.run('allocation')
+  assert.deepEqual(page.selectedServiceItemIDs.value, [])
+  assert.equal(page.refreshCount(), 1)
+  assert.equal(page.toastType.value, 'success')
+})
+
+test('真实页面将能力冲突作为待处理结果保留选择并显示警告', async () => {
+  const page = allocationPage([{ ...item }], {
+    assignExecutionTeam: async () => ({ passed: false, conflicts: ['缺少能力：CISP'] }),
+  })
+  await page.run('allocation')
+  assert.deepEqual(page.selectedServiceItemIDs.value, ['item-1'])
+  assert.match(page.toastMessage.value, /能力校验未通过/)
+  assert.equal(page.toastType.value, 'warning')
+  assert.equal(page.refreshCount(), 1)
+})
+
+test('批量保存成功项与能力冲突项分别处理，冲突项仍可继续修正', async () => {
+  const page = allocationPage([{ ...item, id: 'passed' }, { ...item, id: 'conflict' }], {
+    assignExecutionTeam: async id => ({ passed: id === 'passed', conflicts: [] }),
+  })
+  await page.run('allocation')
+  assert.deepEqual(page.selectedServiceItemIDs.value, ['conflict'])
+  assert.match(page.toastMessage.value, /1 个服务项能力校验未通过/)
+  assert.equal(page.toastType.value, 'warning')
+})
+
+test('分配已通过但权威刷新失败时保留成功事实并取消勾选，不自动重发', async () => {
+  let writes = 0
+  const page = allocationPage([{ ...item }], {
+    assignExecutionTeam: async () => { writes++; return { passed: true, conflicts: [] } },
+    refreshed: async () => { throw new Error('Failed to fetch') },
+  })
+  await page.run('allocation')
+  assert.equal(writes, 1)
+  assert.deepEqual(page.selectedServiceItemIDs.value, [])
+  assert.match(page.refreshWarning.value, /操作已保存.*读取失败/)
+  assert.match(page.toastMessage.value, /已保存.*读取失败.*勿凭旧页面重复提交/)
+  assert.equal(page.toastType.value, 'warning')
 })

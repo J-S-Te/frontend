@@ -889,6 +889,17 @@ button {
   font-size: var(--fs-xs);
 }
 
+.form-footer--with-attribution {
+  flex-direction: column;
+}
+
+.form-footer-capabilities {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+}
+
 .form-footer i {
   width: 3px;
   height: 3px;
