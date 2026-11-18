@@ -243,7 +243,7 @@
 .pm-main { min-width: 0; min-height: 100vh; margin-left: var(--pm-w-sidebar); }
 
 .pm-page {
-  width: min(100%, 1600px);
+  width: min(100%, 1440px);
   margin: 0 auto;
   padding: var(--pm-pad-page) var(--pm-pad-page) var(--pm-sp-8);
 }
@@ -2761,3 +2761,23 @@
   background: var(--pm-card);
 }
 .pm-detail-items thead th:first-child { background: var(--pm-th-bg, var(--pm-card)); }
+
+/* 项目详情第二批：指标带、关注条、紧凑表头与移动端卡片。 */
+.pm-detail-kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; }
+.pm-detail-attention { display: flex; flex-wrap: wrap; gap: 8px; padding: 10px 12px; border: 1px solid var(--pm-line); border-left: 3px solid var(--pm-amber); border-radius: 8px; background: var(--pm-amber-soft); }
+.pm-detail-attention-item { padding: 2px 8px; color: var(--pm-body); font-size: var(--pm-fs-hint); font-weight: 600; border-radius: 999px; background: var(--pm-card); border: 1px solid var(--pm-line); cursor: pointer; }
+.pm-detail-attention-item:hover { border-color: var(--pm-primary); color: var(--pm-primary); }
+.pm-shell .pm-page .pm-detail-items th { height: 40px; padding: 8px 12px; font-size: var(--pm-fs-hint); }
+@media (max-width: 1180px) {
+  .pm-detail-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 760px) {
+  .pm-detail-items { min-width: 0; }
+  .pm-detail-items thead { display: none; }
+  .pm-detail-items, .pm-detail-items tbody, .pm-detail-items tr, .pm-detail-items td { display: block; }
+  .pm-detail-items tr { margin-bottom: 12px; padding: 8px 12px; border: 1px solid var(--pm-line); border-radius: 8px; background: var(--pm-card); }
+  .pm-detail-items td { display: flex; justify-content: space-between; gap: 12px; padding: 6px 0; border: 0; }
+  .pm-detail-items td::before { content: attr(data-label); color: var(--pm-muted); font-weight: 600; }
+  .pm-detail-items td:first-child { position: static; background: transparent; }
+  .pm-detail-kpis { grid-template-columns: minmax(0, 1fr); }
+}

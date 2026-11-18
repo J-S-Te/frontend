@@ -2570,7 +2570,7 @@ const detailItems = computed(() => detailProject.value ? serviceItems.value.filt
 const detailEvents = computed(() => detailProject.value ? projectEvents(detailProject.value) : [])
 const detailPendingDeviations = computed(() => pendingDeviations.value.filter((event) => detailItems.value.some((item) => item.id === event.service_item_id)))
 const detailTab = ref('items')
-const detailTabKeys = new Set(['items', 'plan', 'events', 'exceptions'])
+const detailTabKeys = new Set(['items', 'plan', 'report', 'events', 'exceptions', 'cost', 'archive'])
 useUrlFilterState({
   route,
   router,
@@ -2580,9 +2580,23 @@ useUrlFilterState({
 const detailTabs = computed(() => [
   { key: 'items', label: '服务项拆解', count: detailItems.value.length },
   { key: 'plan', label: '实施计划', count: detailItems.value.filter((item) => item.implementation_plan).length },
-  { key: 'events', label: '交付动态', count: detailEvents.value.length },
+  { key: 'report', label: '报告', count: detailItems.value.filter((item) => item.report_status).length },
+  { key: 'events', label: '活动', count: detailEvents.value.length },
   { key: 'exceptions', label: '异常记录', count: detailPendingDeviations.value.length },
+  { key: 'cost', label: '费用', count: null },
+  { key: 'archive', label: '档案', count: null },
 ])
+
+// 关注条只提示可行动项：待排期、待评审偏离、盖章合同缺失。
+const detailAttention = computed(() => {
+  if (!detailProject.value) return []
+  const list = []
+  const waitingPlan = detailItems.value.filter((item) => !item.implementation_plan).length
+  if (waitingPlan) list.push({ key: 'plan', text: waitingPlan + ' 项待排期', tab: 'plan' })
+  if (detailPendingDeviations.value.length) list.push({ key: 'deviation', text: detailPendingDeviations.value.length + ' 项待评审偏离', tab: 'exceptions' })
+  if (stampedContractStateByProject.value?.get(detailProject.value.id) === false) list.push({ key: 'stamp', text: '盖章合同未上传', tab: 'archive' })
+  return list
+})
 // 甘特条以项目内全部已排期服务项的窗口并集为坐标系，按状态着色。
 const detailGantt = computed(() => {
   const items = detailItems.value.filter((item) => item.planned_start && item.planned_end)
@@ -3941,6 +3955,15 @@ onBeforeUnmount(() => {
           </section>
           <template v-else>
             <div class="pm-detail-stack">
+              <section class="pm-detail-kpis">
+                <KpiCard label="服务项" :value="detailItems.length" suffix="项" />
+                <KpiCard label="项目进度" :value="(detailProject.progress ?? 0) + '%'" />
+                <KpiCard label="待评审异常" :value="detailPendingDeviations.length" :tone="detailPendingDeviations.length ? 'amber' : ''" />
+                <KpiCard label="盖章合同" :value="stampedContractStateByProject.get(detailProject.id) === false ? '未上传' : '已上传'" :tone="stampedContractStateByProject.get(detailProject.id) === false ? 'red' : 'green'" />
+              </section>
+              <section v-if="detailAttention.length" class="pm-detail-attention" aria-label="待处理事项">
+                <button v-for="item in detailAttention" :key="item.key" type="button" class="pm-detail-attention-item" @click="detailTab = item.tab">{{ item.text }}</button>
+              </section>
             <section v-if="detailProject.source_kind === 'NATIVE' && canReadNativeProjectScope && (nativeProjectEnabled || nativeScopeProjectID === detailProject.id)" class="pm-panel">
               <button v-if="!nativeScopeProjectID && nativeProjectEnabled" type="button" class="pm-button"
                 :disabled="saving" @click="nativeScopeProjectID = detailProject.id">原生委托范围变更</button>
@@ -3975,12 +3998,12 @@ onBeforeUnmount(() => {
               </dl>
             </article>
             <section class="pm-sm-tabs pm-detail-tabs">
-              <button v-for="tab in detailTabs" :key="tab.key" type="button" class="pm-tab-pill" :class="{ active: detailTab === tab.key }" @click="detailTab = tab.key">{{ tab.label }}<span class="pm-tab-count">{{ tab.count }}</span></button>
+              <button v-for="tab in detailTabs" :key="tab.key" type="button" class="pm-tab-pill" :class="{ active: detailTab === tab.key }" @click="detailTab = tab.key">{{ tab.label }}<span v-if="tab.count !== null" class="pm-tab-count">{{ tab.count }}</span></button>
             </section>
             <article v-if="detailTab === 'items'" class="pm-table-panel">
-              <div class="pm-table-scroll"><table class="pm-table pm-detail-items"><thead><tr><th scope="col">服务项编号</th><th scope="col">场所 / 批次</th><th scope="col">检测类别</th><th scope="col">体系</th><th scope="col">特殊方法</th><th scope="col">状态</th><th scope="col">渗透专项</th><th scope="col">报告</th><th scope="col">计划窗口</th><th scope="col"></th></tr></thead><tbody>
-                <tr v-for="item in detailItems" :key="item.id"><td class="mono"><b>{{ item.id }}</b></td><td>{{ item.site }}<span class="pm-cell-sub">{{ item.batch }}</span></td><td>{{ item.category }}</td><td>{{ item.system || '—' }}</td><td><span class="pm-badge" :class="item.special === '是' ? '待确认' : 'neutral'">{{ item.special || '否' }}</span></td><td><span class="pm-badge" :class="statusTone(item.status)">{{ item.status }}</span></td><td><span v-if="isEmbeddedPenetrationItem(item)" class="pm-badge" :class="item.penetration_work_package?.decision_status === 'REQUIRED' ? '待确认' : 'neutral'">{{ penetrationPackageLabel(item) }}</span><span v-else>—</span></td><td>{{ item.report_status ? (reportStatusLabel[item.report_status] || item.report_status) : '—' }}</td><td>{{ item.planned_start ? `${formatBusinessDate(item.planned_start)} ~ ${formatBusinessDate(item.planned_end)}` : '待排期' }}</td><td><button class="pm-link" @click="navigate('implementation')">看板</button></td></tr>
-                <tr v-if="!detailItems.length"><td colspan="10" class="pm-empty-mini">该项目暂无服务项</td></tr>
+              <div class="pm-table-scroll"><table class="pm-table pm-detail-items"><thead><tr><th scope="col">服务项</th><th scope="col">类别 / 体系</th><th scope="col">技术要求</th><th scope="col">状态</th><th scope="col">报告 / 计划</th><th scope="col">操作</th></tr></thead><tbody>
+                <tr v-for="item in detailItems" :key="item.id"><td class="mono" data-label="服务项"><b>{{ item.id }}</b><span class="pm-cell-sub">{{ item.site }} · {{ item.batch }}</span></td><td data-label="类别 / 体系">{{ item.category }}<span v-if="item.system" class="pm-cell-sub">{{ item.system }}</span></td><td data-label="技术要求">{{ specialMethodLabel[item.special_method] || item.special || '—' }}</td><td data-label="状态"><span class="pm-badge" :class="statusTone(item.status)">{{ item.status }}</span><span v-if="isEmbeddedPenetrationItem(item)" class="pm-cell-sub">{{ penetrationPackageLabel(item) }}</span></td><td data-label="报告 / 计划"><span>{{ item.report_status ? (reportStatusLabel[item.report_status] || item.report_status) : '—' }}</span><span class="pm-cell-sub">{{ item.planned_start ? formatBusinessDate(item.planned_start) + ' ~ ' + formatBusinessDate(item.planned_end) : '待排期' }}</span></td><td data-label="操作"><button class="pm-link" type="button" @click="navigate('implementation')">看板</button></td></tr>
+                <tr v-if="!detailItems.length"><td colspan="6" class="pm-empty-mini">该项目暂无服务项</td></tr>
               </tbody></table></div>
             </article>
             <article v-if="detailTab === 'items' && detailGantt.length" class="pm-panel">
@@ -4001,6 +4024,13 @@ onBeforeUnmount(() => {
             <section v-if="detailTab === 'plan' && detailItems.some(isEmbeddedPenetrationItem)" class="pm-detail-penetration-list">
               <PenetrationWorkPackageCard v-for="item in detailItems.filter(isEmbeddedPenetrationItem)" :key="item.id" :item="item" :session="session" :engineer-options="penetrationEngineerOptions" compact @updated="updatePenetrationPackage" @notify="notifyFromPenetration" />
             </section>
+            <article v-if="detailTab === 'report'" class="pm-table-panel">
+              <header><div><p class="pm-panel-kicker">报告</p><h2>服务项报告进度</h2></div><span>{{ detailItems.filter((item) => item.report_status).length }} 项进入报告阶段</span></header>
+              <div class="pm-table-scroll"><table class="pm-table pm-detail-items"><thead><tr><th scope="col">服务项</th><th scope="col">报告状态</th><th scope="col">计划完成</th><th scope="col">操作</th></tr></thead><tbody>
+                <tr v-for="item in detailItems" :key="item.id"><td class="mono" data-label="服务项">{{ item.id }}</td><td data-label="报告状态">{{ item.report_status ? (reportStatusLabel[item.report_status] || item.report_status) : '—' }}</td><td data-label="计划完成">{{ item.planned_end ? formatBusinessDate(item.planned_end) : '待排期' }}</td><td data-label="操作"><button class="pm-link" @click="navigate('reports')">查看报告</button></td></tr>
+                <tr v-if="!detailItems.length"><td colspan="4" class="pm-empty-mini">该项目暂无服务项</td></tr>
+              </tbody></table></div>
+            </article>
             <article v-if="detailTab === 'events'" class="pm-panel">
               <header><div><p class="pm-panel-kicker">交付事件</p><h2>交付动态</h2></div><span>最近 {{ detailEvents.length }} 条</span></header>
               <div class="pm-timeline"><div v-for="event in detailEvents" :key="event.id"><i></i><b>{{ eventLabel(event) }}</b><p>{{ event.service_item_id || detailProject.id }} · 操作人 {{ personLabel(event.actor_user_id, '系统') }}</p><time>{{ formatDateTime(event.created_at) }}</time></div><div v-if="!detailEvents.length" class="pm-empty-mini">暂无交付动态</div></div>
@@ -4009,8 +4039,8 @@ onBeforeUnmount(() => {
               <header><div><p class="pm-panel-kicker danger">异常记录</p><h2>异常记录</h2></div><button class="pm-link" @click="navigate('exceptions')">前往异常评审 →</button></header>
               <div class="pm-risk-list"><button v-for="event in detailPendingDeviations" :key="event.id" @click="navigate('exceptions')"><span :class="event.payload?.severity === 'HIGH' ? 'high' : 'medium'">{{ event.payload?.severity === 'HIGH' ? '高' : '中' }}</span><div><b>{{ event.payload?.deviation_id }} · {{ event.service_item_id }}</b><p>{{ event.payload?.description || '现场偏离' }}</p></div><time>{{ formatDateTime(event.created_at) }}</time></button><div v-if="!detailPendingDeviations.length" class="pm-empty-mini">该项目暂无待评审异常</div></div>
             </article>
-            <ReimbursementSpendPanel :session="session" :project-id="detailProject.id" :project-status="detailProject.status" />
-            <ProjectArchiveDirectory :key="detailProject.id" :project="detailProject" :items="detailItems"
+            <ReimbursementSpendPanel v-if="detailTab === 'cost'" :session="session" :project-id="detailProject.id" :project-status="detailProject.status" />
+            <ProjectArchiveDirectory v-if="detailTab === 'archive'" :key="detailProject.id" :project="detailProject" :items="detailItems"
               :events="detailEvents" :session="session" @view-service="detailTab='items';selectServiceItem($event)"
               @view-events="detailTab='events'" />
             </div>
