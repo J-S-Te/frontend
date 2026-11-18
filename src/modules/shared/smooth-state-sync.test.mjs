@@ -77,7 +77,7 @@ test('审批完成后动作按钮跟随服务端终态更新', async () => {
   assert.match(source, /const canActOnApproval = computed\(\(\) => can\('approval\.process'\)/)
   assert.match(source, /v-if="canActOnApproval" class="contract-advanced-actions"/)
   assert.match(source, /v-if="canActOnApproval" class="contract-button primary"/)
-  assert.match(source, /selectedApproval\.value = \{ \.\.\.selectedApproval\.value, status: detailResult\.value\.state\.status \}/)
+  assert.match(source, /if \(state\?\.status && state\.status !== 'running'\) \{\s*selectedApproval\.value = \{ \.\.\.selectedApproval\.value, status: state\.status \}/)
 })
 
 test('状态同步样式使用轻量指示和行过渡，不引入整页闪烁', async () => {
