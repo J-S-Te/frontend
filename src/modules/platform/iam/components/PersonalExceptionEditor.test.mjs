@@ -40,9 +40,9 @@ test('editor preserves untouched raw times and never changes role on edit', () =
 })
 
 // renderExceptionEditor 用真实Vue组件与生产格式化函数呈现授权确认摘要。
-// 参数：draft为待确认授权草稿，包含环境范围及有效时间。
+// 参数：draft 为待确认授权草稿，props 为角色目录、继承来源及当前时间等覆盖项。
 // 返回值：服务端渲染HTML；组件编译或渲染错误直接失败。
-async function renderExceptionEditor(draft) {
+async function renderExceptionEditor(draft, props = {}) {
   const modules = {
     vue: Vue,
     '@/modules/platform/iam/utils/applicationAuthorizationCatalog': catalog,
@@ -63,9 +63,75 @@ async function renderExceptionEditor(draft) {
     .replace('export function render', 'return function render'))(Vue)
   return renderToString(Vue.createSSRApp(component, {
     draft,
+    authorizationState: 'GRANTED',
     environments: [{ code: 'prod', name: 'prod' }],
     catalog: { sync_status: 'SYNCED', roles: [{ code: 'admin', status: 'ACTIVE' }] },
+    ...props,
   }))
+}
+
+test('新增个人例外隐藏已生效的模板角色，保留其他继承来源和未授权角色', async () => {
+  const roles = ['template', 'organization', 'system', 'legacy', 'available', 'manual']
+    .map((code) => ({ code, name: code, status: 'ACTIVE', assignable: true }))
+  const html = await renderExceptionEditor(authorization.createPersonalExceptionDraft(), {
+    now: new Date('2026-11-18T00:00:00Z'),
+    catalog: { sync_status: 'SYNCED', roles },
+    existingManualRoles: [{ code: 'manual' }],
+    inheritedRoles: [
+      { code: 'template', source_type: 'POSITION', grant_origin: 'TEMPLATE' },
+      { code: 'organization', source_type: 'ORG_UNIT', grant_origin: 'MANUAL' },
+      { code: 'system', source_type: 'USER', grant_origin: 'SYSTEM' },
+      { code: 'legacy', source_type: 'POSITION' },
+    ],
+  })
+
+  assert.doesNotMatch(html, /<option[^>]*value="template"/)
+  assert.doesNotMatch(html, /<option[^>]*value="manual"/)
+  for (const code of ['organization', 'system', 'legacy', 'available']) {
+    assert.match(html, new RegExp(`<option[^>]*value="${code}"`))
+  }
+})
+
+test('只有当前生效的模板角色隐藏，未来和到期边界的角色仍可新增', async () => {
+  const now = new Date('2026-11-18T00:00:00Z')
+  const roles = ['active', 'pending', 'expired'].map((code) => ({ code, status: 'ACTIVE' }))
+  const html = await renderExceptionEditor(authorization.createPersonalExceptionDraft(), {
+    now,
+    catalog: { sync_status: 'SYNCED', roles },
+    inheritedRoles: [
+      { code: 'active', grant_origin: 'TEMPLATE', valid_from: now.toISOString() },
+      { code: 'pending', grant_origin: 'TEMPLATE', valid_from: '2026-11-19T00:00:00Z' },
+      { code: 'expired', grant_origin: 'TEMPLATE', valid_until: now.toISOString() },
+    ],
+  })
+
+  assert.doesNotMatch(html, /<option[^>]*value="active"/)
+  assert.match(html, /<option[^>]*value="pending"/)
+  assert.match(html, /<option[^>]*value="expired"/)
+})
+
+test('模板命中同一角色时已有个人例外仍可编辑并保留原始角色', async () => {
+  const draft = authorization.createPersonalExceptionDraft({
+    mode: 'edit', group: { roleCode: 'admin', records: [{ code: 'admin' }] },
+  })
+  const html = await renderExceptionEditor(draft, {
+    mode: 'edit', inheritedRoles: [{ code: 'admin', grant_origin: 'TEMPLATE' }],
+  })
+
+  assert.match(html, /修改例外授权/)
+  assert.match(html, /<code>admin<\/code>/)
+  assert.doesNotMatch(html, /请选择角色/)
+})
+
+for (const state of ['CONFLICT', 'UNAUTHORIZED', '']) {
+  test(`应用状态为 ${state || '未知'} 时模板诊断角色不从新增选项中隐藏`, async () => {
+    const html = await renderExceptionEditor(authorization.createPersonalExceptionDraft(), {
+      authorizationState: state,
+      inheritedRoles: [{ code: 'admin', source_type: 'POSITION', grant_origin: 'TEMPLATE' }],
+    })
+
+    assert.match(html, /<option[^>]*value="admin"/)
+  })
 }
 
 test('确认摘要显示真实环境与限时终点，不能把有限授权显示为长期', async () => {
