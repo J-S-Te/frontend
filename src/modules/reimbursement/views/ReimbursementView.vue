@@ -3221,10 +3221,6 @@ onBeforeUnmount(() => {
               <input v-model="manualInvoiceForm.invoice_type">
             </label>
             <label>
-              发票代码
-              <input v-model="manualInvoiceForm.invoice_code">
-            </label>
-            <label>
               发票号码
               <input v-model="manualInvoiceForm.invoice_number">
             </label>
@@ -5028,10 +5024,6 @@ onBeforeUnmount(() => {
             <label>
               发票类型
               <input v-model="selectedInvoice.invoice_type">
-            </label>
-            <label>
-              发票代码
-              <input v-model="selectedInvoice.invoice_code">
             </label>
             <label>
               发票号码
