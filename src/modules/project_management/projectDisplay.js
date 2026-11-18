@@ -7,6 +7,15 @@ import { normalizeStatusTone } from '../shared/theme/statusCatalog.js'
 import { businessWallClockToInstant, formatBusinessDateTime, instantToBusinessWallClock } from '../shared/utils/businessTime.js'
 import { escapeCsvCell } from '../platform/iam/utils/csvExport.js'
 
+// 用途：以项目和系统名称标识服务项，统一工作台的主展示口径。
+// 参数：item 为服务项快照；project 为对应的已授权项目快照。
+// 返回值：项目名称与系统名称；缺失字段明确显示未提供，不用编号代替名称。
+export function serviceItemLabel(item, project) {
+  const projectName = String(project?.name || '').trim() || '未提供项目名称'
+  const systemName = String(item?.system || '').trim() || '未提供系统名称'
+  return `${projectName} · ${systemName}`
+}
+
 export function startOfWeek(date) {
   const d = new Date(date.getFullYear(), date.getMonth(), date.getDate())
   d.setDate(d.getDate() - ((d.getDay() + 6) % 7))
