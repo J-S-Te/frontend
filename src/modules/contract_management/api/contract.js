@@ -963,6 +963,61 @@ export async function listMyCustomers(params = {}) {
   return { items, page, page_size: pageSize, total, has_more: page * pageSize < total }
 }
 
+// 用途：校验CRM客户编号的原始类型和正整数语义，不隐式接受数组或对象。
+// 参数：value为目录选择或调用方传入的客户编号。
+// 返回值：规范化编号字符串；类型、格式或数值不安全时抛出错误。
+function crmCustomerID(value) {
+  if (!['string', 'number'].includes(typeof value)
+    || (typeof value === 'number' && !Number.isSafeInteger(value))) {
+    throw new Error('请选择有效的 CRM 客户后重试。')
+  }
+  const id = String(value).trim()
+  if (!/^[1-9]\d*$/.test(id)) throw new Error('请选择有效的 CRM 客户后重试。')
+  return id
+}
+
+// 用途：按已关联客户编号核验当前账号可访问的有效客户，不依赖名称搜索或分页。
+// 参数：customerID为已选择的CRM客户编号。
+// 返回值：权威客户记录；失效、不可见或响应结构异常时抛出错误。
+export async function getMyCustomer(customerID) {
+  const id = crmCustomerID(customerID)
+  await ensureContractCRMDirectorySession()
+  const data = await requestBusinessDirectory(
+    CUSTOMER_API_BASE_URL, `/customers/${encodeURIComponent(id)}`,
+    '核对 CRM 客户失败，请重新选择或重试。', 'crm_customer_reference', {
+      requireEnvelope: true,
+      validateData: (item) => resourceObject(item) && String(item.id) === id
+        && (typeof item.id === 'string' || Number.isSafeInteger(item.id))
+        && typeof item.name === 'string' && item.name.trim().length > 0
+        && typeof item.status === 'string',
+    },
+  )
+  if (data.status !== 'ACTIVE') throw new Error('所选 CRM 客户已失效，请重新选择。')
+  return data
+}
+
+// 用途：核对双方身份后读取当前用户有权访问的客户联系人。
+// 参数：customerID为已选择的CRM客户编号。
+// 返回值：联系人数组；身份、权限、网络或响应结构异常时抛出可定位错误。
+export async function listMyCustomerContacts(customerID) {
+  const id = crmCustomerID(customerID)
+  await ensureContractCRMDirectorySession()
+  return requestBusinessDirectory(
+    CUSTOMER_API_BASE_URL,
+    `/customers/${encodeURIComponent(id)}/contacts`,
+    '读取客户联系人失败，请手工填写或重试。',
+    'crm_customer_contacts',
+    {
+      requireEnvelope: true,
+      validateData: (data) => Array.isArray(data) && data.every((item) =>
+        resourceObject(item) && (Number.isSafeInteger(item.id) && item.id > 0
+          || typeof item.id === 'string' && /^[1-9]\d*$/.test(item.id))
+        && typeof item.name === 'string'
+        && typeof item.is_registration === 'boolean'),
+    },
+  )
+}
+
 /** 读取项目管理当前启用的检测类别目录，合同表单不得保存自由文本类别。 */
 export async function listContractDetectionCategories() {
   // 合同后端使用机器身份读取项目管理目录；浏览器只访问合同同源接口，避免要求

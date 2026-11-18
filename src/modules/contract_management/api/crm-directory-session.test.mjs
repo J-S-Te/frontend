@@ -20,11 +20,14 @@ const callbacks = [
 const callbackSource = ast.program.body.filter(node => node.type === 'FunctionDeclaration' && callbacks.includes(node.id.name))
   .map(node => script.slice(node.start, node.end)).join('\n')
 
+// 用途：执行真实合同API客户端，保留请求处理而仅替换浏览器边界。
+// 参数：env为测试使用的公开挂载路径配置。
+// 返回值：真实会话、客户目录及商机目录接口。
 function client(env = {}) {
   const source = apiSource.replace(/^import\s[\s\S]*?from ['"][^'"]+['"]\n/gm, '')
     .replaceAll('import.meta.env', `(${JSON.stringify(env)})`).replace(/^export /gm, '')
   return new Function('formatUserError', 'attachStructuredContext', 'normalizeAuthorizationSession', 'principalIdentityID', 'shouldStartSubsystemLogin', 'subsystemAccessMessage',
-    `${source}; return { ensureContractCRMDirectorySession, openContractCRMLogin, waitForContractCRMDirectorySession, listMyCustomers, listMyOpportunities, ContractAuthError };`)(
+    `${source}; return { ensureContractCRMDirectorySession, openContractCRMLogin, waitForContractCRMDirectorySession, listMyCustomers, listMyOpportunities, getMyCustomer, listMyCustomerContacts, ContractAuthError };`)(
     formatUserError, attachStructuredContext, normalizeAuthorizationSession, principalIdentityID, shouldStartSubsystemLogin, subsystemAccessMessage)
 }
 
@@ -32,6 +35,80 @@ const contractSession = { identity_id: 'identity-a', user_id: 'contract-local-a'
 const crmSession = { user_id: 'identity-a', tenant_id: 'tenant-a', person_id: 'person-a' }
 const response = (status, data, code = 'OK') => new Response(JSON.stringify({ code, data, message: 'session missing', request_id: 'crm-request', trace_id: 'crm-trace' }), {
   status, headers: { 'Content-Type': 'application/json' },
+})
+
+test('合同联系人读取先核对双方身份，并消费客户范围内的真实联系人数组', async () => {
+  const contacts = [{ id: 1, name: '合成联系人', phone: '138****0000', is_registration: true }]
+  await browser(async url => response(200, url.includes('/customers/') ? contacts
+    : url.startsWith('/contract_management/') ? contractSession : crmSession), async ({ calls }) => {
+    assert.deepEqual(await client().listMyCustomerContacts('7'), contacts)
+    assert.deepEqual(calls.map(call => call.url), ['/contract_management/api/v1/auth/me',
+      '/customer-opportunity/api/v1/auth/me', '/customer-opportunity/api/v1/customers/7/contacts'])
+    assert.ok(calls.every(call => call.options.credentials === 'include' && call.options.cache === 'no-store'))
+  })
+})
+
+test('合同联系人读取在账号不匹配时阻断，非法客户编号不发请求', async () => {
+  for (const method of ['listMyCustomerContacts', 'getMyCustomer']) {
+    await browser(async url => response(200, url.startsWith('/contract_management/')
+      ? contractSession : { ...crmSession, user_id: 'other-account' }), async ({ calls }) => {
+      await assert.rejects(client()[method]('7'), { code: 'CRM_IDENTITY_MISMATCH' })
+      assert.equal(calls.length, 2)
+    })
+  }
+  await browser(async () => { throw new Error('不应发起请求') }, async ({ calls }) => {
+    await assert.rejects(client().listMyCustomerContacts('../contacts'))
+    assert.equal(calls.length, 0)
+  })
+})
+
+test('合同联系人读取拒绝HTML、错误结构和无权限，合法空数组保留', async () => {
+  for (const result of [new Response('<html>登录页</html>', { headers: { 'Content-Type': 'text/html' } }),
+    response(200, {}), response(200, [{ id: 1, name: '合成联系人' }]),
+    response(403, null, 'FORBIDDEN'), response(404, null, 'NOT_FOUND')]) {
+    await browser(async url => url.includes('/customers/') ? result : response(200,
+      url.startsWith('/contract_management/') ? contractSession : crmSession), async () => {
+      await assert.rejects(client().listMyCustomerContacts('7'))
+    })
+  }
+  await browser(async url => response(200, url.includes('/customers/') ? []
+    : url.startsWith('/contract_management/') ? contractSession : crmSession), async () => {
+    assert.deepEqual(await client().listMyCustomerContacts('7'), [])
+  })
+})
+
+test('原始客户编号仅接受字符串或安全整数，不把数组强制转换为编号', async () => {
+  await browser(async () => { throw new Error('非法原始类型不应发起请求') }, async ({ calls }) => {
+    await assert.rejects(client().listMyCustomerContacts([7]))
+    assert.equal(calls.length, 0)
+  })
+})
+
+test('提交按客户ID复核，不受客户改名和目录第一页结果影响', async () => {
+  await browser(async url => {
+    if (url.startsWith('/contract_management/')) return response(200, contractSession)
+    if (url.endsWith('/auth/me')) return response(200, crmSession)
+    if (url.endsWith('/customers/7')) return response(200, { id: 7, name: '权威新名称', status: 'ACTIVE' })
+    return response(200, { items: [], total: 0, page: 1, page_size: 100 })
+  }, async ({ calls }) => {
+    const ui = view(client(), { getMyCustomer: id => client().getMyCustomer(id) })
+    await ui.refreshSelectedCRMAccess({ customer_id: '7', customer_name: '旧客户名称', opportunity_id: '' })
+    assert.ok(calls.some(call => call.url.endsWith('/customers/7')))
+    assert.ok(calls.every(call => !call.url.includes('/customers?')))
+  })
+})
+
+test('按编号读取客户仍拒绝不可见、已失效、错编号和畸形回执', async () => {
+  for (const result of [response(403, null, 'FORBIDDEN'), response(404, null, 'NOT_FOUND'),
+    response(200, null), response(200, []), response(200, {}),
+    response(200, { id: 8, name: '其他客户', status: 'ACTIVE' }),
+    response(200, { id: 7, name: '已失效客户', status: 'VOID' }),
+    response(200, { id: 7, name: '', status: 'ACTIVE' })]) {
+    await browser(async url => url.endsWith('/customers/7') ? result : response(200,
+      url.startsWith('/contract_management/') ? contractSession : crmSession), async () => {
+      await assert.rejects(client().getMyCustomer('7'))
+    })
+  }
 })
 
 async function browser(fetcher, run, open = () => null) {
@@ -279,10 +356,10 @@ test('external submission freezes form and file before CRM validation completes'
   const started = new Promise(resolve => { startedResolve = resolve })
   await browser(async url => {
     if (url.startsWith('/contract_management/')) return response(200, contractSession)
-    if (url.includes('/customers?')) {
+    if (url.endsWith('/customers/7')) {
       startedResolve()
       await gate
-      return response(200, { items: [{ id: '7', customer_id: '7', name: '客户甲' }], total: 1, page: 1, page_size: 100 })
+      return response(200, { id: 7, name: '客户甲', status: 'ACTIVE' })
     }
     return response(200, crmSession)
   }, async () => {

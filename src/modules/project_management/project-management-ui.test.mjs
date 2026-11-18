@@ -1581,9 +1581,9 @@ test('状态字段统一为语义化胶囊标签（statusTone 单一映射）', 
   assert.match(source, /:tone="statusTone\(row\.state\)"/)
   assert.match(source, /:class="statusTone\(item\.identity_status\)"/)
   // 纯文本状态（操作台当前项 / 复核状态 / 当前报告阶段）收口为胶囊。
-  assert.match(source, /:class="statusTone\(selectedServiceItem\.status\)"/)
+  assert.match(source, /v-for="badge in serviceItemStatusBadges\(selectedServiceItem\)"/)
   assert.match(source, /<b class="pm-badge" :class="statusTone\(item && reportTechReviewLabel\(item\.tech_review_status\)\)"/)
-  assert.match(source, /<b class="pm-badge" :class="statusTone\(reportStatusLabel\[selectedServiceItem\.report_status\] \|\| selectedServiceItem\.report_status\)"/)
+  assert.match(source, /<b class="pm-badge" :class="selectedReportStage\.tone"/)
   // 修复未定义的 warning 色调：设备在位改 amber，使用范围改关注，CSS 提供兼容别名。
   assert.match(equipmentPanelSource, /item\.presence === 'OUT_OF_COMPANY' \? 'amber' : 'normal'/)
   assert.match(source, /item\.usage_scope === 'COMPANY_ONLY' \? '关注' : 'neutral'/)

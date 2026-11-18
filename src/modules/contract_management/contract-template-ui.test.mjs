@@ -49,12 +49,11 @@ test('admin can edit and delete templates while locked fields are read-only for 
   assert.match(source, /:title="field\.locked && !isAdmin \? '此项已由管理员预设' : undefined"/)
 })
 
-test('template number format is read-only and defers to the system-level number rule', () => {
-  // 实际编号由系统级规则生成，模板里的格式只保留用于展示历史/旧规则。
+test('template editor hides the legacy number format and preserves system numbering', () => {
   assert.doesNotMatch(source, /v-model="templateEditForm\.number_format"/)
-  assert.match(source, /:value="templateEditForm\.number_format" readonly/)
+  assert.doesNotMatch(source, /:value="templateEditForm\.number_format"/)
   assert.match(source, /实际合同编号由系统级编号规则生成/)
-  // 只读展示不改存储：保存模板时仍回传既有格式，避免清空历史配置。
+  // 隐藏只影响展示：保存模板仍保留旧字段，兼容既有模板数据。
   assert.match(source, /number_format: templateEditForm\.value\.number_format\.trim\(\)/)
 })
 
