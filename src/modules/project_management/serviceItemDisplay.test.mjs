@@ -66,19 +66,22 @@ async function renderFragment(fragment, values = {}) {
 }
 
 // 用途：执行页面已有的节点队列计算，检查隐藏全局搜索不会参与节点筛选。
-// 参数：section 为当前操作栏目，keyword 为其他页面遗留的全局关键字。
-// 返回值：真实节点计算结果和可修改的关键字引用。
-function nodeHarness(section, keyword) {
+// 参数：section 为操作栏目，keyword 为旧页关键字，options 提供授权服务项与回退事件。
+// 返回值：真实节点计算结果、关键字和可追加决定事件的响应式引用。
+function nodeHarness(section, keyword, { rows = items, inboxCandidates = rows, events = [] } = {}) {
   const context = { computed: Vue.computed, activeSection: Vue.ref(section),
-    keyword: Vue.ref(keyword), serviceItems: Vue.ref(items) }
+    keyword: Vue.ref(keyword), serviceItems: Vue.ref(rows), deliveryEvents: Vue.ref(events) }
   for (const name of ['allocationItems', 'inboxItems', 'planningItems', 'preparationItems',
     'assignmentItems', 'methodItems', 'exceptionItems', 'reportItems', 'implementationItems']) {
-    context[name] = Vue.ref(items)
+    context[name] = Vue.ref(rows)
   }
+  context.inboxItems = Vue.ref(inboxCandidates)
+  const inboxStart = source.indexOf('const pendingRollbackRequests = computed(')
+  const inboxCode = source.slice(inboxStart, source.indexOf('\nconst planningItems', inboxStart))
   const start = source.indexOf('const activeNodeItems = computed(')
   const statement = source.slice(start, source.indexOf('\nconst completedProjectCount', start))
-  const result = vm.runInNewContext(`${statement}\nactiveNodeItems`, context)
-  return { result, keyword: context.keyword }
+  const result = vm.runInNewContext(`${inboxCode}\n${statement}\nactiveNodeItems`, context)
+  return { result, keyword: context.keyword, events: context.deliveryEvents }
 }
 
 test('服务项队列以项目和系统名称呈现，编号保留为次要信息', async () => {
@@ -199,6 +202,19 @@ test('操作台仅保留队列搜索，其他页遗留关键字不会缩小节�
   assert.equal((html.match(/role="option"/g) || []).length, 2)
   h.keyword.value = '另一旧页搜索词'
   assert.deepEqual(h.result.value.map(item => item.id), ['SI-ONE', 'SI-TWO'])
+})
+
+test('展示宿主使用真实回退待审队列，只合入可见服务项并随审批决定移除', () => {
+  const h = nodeHarness('inbox', '旧页面关键字', {
+    inboxCandidates: [items[0]], events: [
+      { id: 'rollback-visible', type: 'ROLLBACK_REQUESTED', service_item_id: 'SI-TWO' },
+      { id: 'rollback-hidden', type: 'ROLLBACK_REQUESTED', service_item_id: 'SI-HIDDEN' },
+    ],
+  })
+  assert.deepEqual(h.result.value.map(item => item.id), ['SI-ONE', 'SI-TWO'])
+  h.events.value.push({ id: 'rollback-approved', type: 'ROLLBACK_APPROVED',
+    service_item_id: 'SI-TWO', payload: { request_id: 'rollback-visible' } })
+  assert.deepEqual(h.result.value.map(item => item.id), ['SI-ONE'])
 })
 
 test('操作台选中摘要以项目系统名称为主信息', async () => {

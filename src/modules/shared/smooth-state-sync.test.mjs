@@ -31,12 +31,14 @@ test('客户与商机写后同步保留列表，不在后台请求时清空旧�
 test('数据看板与数据源写后同步不进入首屏加载态', async () => {
   const alerts = await read('data_analysis/views/AlertsCenterView.vue')
   const admin = await read('data_analysis/views/AdminSourcesView.vue')
-  for (const source of [alerts, admin]) {
-    assert.match(source, /async function load\(\{ background = false \} = \{\}\)/)
-    assert.match(source, /if \(background\) refreshing\.value = true/)
-    assert.match(source, /if \(background\) refreshing\.value = false/)
-    assert.match(source, /await load\(\{ background: true \}\)/)
-  }
+  assert.match(admin, /async function load\(\{ background = false \} = \{\}\)/)
+  assert.match(admin, /if \(background\) refreshing\.value = true/)
+  assert.match(admin, /if \(background\) refreshing\.value = false/)
+  assert.match(admin, /await load\(\{ background: true \}\)/)
+  assert.match(alerts, /async function load\(\{ background = false, referenceId \} = \{\}\)/)
+  assert.match(alerts, /if \(background\) refreshing\.value = true\s+else loading\.value = true/)
+  assert.match(alerts, /if \(isCurrent\(\)\) \{\s+refreshing\.value = false\s+loading\.value = false/)
+  assert.match(alerts, /await load\(\{ background: true \}\)/)
 })
 
 test('客户门户反馈写后同步保留成功提示和列表', async () => {
