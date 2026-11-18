@@ -540,6 +540,14 @@ try {
           window.__mountPM({ section: item.section, query: item.query || {} })
         }, { item })
         await page.waitForTimeout(1200)
+        // PAGE_PICK_FIRST=1：现场实施等需要先选服务项的页面，先点第一张选择卡再截图。
+        if (process.env.PAGE_PICK_FIRST) {
+          const pickerCard = page.locator('.pm-picker-card').first()
+          if (await pickerCard.count()) {
+            await pickerCard.click()
+            await page.waitForTimeout(700)
+          }
+        }
         const metrics = await page.evaluate(() => ({
           scrollWidth: document.documentElement.scrollWidth,
           clientWidth: document.documentElement.clientWidth,
@@ -548,7 +556,10 @@ try {
           theme: document.documentElement.dataset.theme || '',
         }))
         const file = path.join(outputDir, item.key + '-' + width + '-' + theme + '.png')
-        await page.screenshot({ path: file })
+        // PAGE_ELEMENT：截取单个面板的完整高度，便于核对局部布局。
+        const elementSelector = process.env.PAGE_ELEMENT
+        if (elementSelector) await page.locator(elementSelector).first().screenshot({ path: file })
+        else await page.screenshot({ path: file })
         results.push({ case: item.key, width, theme, errors, metrics, file })
         await page.close()
       }
