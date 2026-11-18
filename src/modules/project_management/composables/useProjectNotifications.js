@@ -1,14 +1,10 @@
 import { onBeforeUnmount, ref } from 'vue'
 
-/**
- * 项目页「业务待办」通知弹层的状态与行为（治理批次 3 第二步）。
- * 收编：未读列表与计数、弹层开关与 5 秒自动收起、已读推进与分区跳转。
- * 仍属父组件的职责（不在此处）：工作区装载节奏、全局 ESC 的其他弹层分支。
- *
- * 注入项与组件内同名标识一一对应：getUnreadCount/listNotificationInbox/markNotificationRead/
- * formatUserError/navigate/showToast；不直接导入 API 模块，保持可独立测试。
- */
-export function useProjectNotifications({ getUnreadCount, listNotificationInbox, markNotificationRead, formatUserError, navigate, showToast }) {
+// 用途：管理项目通知弹层，并在安全导航成功后推进已读。
+// 参数：收件箱与详情接口读取本人通知，openTarget 执行守卫跳转，其余依赖提供提示。
+// 返回值：弹层状态、未读计数、加载与打开通知等操作。
+export function useProjectNotifications({ getUnreadCount, listNotificationInbox,
+  getNotification, markNotificationRead, formatUserError, openTarget, showToast }) {
 const notificationOpen = ref(false)
 const notificationItems = ref([])
 const notificationCount = ref(0)
@@ -52,27 +48,36 @@ async function loadUnreadNotifications() {
   }
 }
 
-function notificationSection(item) {
-  const category = String(item?.category || '').toUpperCase()
-  if (category === 'DEVIATION_REPORTED') return 'exceptions'
-  if (category === 'SPLIT_RULE_MISSING') return 'decomposition'
-  if (['TEAM_ASSIGNED', 'EXECUTION_TEAM_ASSIGNED'].includes(category)) return 'inbox'
-  return ''
-}
-
+// 用途：重读本人通知详情后打开真实目标，失败时保留可重试条目。
+// 参数：item 为列表摘要，只取投递编号；导航和已读判断以详情为准。
+// 返回值：异步完成；详情读取、跳转或已读失败通过提示反馈。
 async function openNotification(item) {
   const deliveryID = String(item?.delivery_id || '')
   if (!deliveryID || notificationActionID.value) return
   notificationActionID.value = deliveryID
+  let opened = false
   try {
-    await markNotificationRead(deliveryID)
+    const detail = await getNotification(deliveryID)
+    if (!detail || String(detail.delivery_id || '') !== deliveryID) {
+      throw new Error('通知详情无法确认，请刷新后重试。')
+    }
+    notificationItems.value = notificationItems.value.map((entry) =>
+      entry.delivery_id === deliveryID ? detail : entry)
+    opened = await openTarget(detail)
+    if (!opened) {
+      showToast('该通知暂无关联页面，请在个人通知中心查看详情。', 'info')
+      return
+    }
+    if (!detail.read_at) {
+      await markNotificationRead(deliveryID)
+      notificationCount.value = Math.max(0, notificationCount.value - 1)
+    }
     notificationItems.value = notificationItems.value.filter((entry) => entry.delivery_id !== deliveryID)
-    notificationCount.value = Math.max(0, notificationCount.value - 1)
-    const section = notificationSection(item)
     closeNotifications()
-    if (section) navigate(section)
   } catch (error) {
-    showToast(formatUserError(error, { fallback: '通知已读状态保存失败，请重试' }), 'error')
+    const fallback = opened ? '已进入关联页面，但已读状态保存失败，请重试。'
+      : '通知详情读取或页面打开失败，请重试。'
+    showToast(formatUserError(error, { fallback }), 'error')
   } finally {
     notificationActionID.value = ''
   }

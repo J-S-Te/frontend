@@ -9,7 +9,7 @@ import LoadingState from '@/modules/shared/components/LoadingState.vue'
 import ErrorState from '@/modules/shared/components/ErrorState.vue'
 import { formatCRMError } from '../api/errorMessages.js'
 import { computed, defineAsyncComponent, defineComponent, h, nextTick, onBeforeUnmount, onMounted, reactive, ref, shallowRef, toRaw, watch } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { NavigationFailureType, useRoute, useRouter } from 'vue-router'
 import { AuthError, logoutCurrentSession } from '@/modules/platform/auth/api/auth'
 import ConsoleIcon from '@/modules/platform/shared/components/ConsoleIcon.vue'
 import { useDictionaryOptions } from '@/modules/platform/dictionaries/composables/useDictionaryOptions.js'
@@ -135,7 +135,7 @@ import { createPresaleReportFilters } from '../composables/usePresaleReportFilte
 import { deleteReadNotifications, getNotificationUnreadCount, listNotifications, markNotificationRead } from '../api/notification.js'
 import PlatformNotificationInbox from '@/modules/shared/components/PlatformNotificationInbox.vue'
 import { listOwnerDirectory } from '../api/ownerDirectory.js'
-import { parseNotificationTarget } from '../navigation.js'
+import { crmNotificationTarget, crmResourceID } from '../navigation.js'
 import {
   addProgress, addWorklog, completePresaleRequest, createPresaleRequest, reopenPresaleRequest, getApprovalHistory, getAssignments, getPresaleRequest,
   getPresaleContactPhone,
@@ -629,6 +629,8 @@ const notifications = ref([])
 const showCrossNotifications = ref(false)
 const notificationUnreadCount = ref(0)
 const notificationUnreadOnly = ref(false)
+const notificationOpening = ref(false)
+const notificationWarning = ref('')
 const stageAlerts = ref([])
 const stageAlertUnreadOnly = ref(false)
 const selectedStageAlert = ref(null)
@@ -642,7 +644,8 @@ const canReadCredit = computed(() => (crmSession.value?.permissions || []).inclu
 const canApplyCredit = computed(() => (crmSession.value?.permissions || []).includes('customer.credit.apply') && (crmSession.value?.roles || []).some((role) => CREDIT_APPLICATION_ROLES.has(role)) && !(crmSession.value?.roles || []).some((role) => CREDIT_APPROVAL_ROLES.has(role)))
 const canApproveCredit = computed(() => hasCreditApprovalAccess(crmSession.value))
 const canManageCreditRules = computed(() => (crmSession.value?.permissions || []).includes('customer.credit.rule.manage'))
-const canReadNotifications = computed(() => canReadOpportunities.value || canReadPresales.value)
+const canReadNotifications = computed(() => canReadOpportunities.value || canReadPresales.value
+  || canApproveCredit.value || canReadCredit.value)
 const canConfigureStageAlerts = computed(() => (crmSession.value?.permissions || []).includes('opportunity.alert.config'))
 const canManagePresaleApprovalRules = computed(() => (crmSession.value?.permissions || []).includes('presale.approval_rule.manage'))
 const canReadCustomerAudit = computed(() => (crmSession.value?.permissions || []).includes('customer.audit.read'))
@@ -1351,8 +1354,21 @@ function retryCustomerTab() {
   else void openCustomerTab(tab)
 }
 
-async function syncPresaleURL() {
+// 用途：生成售前筛选查询，保留通知绑定的申请坐标。
+// 参数：无；读取当前筛选和路由状态。
+// 返回值：可写回 URL 的筛选与有效申请编号。
+function presaleQueryForRoute() {
   const query = presaleStateToQuery(presaleFilters, presaleView.value, presalePage.number, presalePage.size, presaleColumnLimit.value)
+  const id = crmResourceID(route.query.request_id)
+  if (id) query.request_id = String(id)
+  return query
+}
+
+// 用途：把售前筛选状态同步到 URL，同时保留有效详情深链。
+// 参数：无。
+// 返回值：异步完成；仅在查询变化时替换路由。
+async function syncPresaleURL() {
+  const query = presaleQueryForRoute()
   const current = Object.fromEntries(Object.entries(route.query).map(([key, value]) => [key, Array.isArray(value) ? String(value[0] || '') : String(value || '')]))
   if (stableQuery(current) !== stableQuery(query)) await router.replace({ name: route.name, params: route.params, query })
 }
@@ -2283,17 +2299,56 @@ async function loadNotifications() {
   page.total = Number(result?.total || 0)
 }
 
-async function openNotification(item) {
+// 用途：独立同步已打开通知的已读状态与未读数量。
+// 参数：item 为已到达真实业务入口的当前账号通知。
+// 返回值：辅助状态未确认的提示集合；失败保留原状态，不阻断业务详情。
+async function acknowledgeOpenedNotification(item) {
+  const warnings = []
+  if (item.status === 'UNREAD') {
+    try {
+      await markNotificationRead(item.id)
+      item.status = 'READ'
+    } catch {
+      warnings.push('通知已读状态暂未确认，请稍后刷新核对。')
+    }
+  }
   try {
-    const target = parseNotificationTarget(item.target_path, window.location.origin)
-    if (!target) { error.value = '通知中的业务入口无效，已保留当前通知列表。'; return }
-    if (item.status === 'UNREAD') await markNotificationRead(item.id)
-    await refreshNotificationCount()
-    await router.push(target)
-    // 路由只承载导航状态；详情仍调用带数据范围校验的真实接口，伪造或过期通知不能借此
-    // 绕过商机、售前任务的对象级授权边界。
-    if (target.params.section === 'presale') await openPresale(Number(target.query.request_id))
-  } catch (value) { showError(value) }
+    const result = await getNotificationUnreadCount()
+    notificationUnreadCount.value = Number(result?.count || 0)
+  } catch {
+    warnings.push('通知未读数量暂时无法刷新，请稍后重试。')
+  }
+  return warnings
+}
+
+// 用途：先进入通知的真实业务入口，再独立同步通知辅助状态。
+// 参数：item 为当前账号可见的业务通知。
+// 返回值：异步完成；无效目标保留正文，导航失败保留可重试提示。
+async function openNotification(item) {
+  if (notificationOpening.value) return
+  const target = crmNotificationTarget(item, window.location.origin)
+  if (!target) { error.value = '通知中的业务入口无效，已保留当前通知列表。'; return }
+  notificationOpening.value = true
+  notificationWarning.value = ''
+  try {
+    const resolved = router.resolve(target)
+    const failure = await router.push(target)
+    if (failure && failure.type !== NavigationFailureType.duplicated) {
+      throw new Error('无法进入提醒关联页面，请检查访问权限后重试。')
+    }
+    if (route.fullPath !== resolved.fullPath) {
+      throw new Error('未能进入提醒关联页面，请核对访问权限或重新选择待办。')
+    }
+    if (failure?.type === NavigationFailureType.duplicated && target.params.section === 'presale') {
+      await openPresaleFromRoute()
+    }
+    const warnings = await acknowledgeOpenedNotification(item)
+    notificationWarning.value = warnings.join('；')
+  } catch (value) {
+    notificationWarning.value = formatCRMError(value, { fallback: '无法进入提醒关联页面，请重试。' })
+  } finally {
+    notificationOpening.value = false
+  }
 }
 
 // deleteRead 软删除当前账号已读通知；未读与其他用户的通知不受影响。
@@ -2334,6 +2389,32 @@ function notificationContext(item) {
   }
   const reference = item.request_no || item.opportunity_no || (item.customer_id ? `客户 #${item.customer_id}` : '业务通知')
   return `${events[item.type] || '业务事件'} · ${reference} · ${labels[item.recipient_kind] || '收件人'}`
+}
+
+// 用途：从通知深链读取真实授权售前详情，支持同栏目切换申请。
+// 参数：无；读取当前申请查询参数与会话读取能力。
+// 返回值：异步完成；非法坐标关闭旧详情并提示，不发起业务写入。
+async function openPresaleFromRoute() {
+  if (activeSection.value !== 'presale' || !canReadPresales.value) return
+  const raw = route.query.request_id
+  if (raw === undefined || raw === null || raw === '') return
+  const id = crmResourceID(raw)
+  if (!id) {
+    closePresale()
+    error.value = '售前详情入口无效，请从通知或申请列表重新打开。'
+    return
+  }
+  if (Number(selectedPresale.value?.request?.id) !== id) await openPresale(id)
+}
+
+// 用途：清除信用待审通知筛选，返回当前账号的全部授权待办。
+// 参数：无。
+// 返回值：导航完成的 Promise。
+function clearCreditApprovalTarget() {
+  const query = { ...route.query }
+  delete query.application_id
+  delete query.customer_id
+  return router.replace({ name: 'customer_opportunity', params: { section: 'credit-approvals' }, query })
 }
 
 async function openOpportunityFromRoute() {
@@ -3445,7 +3526,7 @@ watch(activeSection, () => {
 watch(() => route.fullPath, () => {
   if (activeSection.value !== 'presale') return
   const current = Object.fromEntries(Object.entries(route.query).map(([key, value]) => [key, Array.isArray(value) ? String(value[0] || '') : String(value || '')]))
-  const expected = presaleStateToQuery(presaleFilters, presaleView.value, presalePage.number, presalePage.size, presaleColumnLimit.value)
+  const expected = presaleQueryForRoute()
   // 组件主动 replace 也会触发 watcher；稳定比较用于打断“状态写 URL—URL 再写状态”循环。
   if (stableQuery(current) === stableQuery(expected)) return
   restorePresaleStateFromURL()
@@ -3453,6 +3534,7 @@ watch(() => route.fullPath, () => {
 })
 watch(() => [activeSection.value, route.query.opportunity_id], openOpportunityFromRoute, { immediate: true })
 watch(() => [activeSection.value, route.query.customer_id], openCustomerFromRoute, { immediate: true })
+watch(() => [activeSection.value, route.query.request_id, canReadPresales.value], openPresaleFromRoute, { immediate: true })
 watch(notificationUnreadOnly, () => { page.number = 1; if (activeSection.value === 'notifications') loadCurrent() })
 watch(stageAlertUnreadOnly, loadStageAlerts)
 onMounted(async () => {
@@ -3513,6 +3595,7 @@ onMounted(async () => {
     </template>
 
       <OperationToast :message="error || notice" :tone="error ? 'error' : 'success'" :reference="noticeReference" /><p v-if="runtimeCapabilitiesError" class="crm-alert warning" role="status">{{ runtimeCapabilitiesError }}</p>
+      <p v-if="notificationWarning" class="crm-alert warning" role="status">{{ notificationWarning }}</p>
       <div v-if="activeSection === 'customers'" class="crm-stat-cards" aria-label="客户统计">
         <article v-for="card in customerStatCards" :key="card.key" class="crm-stat-card" :data-tone="card.tone">
           <span class="crm-stat-label">{{ card.label }}</span>
@@ -3553,7 +3636,10 @@ onMounted(async () => {
       <section v-if="activeSection === 'customers'" class="crm-quick-filters" aria-label="客户快捷筛选"><button :class="{ active: customerFilters.quick_filter === 'NEW' }" @click="useCustomerQuickFilter('NEW')">新增客户（近 30 天）</button><button :class="{ active: customerFilters.quick_filter === 'WON' }" @click="useCustomerQuickFilter('WON')">成交客户</button><button :class="{ active: customerFilters.quick_filter === 'FOLLOWUP_DUE' }" @click="useCustomerQuickFilter('FOLLOWUP_DUE')">待跟进</button></section>
 
       <section v-if="activeSection === 'notifications'" class="crm-panel crm-inbox"><div class="crm-panel-heading"><div><h2>我的业务通知</h2><p class="crm-note">包含当前用户的商机、售前与信用等级通知；点击后标为已读，并通过真实详情接口再次校验对象权限。</p></div><div class="crm-inbox-actions"><label class="check"><input v-model="notificationUnreadOnly" type="checkbox">仅看未读</label><button type="button" class="crm-state-action" :disabled="!hasReadNotifications || loading" @click="deleteRead">删除已读</button><button type="button" class="crm-state-action" @click="showCrossNotifications = !showCrossNotifications">{{ showCrossNotifications ? '收起跨系统' : '跨系统提醒' }}</button></div></div><ListState v-if="notificationsListState" :loading="loading" :error="listError" error-title="业务通知加载失败" :empty-title="notificationUnreadOnly ? '暂无未读个人通知' : '暂无个人通知'" @retry="loadCurrent"><template #empty-action><button v-if="notificationUnreadOnly" type="button" class="crm-state-action" @click="notificationUnreadOnly = false">查看全部通知</button></template></ListState><div v-else class="crm-inbox-list"><button v-for="item in notifications" :key="item.id" :class="['crm-inbox-item', { unread: item.status === 'UNREAD' }]" @click="openNotification(item)"><span class="crm-status">{{ item.status === 'UNREAD' ? '未读' : '已读' }}</span><strong>{{ item.title }}</strong><span>{{ item.body }}</span><small>{{ notificationContext(item) }} · {{ formatDate(item.created_at) }}</small></button></div><PlatformNotificationInbox v-if="showCrossNotifications" app-code="customer_and_opportunity" scope="cross" :page-size="8" /></section>
-      <CreditApprovalInbox v-if="activeSection === 'credit-approvals'" :permissions="crmSession?.permissions || []" :roles="crmSession?.roles || []" />
+      <CreditApprovalInbox v-if="activeSection === 'credit-approvals'"
+        :permissions="crmSession?.permissions || []" :roles="crmSession?.roles || []"
+        :application-id="route.query.application_id" :customer-id="route.query.customer_id"
+        @clear-target="clearCreditApprovalTarget" />
       <CreditRuleSettingsPanel v-if="activeSection === 'credit-rules'" @notice="notice = $event" @error="error = $event" />
 
       <section v-if="activeSection === 'customers'" class="crm-panel table-panel"><ListState v-if="customersListState" :loading="loading" :error="listError" error-title="客户列表加载失败" empty-title="暂无符合条件的客户" @retry="loadCurrent"><template #empty-action><button type="button" class="crm-state-action" @click="resetCustomerFilters">重置筛选</button></template></ListState><table v-else-if="customerFilters.view === 'table'" class="crm-data-table"><thead><tr><th scope="col">客户编号</th><th scope="col">客户名称</th><th scope="col">信用等级</th><th scope="col">类型</th><th scope="col">行业 / 区域</th><th scope="col">负责人</th><th scope="col">状态</th><th scope="col" title="包含客户沟通记录和关联商机跟进记录">最近跟进（含商机）</th><th scope="col">商机金额汇总</th><th scope="col">操作</th></tr></thead><tbody><tr v-for="item in customers" :key="item.id" @click="openCustomer(item.id)"><td>{{ item.customer_no }}</td><td>{{ item.name }}</td><td><span class="crm-credit-level crm-credit-level--inline" :class="`is-${String(item.credit_level || 'B').toLowerCase()}`">{{ creditLevelLabel(item.credit_level) }}</span></td><td>{{ item.customer_type }}</td><td>{{ item.industry }} / {{ item.region }}</td><td>{{ ownerLabel(item) }}</td><td><span class="crm-badge" :class="customerStatusTone(item.status)">{{ customerStatusText(item.status) }}</span></td><td>{{ formatDate(item.last_followup_at) }}</td><td>{{ formatAmount(item.opportunity_amount_sum) }}</td><td class="crm-table-actions"><button type="button" class="crm-table-link" @click.stop="openCustomer(item.id)">查看</button><button type="button" class="crm-table-link" @click.stop="editCustomerFromList(item)">编辑</button></td></tr></tbody></table>      <div v-else class="crm-customer-cards" :data-quick-filter="customerFilters.quick_filter">

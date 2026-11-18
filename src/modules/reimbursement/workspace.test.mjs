@@ -1,6 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { workspaceQuery, uploadFiles, safeNotificationPath,claimChanges,submittedClaimStatuses } from './workspace.js'
+import * as workspace from './workspace.js'
 
 test('一期列表查询保留筛选坐标和分页，异常池/我发起的绑定正式查询', () => {
   assert.equal(workspaceQuery('claims',{q:' EXP 1 ',date_from:'2026-11-01'},2,20,''),
@@ -54,4 +55,22 @@ test('轮次关键字段差异来自真实快照，不把受限范围变化当�
   assert.ok(changes.some(row=>row.label==='费用i金额' && row.before==='1.00 元' && row.after==='2.00 元'))
   assert.ok(changes.some(row=>row.label==='费用j' && row.before==='无' && row.after==='新增'))
   assert.equal(claimChanges({...before,scope_limited:true},after).some(row=>row.label==='费用j'),false)
+})
+
+test('审批提醒按单据精确读取本人待办，不从当前列表页猜任务', async () => {
+  const paths=[]
+  const id=await workspace.notificationApprovalTaskID({claim_id:'claim/1'},async(path)=>{
+    paths.push(path)
+    return {items:[{id:'task',claim_id:'claim/1',status:'PENDING'}],total:1}
+  })
+  assert.equal(id,'task')
+  const query=new URLSearchParams(paths[0]?.split('?')[1])
+  assert.equal(query.get('claim_id'),'claim/1')
+  assert.equal(query.get('status'),'PENDING')
+})
+
+test('多项审批任务或超出当前响应时要求选待办，不自动打开其他任务',async()=>{
+  await assert.rejects(async()=>workspace.notificationApprovalTaskID({claim_id:'claim'},
+    async()=>({items:[{id:'a',claim_id:'claim',status:'PENDING'},
+      {id:'b',claim_id:'claim',status:'PENDING'}],total:2})),/多项/)
 })

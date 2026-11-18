@@ -1,7 +1,8 @@
 <script setup>
 import { onMounted,ref,computed } from 'vue'
+import { useRouter } from 'vue-router'
+import { openNotificationTarget, notificationTarget } from '../../shared/utils/notificationNavigation.js'
 import { deleteReadNotifications,listInbox,getNotification,getUnreadCount,markNotificationRead } from '../../platform/notifications/api/notifications.js'
-import { safeNotificationPath } from '../workspace.js'
 import { formatBusinessDateTime } from '../../shared/utils/businessTime.js'
 import PaginationBar from '@/modules/shared/components/PaginationBar.vue'
 import ErrorState from '../../shared/components/ErrorState.vue'
@@ -11,6 +12,7 @@ import { useConfirmDialog } from '@/modules/shared/composables/useConfirmDialog.
 const rows=ref([]),total=ref(0),page=ref(1),unreadOnly=ref(false),unread=ref(0)
 const tab=ref('all'),tabs=[{key:'all',label:'全部'},{key:'local',label:'本系统'},{key:'cross',label:'跨系统'}]
 const detail=ref(null),error=ref(''),busy=ref(false)
+const router=useRouter(),opening=ref(false)
 const { dialog: confirmDialog, askConfirm, accept: acceptConfirm, cancel: cancelConfirm } = useConfirmDialog()
 let sequence=0
 
@@ -28,15 +30,25 @@ async function load() {
  finally {if(ticket===sequence)busy.value=false}
 }
 
-// 用途：读取并标记本人的消息已读，目标应用仍重验业务权限。
+// 用途：读取本人的消息并进入处理页面，目标应用重新校验权限。
 // 参数：row为平台已授权的消息摘要。
 // 返回值：无；失败保留消息坐标供重试。
 async function open(row) {
+ if(!row?.delivery_id||opening.value)return
+ opening.value=true;error.value=''
  try {
-  detail.value=await getNotification(row.delivery_id)
-  if(!row.read_at)await markNotificationRead(row.delivery_id)
-  await load()
+  const result=await getNotification(row.delivery_id)
+  detail.value=result
+  if(!result.read_at) {
+   try {
+    await markNotificationRead(row.delivery_id)
+    detail.value={...result,read_at:new Date().toISOString()}
+    await load()
+   } catch(cause) {error.value=cause.message}
+  }
+  await openNotificationTarget(result,router)
  } catch(cause) {error.value=cause.message}
+ finally {opening.value=false}
 }
 const hasReadItems=computed(()=>rows.value.some((row)=>row.read_at))
 // deleteRead 软删除当前账号已读站内信；未读与其他收件人的消息不受影响。
@@ -78,14 +90,14 @@ onMounted(load)
       <span class="expense-message__content">{{ row.content }}</span>
       <span class="expense-message__time">{{ formatBusinessDateTime(row.delivered_at) }}</span>
     </span>
-    <button class="expense-button" @click="open(row)">查看消息</button>
+    <button class="expense-button" :disabled="opening" @click="open(row)">查看并处理</button>
    </li>
   </ul>
   <PaginationBar label="站内消息分页" :page="page" :total="total" :page-size="20" :loading="busy"
    @change="nextPage => { page = nextPage; load() }" />
   <ConfirmDialog :open="Boolean(confirmDialog)" v-bind="confirmDialog || {}" @confirm="acceptConfirm" @cancel="cancelConfirm" />
   <aside v-if="detail" class="expense-item"><h3>{{ detail.title }}</h3><p>{{ detail.content }}</p>
-   <a v-if="safeNotificationPath(detail.target_url)" :href="safeNotificationPath(detail.target_url)">查看关联业务（重新校验权限）</a>
+   <button v-if="notificationTarget(detail)" class="expense-button" :disabled="opening" @click="open(detail)">进入关联处理页面</button>
    <button class="expense-button" @click="detail=null">关闭</button></aside>
  </section>
 </template>

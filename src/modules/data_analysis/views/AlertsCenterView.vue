@@ -1,7 +1,8 @@
 <script setup>
 // 预警中心（P-08）：按严重度/到期日排序展示，OPEN→ACK→CLOSED 闭环。
 // 权限与数据范围由后端逐请求执行，前端仅按 permissions 控制动作显隐。
-import { computed, onMounted, ref } from "vue"
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue"
+import { useRoute } from "vue-router"
 import ConsoleIcon from "@/modules/shared/components/ConsoleIcon.vue"
 import ListState from "@/modules/shared/components/ListState.vue"
 import PaginationBar from "@/modules/shared/components/PaginationBar.vue"
@@ -9,6 +10,7 @@ import { ackAlert, closeAlert, getAlertSummary, getAlerts } from "../api/dataAna
 import { formatDataAnalysisError } from "../utils/errors.js"
 
 const props = defineProps({ permissions: { type: Array, default: () => [] } })
+const route = useRoute()
 
 const alerts = ref([])
 const loading = ref(true)
@@ -22,6 +24,10 @@ const pageSize = 50
 const total = ref(0)
 const summary = ref({ total: 0, open: 0, ack: 0, closed: 0, by_severity: {} })
 const acting = ref(null)
+const selectedAlert = ref(null)
+const selectedAlertPanel = ref(null)
+const referenceNotice = ref("")
+let alertLoadSequence = 0
 
 const canManage = computed(() => props.permissions.includes("alert.manage"))
 
@@ -114,28 +120,101 @@ const pageCount = computed(() => Math.max(1, Math.ceil(total.value / pageSize)))
 // 三态闸门：加载中 / 加载失败 / 无记录都走 ListState；失败一定带重试，不会渲染成「暂无预警」。
 const alertListState = computed(() => loading.value || Boolean(error.value) || !filteredAlerts.value.length)
 
-async function load({ background = false } = {}) {
+// 用途：在授权预警列表中有界定位通知记录，不假设列表支持编号过滤。
+// 参数：id 为预警标识；isCurrent 判断本次查询是否仍属于当前页面。
+// 返回值：命中页及记录；未命中保留检查范围，已过期查询返回 null。
+async function findReferencedAlert(id, isCurrent) {
+  for (let currentPage = 1; currentPage <= 20; currentPage++) {
+    const result = await getAlerts({
+      page: currentPage, page_size: pageSize, severity: "", status: "",
+    })
+    if (!isCurrent()) return null
+    const items = Array.isArray(result) ? result : (result?.items || [])
+    const count = Array.isArray(result) ? result.length : Number(result?.total || 0)
+    const found = items.find((item) => String(item?.id) === id)
+    const complete = items.length < pageSize || currentPage * pageSize >= count
+    const pageResult = { items, total: count, page: currentPage, found, complete }
+    if (found || complete || currentPage === 20) return pageResult
+  }
+}
+
+// 用途：展示权威预警页，通知命中时突出记录并聚焦关联内容。
+// 参数：result 为列表页；aggregate 为汇总；id 为通知标识；isCurrent 校验查询有效性。
+// 返回值：无；聚焦前再次确认查询仍有效。
+async function displayAlertResult(result, aggregate, id, isCurrent) {
+  const items = Array.isArray(result) ? result : (result?.items || [])
+  // 状态列补充说明在加载时算好，模板只做渲染，避免每帧重复解析字段。
+  alerts.value = items.map((item) => (item && typeof item === "object"
+    ? { ...item, statusNotes: alertStatusNotes(item) } : item))
+  total.value = Array.isArray(result) ? result.length : Number(result?.total || 0)
+  if (aggregate && typeof aggregate === "object") summary.value = aggregate
+  if (!id) {
+    if (selectedAlert.value) selectedAlert.value = alerts.value.find((item) =>
+      String(item?.id) === String(selectedAlert.value.id)) || selectedAlert.value
+    return
+  }
+  page.value = result.page
+  selectedAlert.value = alerts.value.find((item) => String(item?.id) === id) || null
+  if (!selectedAlert.value) {
+    referenceNotice.value = result.complete
+      ? "在当前可见预警中未定位到通知关联记录，请核对通知或刷新重试。"
+      : "已检查当前可见预警前 20 页（最多 1000 条），仍未定位到通知关联记录，请联系管理员核对。"
+  }
+  await nextTick()
+  if (isCurrent()) {
+    selectedAlertPanel.value?.focus()
+    selectedAlertPanel.value?.scrollIntoView?.({ block: "nearest" })
+  }
+}
+
+// 用途：读取当前页或通知关联页，拒绝迟到响应覆盖新通知与筛选结果。
+// 参数：background 控制刷新状态；referenceId 仅在通知参数变化时指定。
+// 返回值：读取是否成功；失败、取消或卸载后返回 false 并保留真实提示。
+async function load({ background = false, referenceId } = {}) {
+  const sequence = ++alertLoadSequence
+  const id = typeof referenceId === "string" ? referenceId.trim() : ""
+  let active = true
+  const isCurrent = () => active && sequence === alertLoadSequence
+  if (referenceId !== undefined) {
+    selectedAlert.value = null
+    referenceNotice.value = ""
+  }
+  if (id) {
+    keyword.value = ""
+    statusFilter.value = ""
+    severityFilter.value = ""
+    page.value = 1
+  }
   if (background) refreshing.value = true
   else loading.value = true
   error.value = null
   try {
     const [result, aggregate] = await Promise.all([
-      getAlerts({ page: page.value, page_size: pageSize, severity: severityFilter.value, status: statusFilter.value }),
+      id ? findReferencedAlert(id, isCurrent)
+        : getAlerts({ page: page.value, page_size: pageSize, severity: severityFilter.value, status: statusFilter.value }),
       getAlertSummary(),
     ])
-    const items = Array.isArray(result) ? result : (result?.items || [])
-    // 状态列补充说明在加载时算好，模板只做渲染，避免每帧重复解析字段。
-    alerts.value = items.map((item) => (item && typeof item === "object" ? { ...item, statusNotes: alertStatusNotes(item) } : item))
-    total.value = Array.isArray(result) ? result.length : Number(result?.total || 0)
-    if (aggregate && typeof aggregate === "object") summary.value = aggregate
+    if (!isCurrent()) return false
+    await displayAlertResult(result, aggregate, id, isCurrent)
+    return isCurrent()
   } catch (err) {
+    if (!isCurrent()) return false
     error.value = formatDataAnalysisError(err, { fallback: "预警加载失败，请稍后刷新。" })
     return false
   } finally {
-    if (background) refreshing.value = false
-    else loading.value = false
+    if (isCurrent()) {
+      refreshing.value = false
+      loading.value = false
+    }
+    active = false
   }
-  return true
+}
+
+// 用途：刷新或重试时保留通知定位意图，避免退回普通第一页。
+// 参数：无。
+// 返回值：当前预警列表或通知定位的读取结果。
+function refreshAlerts() {
+  return load({ referenceId: route.query.alert_id || "" })
 }
 
 function changePage(next) {
@@ -166,7 +245,10 @@ async function runAction(id, action) {
 function onAck(id) { runAction(id, "ack") }
 function onClose(id) { runAction(id, "close") }
 
-onMounted(load)
+watch(() => route.query.alert_id,
+  (id) => load({ referenceId: typeof id === "string" ? id : "" }), { flush: "sync" })
+onMounted(refreshAlerts)
+onBeforeUnmount(() => { alertLoadSequence++ })
 </script>
 
 <template>
@@ -205,10 +287,19 @@ onMounted(load)
         <option value="MEDIUM">中</option>
         <option value="LOW">低</option>
       </select>
-      <button class="da-button ghost" :disabled="loading" @click="load"><ConsoleIcon name="reset" />刷新</button>
+      <button class="da-button ghost" :disabled="loading" @click="refreshAlerts"><ConsoleIcon name="reset" />刷新</button>
       <span class="da-pill">数据与看板同源 · 只读汇总</span>
     </div>
 
+    <p v-if="referenceNotice" class="da-alert-meta" role="status">{{ referenceNotice }}</p>
+    <section v-if="selectedAlert" ref="selectedAlertPanel" class="da-panel da-alert-reference"
+      tabindex="-1" aria-label="通知关联预警详情">
+      <header><b>{{ selectedAlert.title }}</b><span class="da-badge">{{ STATUS_LABELS[selectedAlert.status] || selectedAlert.status }}</span></header>
+      <p>预警编号：<span class="mono">{{ selectedAlert.id }}</span></p>
+      <p>关联对象：{{ selectedAlert.target_ref || '—' }} · {{ alertTypeLabel(selectedAlert.alert_type) }}</p>
+      <p>触发规则：{{ selectedAlert.rule_code || '—' }} · 到期时间：{{ selectedAlert.due_date || '无期限' }}</p>
+      <p v-if="selectedAlert.statusNotes?.length" class="da-alert-meta">{{ selectedAlert.statusNotes.join(' · ') }}</p>
+    </section>
     <ListState
       v-if="alertListState"
       :loading="loading"
@@ -216,7 +307,7 @@ onMounted(load)
       error-title="预警列表加载失败"
       empty-title="暂无预警"
       empty-description="当前筛选条件下没有预警记录"
-      @retry="load"
+      @retry="refreshAlerts"
     />
     <div v-else class="da-panel da-table-panel da-alert-table-panel">
       <header><div><b>预警清单</b><p>按严重度与到期日排序 · 受理后进入处理中</p></div><span>共 {{ total }} 条</span></header>
@@ -224,7 +315,7 @@ onMounted(load)
         <table class="da-table">
           <thead><tr><th scope="col">严重度</th><th scope="col">预警项</th><th scope="col">对象</th><th scope="col">触发规则</th><th scope="col">到期 / 状态</th><th scope="col">状态</th><th scope="col">操作</th></tr></thead>
           <tbody>
-            <tr v-for="item in filteredAlerts" :key="item.id" :class="{ risk: String(item.severity).toUpperCase() === 'CRITICAL' }">
+            <tr v-for="item in filteredAlerts" :key="item.id" :class="{ risk: String(item.severity).toUpperCase() === 'CRITICAL', 'da-alert-selected': selectedAlert && String(selectedAlert.id) === String(item.id) }">
               <td><span class="da-alert-severity-pill" :class="item.severity.toLowerCase()">{{ SEVERITY_LABELS[String(item.severity).toUpperCase()] || item.severity }}</span></td>
               <td><b>{{ item.title }}</b><small>{{ alertTypeLabel(item.alert_type) }}</small></td>
               <td>{{ item.target_ref || '—' }}</td>
@@ -249,3 +340,10 @@ onMounted(load)
     </div>
   </section>
 </template>
+
+<style scoped>
+.da-alert-reference { margin-bottom: 1rem; padding: 1rem; overflow-wrap: anywhere; }
+.da-alert-reference header { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
+.da-alert-reference p { margin: .65rem 0 0; }
+.da-alert-selected { outline: 2px solid var(--primary); outline-offset: -2px; }
+</style>

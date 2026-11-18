@@ -1,5 +1,7 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
+import { openNotificationTarget, notificationTarget } from '../../shared/utils/notificationNavigation.js'
 import { formatUserError } from '../../shared/utils/userError.js'
 import { formatBusinessDateTime } from '../../shared/utils/businessTime.js'
 import { deleteReadNotifications, getNotification, listInbox, markNotificationRead } from '@/modules/platform/notifications/api/notifications'
@@ -8,6 +10,7 @@ import ConfirmDialog from '@/modules/shared/components/ConfirmDialog.vue'
 import { useConfirmDialog } from '@/modules/shared/composables/useConfirmDialog.js'
 
 const emit = defineEmits(['read'])
+const router = useRouter()
 const { dialog: confirmDialog, askConfirm, accept: acceptConfirm, cancel: cancelConfirm } = useConfirmDialog()
 const items = ref([]), total = ref(0), page = ref(1), unreadOnly = ref(false)
 const tab = ref('all'), tabs = [{ key: 'all', label: '全部' }, { key: 'local', label: '本系统' }, { key: 'cross', label: '跨系统' }]
@@ -17,16 +20,7 @@ let loadSequence = 0
 const pages = computed(() => Math.max(1, Math.ceil(total.value / pageSize)))
 const formatDate = (value) => value ? (formatBusinessDateTime(value) || '—') : '—'
 
-// 通知目标为可选项。绝不能将任意 URL 或类别
-// 转换为项目路由，也不能绕过目标页面自身的授权校验。
-const projectTarget = computed(() => {
-  if (!detail.value?.target_url) return ''
-  try {
-    const url = new URL(detail.value.target_url, window.location.origin)
-    return url.origin === window.location.origin && url.pathname.startsWith('/project_management/')
-      ? `${url.pathname}${url.search}${url.hash}` : ''
-  } catch { return '' }
-})
+const projectTarget = computed(() => notificationTarget(detail.value))
 
 async function load() {
   const sequence = ++loadSequence
@@ -49,19 +43,27 @@ async function load() {
 function changeFilter() { page.value = 1; detail.value = null; load() }
 function changeTab(next) { tab.value = next; page.value = 1; detail.value = null; load() }
 function changePage(next) { page.value = next; load() }
+// 用途：读取已授权的通知后直达处理页面，支持跨系统提醒。
+// 参数：item 为当前用户的通知摘要。
+// 返回值：无；无目标保留正文，失败显示错误。
 async function open(item) {
-  if (actionID.value) return
+  if (!item?.delivery_id || actionID.value) return
   actionID.value = item.delivery_id
   error.value = ''
   try {
     const result = await getNotification(item.delivery_id)
     detail.value = result
     if (!result.read_at) {
-      await markNotificationRead(item.delivery_id)
-      detail.value = { ...result, read_at: new Date().toISOString() }
-      emit('read')
-      await load()
+      try {
+        await markNotificationRead(item.delivery_id)
+        detail.value = { ...result, read_at: new Date().toISOString() }
+        emit('read')
+        await load()
+      } catch (value) {
+        error.value = formatUserError(value, { fallback: '已读状态保存失败，可继续处理。' })
+      }
     }
+    await openNotificationTarget(result, router)
   } catch (value) { error.value = formatUserError(value, { fallback: '通知读取失败，请重试。' }) }
   finally { actionID.value = '' }
 }
@@ -101,10 +103,10 @@ onMounted(load)
       <PaginationBar class="pm-personal-pagination" label="个人通知分页" :page="page" :total="total" :page-size="pageSize" :loading="loading" :disabled="!!actionID" @change="changePage" />
     </template>
     <ConfirmDialog :open="Boolean(confirmDialog)" v-bind="confirmDialog || {}" @confirm="acceptConfirm" @cancel="cancelConfirm" />
-    <aside v-if="detail" class="pm-personal-detail" aria-label="通知详情"><header><h3>{{ detail.title }}</h3><button type="button" class="pm-button" @click="detail = null">关闭详情</button></header><p>{{ detail.content }}</p><small>送达时间：{{ formatDate(detail.delivered_at) }}</small><a v-if="projectTarget" class="pm-button" :href="projectTarget">查看项目关联内容</a></aside>
+    <aside v-if="detail" class="pm-personal-detail" aria-label="通知详情"><header><h3>{{ detail.title }}</h3><button type="button" class="pm-button" @click="detail = null">关闭详情</button></header><p>{{ detail.content }}</p><small>送达时间：{{ formatDate(detail.delivered_at) }}</small><button v-if="projectTarget" type="button" class="pm-button pm-notification-target" :disabled="!!actionID" @click="open(detail)">进入关联处理页面</button></aside>
   </section>
 </template>
 
 <style scoped>
-.pm-personal-notifications>header,.pm-personal-detail>header,.pm-personal-pagination{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap}.pm-personal-notifications h2,.pm-personal-detail h3{margin:0}.pm-personal-notifications header p,.pm-personal-pagination,.pm-personal-list time{color:var(--pm-muted,#64748b)}.pm-personal-list{display:grid;gap:10px;margin:20px 0}.pm-personal-list>button{display:grid;gap:8px;text-align:left;padding:18px;border:1px solid var(--pm-border,#e2e8f0);border-radius:12px;background:transparent;color:inherit;cursor:pointer}.pm-personal-list>button.unread{border-left:4px solid #2563eb}.pm-personal-title{display:flex;justify-content:space-between;gap:16px;font-weight:600}.pm-personal-title small{font-weight:400;color:#64748b}.pm-personal-content{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.pm-personal-empty{padding:64px 20px;text-align:center;color:#64748b}.pm-personal-detail{margin-top:24px;padding:20px;border:1px solid var(--pm-border,#e2e8f0);border-radius:12px}.pm-personal-detail p{white-space:pre-wrap;overflow-wrap:anywhere}.pm-personal-detail a{display:inline-flex;margin:12px}.pm-notification-error{color:#b91c1c}.pm-notification-tabs{--pm-tab-border:#e2e8f0;--pm-tab-active:#2563eb;--pm-tab-on:#fff;display:inline-flex;gap:4px;margin-right:8px}.pm-notification-tabs button{padding:6px 10px;border:1px solid var(--pm-tab-border);border-radius:8px;background:transparent;color:inherit;cursor:pointer}.pm-notification-tabs button.active{background:var(--pm-tab-active);border-color:var(--pm-tab-active);color:var(--pm-tab-on)}
+.pm-personal-notifications>header,.pm-personal-detail>header,.pm-personal-pagination{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap}.pm-personal-notifications h2,.pm-personal-detail h3{margin:0}.pm-personal-notifications header p,.pm-personal-pagination,.pm-personal-list time{color:var(--pm-muted,#64748b)}.pm-personal-list{display:grid;gap:10px;margin:20px 0}.pm-personal-list>button{display:grid;gap:8px;text-align:left;padding:18px;border:1px solid var(--pm-border,#e2e8f0);border-radius:12px;background:transparent;color:inherit;cursor:pointer}.pm-personal-list>button.unread{border-left:4px solid #2563eb}.pm-personal-title{display:flex;justify-content:space-between;gap:16px;font-weight:600}.pm-personal-title small{font-weight:400;color:#64748b}.pm-personal-content{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.pm-personal-empty{padding:64px 20px;text-align:center;color:#64748b}.pm-personal-detail{margin-top:24px;padding:20px;border:1px solid var(--pm-border,#e2e8f0);border-radius:12px}.pm-personal-detail p{white-space:pre-wrap;overflow-wrap:anywhere}.pm-personal-detail .pm-notification-target{display:inline-flex;margin:12px}.pm-notification-error{color:#b91c1c}.pm-notification-tabs{--pm-tab-border:#e2e8f0;--pm-tab-active:#2563eb;--pm-tab-on:#fff;display:inline-flex;gap:4px;margin-right:8px}.pm-notification-tabs button{padding:6px 10px;border:1px solid var(--pm-tab-border);border-radius:8px;background:transparent;color:inherit;cursor:pointer}.pm-notification-tabs button.active{background:var(--pm-tab-active);border-color:var(--pm-tab-active);color:var(--pm-tab-on)}
 </style>

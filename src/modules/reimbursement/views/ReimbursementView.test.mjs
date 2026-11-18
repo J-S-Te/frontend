@@ -80,7 +80,7 @@ async function mountPage(permissions, request, section = 'dashboard', roles = []
     ConsoleIcon: { props: ['name'], setup: () => () => Vue.h('svg') },
     computed: Vue.computed, nextTick: Vue.nextTick, onBeforeUnmount: Vue.onBeforeUnmount,
     onMounted: Vue.onMounted, ref: Vue.ref, watch: Vue.watch, useRoute: () => route, useRouter: () => router,
-    onBeforeRouteLeave() {}, PaginationBar: PaginationBarStub, InvoiceCandidateCards,
+    onBeforeRouteLeave() {}, onBeforeRouteUpdate: () => {}, PaginationBar: PaginationBarStub, InvoiceCandidateCards,
     useLoginUsername: (session) => Vue.computed(() => loginUsername(session.value)),
     ConfirmDialog: panelStub, useConfirmDialog: useConfirmDialogStub,
     AppShell: { props: ['userName'], setup: (props, { slots }) => { Object.assign(shellProps, props); return () => Vue.h('main', slots.default?.()) } }, LoadingState: panelStub, ErrorState: ErrorStateStub, EmptyState: EmptyStateStub, ExpenseInbox: panelStub, ArchiveBorrowPanel: panelStub, TravelFields: panelStub, BusinessObjectSelect: panelStub, BusinessAttachmentSelect: panelStub, CitySelect: panelStub, ClaimPreviewPanel:panelStub,InvoiceContentFields:panelStub,InvoiceContentMappings:panelStub,InvoiceClassificationEvidence:panelStub,ParseExceptionsPanel:panelStub, PaymentExceptionPanel: panelStub, ClaimEvidenceTravelPanel: panelStub, BusinessOptionPicker: panelStub, ArchivePackagePanel: panelStub, InvoiceControlsPanel: panelStub, ApprovalRoundsPanel: panelStub, ClaimSyncPanel: panelStub, ReimbursementCostNotice: panelStub, RecoveryPanel: panelStub, InvoiceOriginalViewer: panelStub, todayBusinessDate: () => '2026-11-10', formatBusinessDateTime: (value) => value,
@@ -123,6 +123,50 @@ async function mountPage(permissions, request, section = 'dashboard', roles = []
   return { state, route, routerCalls, html, shellProps, confirm: confirmController,
     unmount: () => { app.unmount(); globalThis.window = previousWindow } }
 }
+
+test('审批提醒同页切换任务坐标后读取真实任务，不停留在普通报销单页',async()=>{
+  const calls=[]
+  const fixture=await mountPage(['expense.approval.act'],async(path)=>{
+    calls.push(path)
+    if(path==='/approval-tasks/task-1')return {id:'task-1',claim_id:'claim-1',
+      status:'PENDING',version:3,allowed_actions:['APPROVE'],snapshot:{items:[]}}
+    return {items:[],total:0}
+  },'approvals')
+  try {
+    fixture.route.query={task_id:'task-1',claim_id:'claim-1'}
+    await new Promise(resolve=>setTimeout(resolve,0));await Vue.nextTick()
+    assert.equal(fixture.state.approvalTask.value?.id,'task-1')
+    assert.ok(calls.includes('/approval-tasks/task-1'))
+  }finally{fixture.unmount()}
+})
+
+test('同页换审批提醒同步单据列表，清理坐标后恢复完整本人待办',async()=>{
+  const fixture=await mountPage(['expense.approval.act'],async(path)=>{
+    if(path.startsWith('/approval-tasks?')){
+      const id=new URLSearchParams(path.split('?')[1]).get('claim_id')
+      return {items:[{id:`task-${id||'all'}`,claim_id:id||'all',status:'PENDING'}],total:id?1:8}
+    }
+    if(path.startsWith('/approval-tasks/task-')&&!path.endsWith('/history')){
+      const id=path.split('task-')[1]
+      return {id:`task-${id}`,claim_id:id,status:'PENDING',allowed_actions:[],snapshot:{items:[]}}
+    }
+    return {items:[],total:0}
+  },'approvals')
+  try{
+    fixture.route.query={claim_id:'a',task_id:'task-a'}
+    await new Promise(resolve=>setTimeout(resolve,0));await Vue.nextTick()
+    assert.equal(fixture.state.rows.value[0].claim_id,'a')
+    fixture.state.page.value=3
+    fixture.route.query={claim_id:'b',task_id:'task-b'}
+    await new Promise(resolve=>setTimeout(resolve,0));await Vue.nextTick()
+    assert.equal(fixture.state.rows.value[0].claim_id,'b')
+    assert.equal(fixture.state.page.value,1)
+    fixture.route.query={}
+    await new Promise(resolve=>setTimeout(resolve,0));await Vue.nextTick()
+    assert.equal(fixture.state.total.value,8)
+    assert.equal(fixture.state.rows.value[0].claim_id,'all')
+  }finally{fixture.unmount()}
+})
 
 test('侧栏使用当前登录账号和对应头像，不显示OIDC内部名称', async () => {
   const fixture = await mountPage(['expense.claim.read'], async () => ({ my_claims: 0 }),

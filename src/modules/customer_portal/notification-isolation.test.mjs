@@ -44,6 +44,20 @@ function notificationOpenHarness(kind, read) {
 }
 
 for (const kind of ['feedback', 'reports']) {
+  test(`${kind} 已读请求 503 时仍打开授权详情，保留未读记录和计数`, async () => {
+    const h = notificationOpenHarness(kind, async () => {
+      throw Object.assign(new Error('已读服务暂时不可用'), { status: 503 })
+    })
+    await h.notify({ id: 'notice-a', status: 'UNREAD', feedback_id: 'a', request_id: 'a' })
+    assert.deepEqual(h.calls, ['a'])
+    assert.equal((h.selected.value.feedback || h.selected.value).id, 'a')
+    assert.equal(h.count.value, 3)
+    const prefix = kind === 'feedback' ? 'feedback' : 'report'
+    assert.equal(h.context[`${prefix}Notifications`].value[0].status, 'UNREAD')
+    assert.match(h.context[`${prefix}NotificationError`].value, /已读.*未确认/)
+    assert.equal(h.context[`${prefix}NotificationOpening`].has('notice-a'), false)
+  })
+
   test(`${kind} 已读迟到时不得跨栏目重新打开详情`, async () => {
     let complete
     const h = notificationOpenHarness(kind, () => new Promise(resolve => { complete = resolve }))

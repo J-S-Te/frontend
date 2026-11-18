@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs'
 import { parse, compileScript } from '@vue/compiler-sfc'
 import * as Vue from 'vue'
 import { safeNotificationPath } from '../workspace.js'
+import { openNotificationTarget, notificationTarget } from '../../shared/utils/notificationNavigation.js'
 import { formatBusinessDateTime } from '../../shared/utils/businessTime.js'
 import { PaginationBarStub } from '../../../test/helpers/paginationStub.mjs'
 import { createErrorStateStub } from '../../../test/helpers/errorStateStub.mjs'
@@ -14,7 +15,10 @@ import { createErrorStateStub } from '../../../test/helpers/errorStateStub.mjs'
 function component(extras = {}) {
   const { descriptor } = parse(readFileSync(new URL('./ExpenseInbox.vue', import.meta.url), 'utf8'))
   const compiled = compileScript(descriptor, { id: 'expense-inbox-test', inlineTemplate: true })
-  const values = { PaginationBar: PaginationBarStub, ErrorState: createErrorStateStub().Stub, ConfirmDialog: { render() { return null } }, useConfirmDialog: () => ({ dialog: { value: null }, askConfirm: async () => false, accept() {}, cancel() {} }), ...extras }
+  const values = { useRouter: () => ({ push: async () => {} }), openNotificationTarget,
+    notificationTarget, PaginationBar: PaginationBarStub, ErrorState: createErrorStateStub().Stub,
+    ConfirmDialog: { render() { return null } }, useConfirmDialog: () => ({ dialog: { value: null },
+      askConfirm: async () => false, accept() {}, cancel() {} }), ...extras }
   const directives = {
     vModelText: { created: (el, binding) => { el.props.value = binding.value } },
     vModelSelect: { created: (el, binding) => { el.props.value = binding.value } },
@@ -162,7 +166,7 @@ test('收件箱显示未读计数、未读标记、正文与业务时间，并�
     assert.match(rendered, /&lt;b&gt;请处理&lt;\/b&gt;/)
     assert.doesNotMatch(rendered, /<b>请处理/)
     assert.match(rendered, /2026-11-11 09:00/)
-    assert.match(rendered, /查看消息/)
+    assert.match(rendered, /查看并处理/)
   } finally { app.unmount() }
 })
 
@@ -181,15 +185,15 @@ test('消息详情只渲染站内安全路径，脚本或跨站协议链接不�
     currentTarget = target
     const { app, html, click } = await mount(view)
     try {
-      await click('查看消息')
+      await click('查看并处理')
       const rendered = html()
       assert.match(rendered, /&lt;b&gt;详情&lt;\/b&gt;/)
       assert.doesNotMatch(rendered, /<b>详情/)
       if (allowed) {
-        assert.match(rendered, /href="\/claims\/42"/)
-        assert.match(rendered, /查看关联业务（重新校验权限）/)
+        assert.doesNotMatch(rendered, /href=/)
+        assert.match(rendered, /进入关联处理页面/)
       } else {
-        assert.doesNotMatch(rendered, /查看关联业务/)
+        assert.doesNotMatch(rendered, /进入关联处理页面/)
         assert.doesNotMatch(rendered, /javascript:alert/)
       }
     } finally { app.unmount() }

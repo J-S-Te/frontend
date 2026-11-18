@@ -2,6 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import vm from 'node:vm'
+import * as Vue from 'vue'
 import { attachStructuredContext, createApiRequestContext } from '../platform/shared/api/requestContext.js'
 import { shouldStartSubsystemLogin } from '../shared/authz/sessionCompatibility.js'
 import { formatDataAnalysisError } from './utils/errors.js'
@@ -201,10 +202,17 @@ test('BI mutation network timeout is not retried and reports unconfirmed result'
   assert.equal(calls, 1)
 })
 
+// 用途：执行真实页面脚本，隔离远端接口与组件生命周期。
+// 参数：name 为页面名；bindings 为受控接口实现。
+// 返回值：真实加载与操作函数及错误状态。
 async function componentHarness(name, bindings) {
   const component = await readFile(new URL(`./views/${name}.vue`, import.meta.url), 'utf8')
   const script = component.match(/<script setup>([\s\S]*?)<\/script>/)[1].replace(/^import .*$/gm, '')
-  const context = vm.createContext({ ref: (value) => ({ value }), computed: (getter) => ({ get value() { return getter() } }), defineProps: () => ({ permissions: ['alert.manage', 'aggregation.manage'] }), onMounted() {}, formatDataAnalysisError, ...bindings })
+  const context = vm.createContext({
+    ...Vue, defineProps: () => ({ permissions: ['alert.manage', 'aggregation.manage'] }),
+    onMounted() {}, onBeforeUnmount() {}, useRoute: () => ({ query: {} }),
+    formatDataAnalysisError, ...bindings,
+  })
   vm.runInContext(`${script}\nglobalThis.ui = { load, error, ${name === 'AdminSourcesView' ? 'onTrigger, onTriggerAll, notice' : 'runAction'} };`, context)
   return context.ui
 }
