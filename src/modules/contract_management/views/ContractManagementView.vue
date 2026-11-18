@@ -136,6 +136,7 @@ import {
   toDictionaryFallback,
 } from '@/modules/contract_management/utils/contractDisplay'
 import ContractNotificationPanel from '@/modules/contract_management/components/ContractNotificationPanel.vue'
+import { getUnreadCount } from '@/modules/platform/notifications/api/notifications'
 import ContractIntegrationOutboxPanel from '@/modules/contract_management/components/ContractIntegrationOutboxPanel.vue'
 import ContractAuditOutboxPanel from '@/modules/contract_management/components/ContractAuditOutboxPanel.vue'
 import { useSigningLedger } from '@/modules/contract_management/composables/useSigningLedger'
@@ -712,6 +713,9 @@ const statusChangeTargets = computed(() => {
 })
 useDialogFocusTrap({ active: computed(() => statusChangeOpen.value), container: statusChangeElement, initialFocus: 'select, textarea' })
 const notificationOpen = ref(false)
+// 合同铃铛同时承载审批待办与站内通知：待办数来自业务接口，未读数来自平台收件箱，
+// 两者分开计数，避免再把“N 项待办”误当成未读通知。
+const notificationUnread = ref(0)
 const outboxTab = ref('integration')
 const toast = ref('')
 const isLoggingOut = ref(false)
@@ -3082,11 +3086,22 @@ async function loadContractSourceCapabilities() {
   } finally { contractSourceCapabilitiesLoaded.value = true }
 }
 
+// 读取本系统站内未读；失败时只隐藏未读红点，不阻断合同主流程。
+async function loadNotificationUnread() {
+  try {
+    const result = await getUnreadCount({ sourceApplication: 'contract_management' })
+    notificationUnread.value = Number(result?.unread_count || 0)
+  } catch {
+    notificationUnread.value = 0
+  }
+}
+
 onMounted(async () => {
   try {
     session.value = await getContractSession()
     ensureImportBatchSection()
     void loadContractSourceCapabilities()
+    void loadNotificationUnread()
     await loadBusinessData()
     contractNotificationReady.value = true
     await openContractNotificationRoute()
@@ -3157,7 +3172,7 @@ onBeforeUnmount(() => {
         <div class="contract-topbar-actions">
           <ShellPreferences sidebar-id="contract-sidebar" @collapse-change="desktopSidebarCollapsed = $event" />
           <OperationInboxPanel />
-          <button class="contract-icon-button" type="button" :aria-label="can('approval.process') && !approvalsKnown ? '通知，待办状态未知' : '通知'" @click="notificationOpen = !notificationOpen"><ConsoleIcon name="bell" /><i v-if="approvalsKnown && can('approval.process') && approvals.length"></i><span v-else-if="can('approval.process') && !approvalsKnown" aria-hidden="true">?</span></button>
+          <button class="contract-icon-button" type="button" :aria-label="can('approval.process') && !approvalsKnown ? '通知与审批待办，待办状态未知' : '通知与审批待办'" @click="notificationOpen = !notificationOpen"><ConsoleIcon name="bell" /><i v-if="(approvalsKnown && can('approval.process') && approvals.length) || notificationUnread"></i><span v-else-if="can('approval.process') && !approvalsKnown" aria-hidden="true">?</span></button>
           <span class="contract-topbar-avatar">{{ currentUserInitial }}</span>
         </div>
         <ContractNotificationPanel
@@ -3166,6 +3181,7 @@ onBeforeUnmount(() => {
           :can-process="can('approval.process')"
           @open-approval="openApproval"
           @view-all="navigate('approvals')"
+          @unread-change="notificationUnread = $event"
         />
         <div v-else-if="notificationOpen" class="contract-notification-panel" role="status">
           <p>待办状态尚未读取或读取失败。</p>

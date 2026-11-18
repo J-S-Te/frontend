@@ -52,10 +52,10 @@ async function loadSfc(file) {
 // golden 为提取前 ProjectManagementView.vue 通知弹层片段的 SSR 渲染结果（批次 3 第三步b 采集），
 // 提取后本组件必须逐字节复现同一 DOM；有意变更须同步重采 golden。
 const GOLDENS = {
-  "loaded-items": "<div id=\"project-notifications\" class=\"pm-notifications\" role=\"status\" aria-live=\"polite\"><div class=\"pm-popover-head\"><b>业务待办</b><span>2 条</span></div><!--v-if--><!--[--><button disabled><i class=\"danger\"></i><span><b>NOTIF alpha</b><small>content alpha</small></span></button><button><i class=\"warning\"></i><span><b>NOTIF beta</b><small>content beta</small></span></button><!--]--><!--v-if--><button type=\"button\">查看全部通知</button></div>",
-  "loading": "<div id=\"project-notifications\" class=\"pm-notifications\" role=\"status\" aria-live=\"polite\"><div class=\"pm-popover-head\"><b>业务待办</b><span>0 条</span></div><p class=\"pm-notification-state\">正在加载未读通知…</p><!--[--><!--]--><!--v-if--><button type=\"button\">查看全部通知</button></div>",
-  "error-state": "<div id=\"project-notifications\" class=\"pm-notifications\" role=\"status\" aria-live=\"polite\"><div class=\"pm-popover-head\"><b>业务待办</b><span>0 条</span></div><p class=\"pm-notification-state danger\">ERR unreadable</p><!--[--><!--]--><!--v-if--><button type=\"button\">查看全部通知</button></div>",
-  "empty-no-viewall": "<div id=\"project-notifications\" class=\"pm-notifications\" role=\"status\" aria-live=\"polite\"><div class=\"pm-popover-head\"><b>业务待办</b><span>0 条</span></div><!--v-if--><!--[--><!--]--><div class=\"pm-empty-mini\" role=\"status\">暂无未读通知</div><!--v-if--></div>"
+  "loaded-items": "<div id=\"project-notifications\" class=\"pm-notifications\" role=\"status\" aria-live=\"polite\"><div class=\"pm-popover-head\"><b>未读通知</b><span>2 条</span></div><!--v-if--><!--[--><button disabled><i class=\"danger\"></i><span><b>NOTIF alpha</b><small>content alpha</small></span></button><button><i class=\"warning\"></i><span><b>NOTIF beta</b><small>content beta</small></span></button><!--]--><!--v-if--><button type=\"button\">查看全部通知</button></div>",
+  "loading": "<div id=\"project-notifications\" class=\"pm-notifications\" role=\"status\" aria-live=\"polite\"><div class=\"pm-popover-head\"><b>未读通知</b><span>0 条</span></div><p class=\"pm-notification-state\">正在加载未读通知…</p><!--[--><!--]--><!--v-if--><button type=\"button\">查看全部通知</button></div>",
+  "error-state": "<div id=\"project-notifications\" class=\"pm-notifications\" role=\"status\" aria-live=\"polite\"><div class=\"pm-popover-head\"><b>未读通知</b><span>0 条</span></div><p class=\"pm-notification-state danger\">ERR unreadable</p><!--[--><!--]--><!--v-if--><button type=\"button\">查看全部通知</button></div>",
+  "empty-no-viewall": "<div id=\"project-notifications\" class=\"pm-notifications\" role=\"status\" aria-live=\"polite\"><div class=\"pm-popover-head\"><b>未读通知</b><span>0 条</span></div><!--v-if--><!--[--><!--]--><div class=\"pm-empty-mini\" role=\"status\">暂无未读通知</div><!--v-if--></div>"
 }
 const CASES = {
   "loaded-items": {

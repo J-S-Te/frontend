@@ -37,8 +37,26 @@ export const listInbox = ({ page = 1, pageSize = 20, unreadOnly = false, sourceA
  */
 export const getNotification = (deliveryID) => request(`/notifications/inbox/${encodeURIComponent(deliveryID)}`)
 
-/** getUnreadCount 统计未读站内信数量，用于页头徽标与提醒角标。 */
-export const getUnreadCount = () => request('/notifications/inbox/unread-count')
+/**
+ * getUnreadCount 统计未读站内信数量，用于页头徽标与提醒角标。
+ * 过滤参数必须与 listInbox 保持同一组，否则“本系统”徽标会和列表出现两个数。
+ */
+export const getUnreadCount = ({ sourceApplication = '', excludeSourceApplication = '' } = {}) => {
+  const query = new URLSearchParams()
+  if (sourceApplication) query.set('source_application', sourceApplication)
+  if (excludeSourceApplication) query.set('exclude_source_application', excludeSourceApplication)
+  const suffix = query.toString() ? `?${query}` : ''
+  return request(`/notifications/inbox/unread-count${suffix}`)
+}
+
+/** getNotificationBadge 一次读取未读总数与分来源数量，供统一铃铛聚合使用。 */
+export const getNotificationBadge = () => request('/notifications/badge')
+
+/** markNotificationsReadBatch 批量标记最多 100 条站内信为已读，返回实际更新条数。 */
+export const markNotificationsReadBatch = (deliveryIDs = []) => request('/notifications/inbox/read-batch', {
+  method: 'POST',
+  body: JSON.stringify({ delivery_ids: Array.isArray(deliveryIDs) ? deliveryIDs : [] }),
+})
 
 /** markNotificationRead 标记单条消息为已读。 */
 export const markNotificationRead = (deliveryID) => request(`/notifications/inbox/${encodeURIComponent(deliveryID)}/read`, { method: 'POST', body: '{}' })

@@ -10,13 +10,13 @@ defineProps({
   showInbox: { type: Boolean, default: true },
 })
 
-defineEmits(['open-approval', 'view-all'])
+defineEmits(['open-approval', 'view-all', 'unread-change'])
 
 </script>
 
 <template>
   <div class="contract-notification-panel">
-    <header><strong>通知中心</strong><span>{{ approvals.length }} 项待办</span></header>
+    <header><strong>审批待办</strong><span>{{ approvals.length }} 项</span></header>
     <template v-if="canProcess && approvals.length">
       <button
         v-for="approval in approvals.slice(0, 5)"
@@ -36,8 +36,8 @@ defineEmits(['open-approval', 'view-all'])
     </template>
     <p v-else class="contract-notification-empty">当前没有待处理流程事件。</p>
     <section v-if="showInbox" class="contract-inbox-section" aria-label="站内通知">
-      <header><strong>站内通知</strong><small>本系统与跨系统提醒</small></header>
-      <PlatformNotificationInbox app-code="contract_management" :page-size="5" />
+      <header><strong>通知</strong><small>本系统与跨系统提醒</small></header>
+      <PlatformNotificationInbox app-code="contract_management" :page-size="5" @unread-change="$emit('unread-change', $event)" />
     </section>
   </div>
 </template>

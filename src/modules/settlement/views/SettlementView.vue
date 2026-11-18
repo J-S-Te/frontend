@@ -1012,7 +1012,7 @@ watch(invoiceDetailID, load);
             :aria-label="taskStatusKnown ? '我的待办' : '我的待办，状态未读取或读取失败'"
             @click="go('tasks')"
           >
-            <ConsoleIcon name="bell" /><i v-if="taskStatusKnown && taskGroups.some(group => group.items.length)" class="settlement-notification-dot" /><span v-else-if="!taskStatusKnown" aria-hidden="true">?</span>
+            <ConsoleIcon name="nav-approval" /><i v-if="taskStatusKnown && taskGroups.some(group => group.items.length)" class="settlement-notification-dot" /><span v-else-if="!taskStatusKnown" aria-hidden="true">?</span>
           </button>
           <div class="settlement-topbar-notifications">
             <button class="settlement-topbar-icon" type="button" title="站内通知" aria-label="站内通知" @click="showNotifications = !showNotifications">

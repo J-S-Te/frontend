@@ -3,7 +3,7 @@ import { readFileSync, existsSync } from 'node:fs'
 import { afterEach, test } from 'node:test'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { deleteReadNotifications, getNotificationSettings, retryFailedNotificationDeliveries, updateNotificationSettings } from './notifications.js'
+import { deleteReadNotifications, getNotificationBadge, getNotificationSettings, getUnreadCount, markNotificationsReadBatch, retryFailedNotificationDeliveries, updateNotificationSettings } from './notifications.js'
 
 // 跨仓契约守卫：前端使用的通知路由必须真实存在于平台路由表，
 // 避免只断言模拟响应而漏掉路径拼写错误（历史缺陷：retry-failed）。
@@ -109,6 +109,57 @@ test('retryFailedNotificationDeliveries defaults to 20 and rejects a non-positiv
   assert.equal(requested.url, '/api/v1/notifications/deliveries/retry?limit=20')
 
   await assert.rejects(() => retryFailedNotificationDeliveries(0), /limit/i)
+})
+
+test('getUnreadCount forwards the same source scope as the inbox list', async () => {
+  const calls = []
+  globalThis.fetch = async (url) => {
+    calls.push(url)
+    return jsonResponse({ data: { unread_count: 4 } })
+  }
+
+  const result = await getUnreadCount({ sourceApplication: 'contract_management' })
+  assert.deepEqual(result, { unread_count: 4 })
+  assert.equal(calls[0], '/api/v1/notifications/inbox/unread-count?source_application=contract_management')
+
+  await getUnreadCount({ excludeSourceApplication: 'contract_management' })
+  assert.equal(calls[1], '/api/v1/notifications/inbox/unread-count?exclude_source_application=contract_management')
+
+  await getUnreadCount()
+  assert.equal(calls[2], '/api/v1/notifications/inbox/unread-count')
+})
+
+test('getNotificationBadge reads the aggregate badge route once', async () => {
+  let requested
+  globalThis.fetch = async (url) => {
+    requested = url
+    return jsonResponse({ data: { total: 5, by_source: [{ source_application: 'contract_management', unread_count: 3 }] } })
+  }
+
+  const result = await getNotificationBadge()
+  assert.equal(requested, '/api/v1/notifications/badge')
+  assert.equal(result.total, 5)
+  assert.equal(result.by_source[0].unread_count, 3)
+})
+
+test('markNotificationsReadBatch posts delivery IDs to the batch route', async () => {
+  let requested
+  globalThis.fetch = async (url, options) => {
+    requested = { url, options }
+    return jsonResponse({ data: { updated_count: 2 } })
+  }
+
+  const result = await markNotificationsReadBatch([' d-1 ', 'd-2'])
+  assert.equal(requested.url, '/api/v1/notifications/inbox/read-batch')
+  assert.equal(requested.options.method, 'POST')
+  assert.equal(requested.options.credentials, 'include')
+  assert.deepEqual(JSON.parse(requested.options.body), { delivery_ids: [' d-1 ', 'd-2'] })
+  assert.deepEqual(result, { updated_count: 2 })
+})
+
+test('notification badge and batch-read routes exist in the platform router (cross-repo drift guard)', { skip: !routerSource }, () => {
+  assert.match(routerSource, /"\/notifications\/badge"/)
+  assert.match(routerSource, /"\/notifications\/inbox\/read-batch"/)
 })
 
 test('notification retry route exists in the platform router (cross-repo drift guard)', { skip: !routerSource }, () => {

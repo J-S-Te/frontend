@@ -58,9 +58,9 @@ async function loadSfc(file) {
 // （批次 3 合同页第三步采集，绑定真实 approvalNotificationTitle/approvalStatusLabel）；
 // 已同步加入合同名称字段；有意变更须同步更新 golden。
 const GOLDENS = {
-  "with-todo": "<div class=\"contract-notification-panel\"><header><strong>通知中心</strong><span>6 项待办</span></header><!--[--><!--[--><button type=\"button\"><i class=\"warning\"></i><span><strong>合同审批已流转至部门审批</strong><small class=\"contract-notification-name\">合同名称：—</small><small>事件：流程流转 · 当前节点：部门审批 · 状态：处理中</small><small>点击查看并处理</small></span></button><button type=\"button\"><i class=\"warning\"></i><span><strong>合同审批已流转至财务审批</strong><small class=\"contract-notification-name\">合同名称：—</small><small>事件：流程流转 · 当前节点：财务审批 · 状态：待处理</small><small>点击查看并处理</small></span></button><button type=\"button\"><i class=\"warning\"></i><span><strong>合同审批已流转至N3</strong><small class=\"contract-notification-name\">合同名称：—</small><small>事件：流程流转 · 当前节点：N3 · 状态：处理中</small><small>点击查看并处理</small></span></button><button type=\"button\"><i class=\"warning\"></i><span><strong>合同审批已流转至N4</strong><small class=\"contract-notification-name\">合同名称：—</small><small>事件：流程流转 · 当前节点：N4 · 状态：处理中</small><small>点击查看并处理</small></span></button><button type=\"button\"><i class=\"warning\"></i><span><strong>合同审批已流转至N5</strong><small class=\"contract-notification-name\">合同名称：—</small><small>事件：流程流转 · 当前节点：N5 · 状态：处理中</small><small>点击查看并处理</small></span></button><!--]--><button type=\"button\"><i class=\"info\"></i><span><strong>查看全部待处理事件</strong><small>还有 1 项审批待办</small></span></button><!--]--><!--v-if--></div>",
-  "no-permission": "<div class=\"contract-notification-panel\"><header><strong>通知中心</strong><span>6 项待办</span></header><p class=\"contract-notification-empty\">当前没有待处理流程事件。</p><!--v-if--></div>",
-  "empty": "<div class=\"contract-notification-panel\"><header><strong>通知中心</strong><span>0 项待办</span></header><p class=\"contract-notification-empty\">当前没有待处理流程事件。</p><!--v-if--></div>"
+  "with-todo": "<div class=\"contract-notification-panel\"><header><strong>审批待办</strong><span>6 项</span></header><!--[--><!--[--><button type=\"button\"><i class=\"warning\"></i><span><strong>合同审批已流转至部门审批</strong><small class=\"contract-notification-name\">合同名称：—</small><small>事件：流程流转 · 当前节点：部门审批 · 状态：处理中</small><small>点击查看并处理</small></span></button><button type=\"button\"><i class=\"warning\"></i><span><strong>合同审批已流转至财务审批</strong><small class=\"contract-notification-name\">合同名称：—</small><small>事件：流程流转 · 当前节点：财务审批 · 状态：待处理</small><small>点击查看并处理</small></span></button><button type=\"button\"><i class=\"warning\"></i><span><strong>合同审批已流转至N3</strong><small class=\"contract-notification-name\">合同名称：—</small><small>事件：流程流转 · 当前节点：N3 · 状态：处理中</small><small>点击查看并处理</small></span></button><button type=\"button\"><i class=\"warning\"></i><span><strong>合同审批已流转至N4</strong><small class=\"contract-notification-name\">合同名称：—</small><small>事件：流程流转 · 当前节点：N4 · 状态：处理中</small><small>点击查看并处理</small></span></button><button type=\"button\"><i class=\"warning\"></i><span><strong>合同审批已流转至N5</strong><small class=\"contract-notification-name\">合同名称：—</small><small>事件：流程流转 · 当前节点：N5 · 状态：处理中</small><small>点击查看并处理</small></span></button><!--]--><button type=\"button\"><i class=\"info\"></i><span><strong>查看全部待处理事件</strong><small>还有 1 项审批待办</small></span></button><!--]--><!--v-if--></div>",
+  "no-permission": "<div class=\"contract-notification-panel\"><header><strong>审批待办</strong><span>6 项</span></header><p class=\"contract-notification-empty\">当前没有待处理流程事件。</p><!--v-if--></div>",
+  "empty": "<div class=\"contract-notification-panel\"><header><strong>审批待办</strong><span>0 项</span></header><p class=\"contract-notification-empty\">当前没有待处理流程事件。</p><!--v-if--></div>"
 }
 const CASES = {
   "with-todo": {
@@ -202,11 +202,12 @@ test('通知面板复现提取前 golden：无待办', async () => {
   assert.equal(html, GOLDENS['empty'])
 })
 
-test('通知面板默认挂载站内通知并保留待办事件', () => {
+test('通知面板默认挂载站内通知并转发未读数', () => {
   const panelSource = readFileSync(new URL('./ContractNotificationPanel.vue', import.meta.url), 'utf8')
   assert.match(panelSource, /PlatformNotificationInbox/)
   assert.match(panelSource, /app-code="contract_management"/)
   assert.match(panelSource, /showInbox/)
+  assert.ok(panelSource.includes("@unread-change=\"$emit('unread-change', $event)\""))
 })
 test('通知面板以事件转发打开待办与查看全部', () => {
   const panelSource = readFileSync(new URL('./ContractNotificationPanel.vue', import.meta.url), 'utf8')
