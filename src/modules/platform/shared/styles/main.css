@@ -90,6 +90,26 @@
   --status-danger-border: #fecaca;
   --status-danger-text: #b91c1c;
   --status-danger-dot: #dc2626;
+  /* 分类标签（与状态五档分离）：只表达“类别”，不参与状态语义；色值仅在此处定义。 */
+  --tag-person-text: #6d28d9;
+  --tag-person-bg: #f4f1fe;
+  --tag-person-border: #d6c9fa;
+  --tag-equipment-text: #0f6b60;
+  --tag-equipment-bg: #e6f6f3;
+  --tag-equipment-border: #a7ddd2;
+  --tag-credential-text: #6d28d9;
+  --tag-credential-bg: #f5f3ff;
+  --tag-credential-border: #d8ccfb;
+  --tag-testing-text: #0f6b60;
+  --tag-testing-bg: #edf9f6;
+  --tag-testing-border: #a9ded3;
+  --tag-system-text: #9d2b6b;
+  --tag-system-bg: #fdf2f8;
+  --tag-system-border: #eeb3cf;
+  --tag-other-text: #475569;
+  --tag-other-bg: #f8fafc;
+  --tag-other-border: #cbd5e1;
+
 }
 
 /* ==========================================================================
@@ -237,7 +257,27 @@
   --status-danger-bg: #2c1418;
   --status-danger-border: #5c2630;
   --status-danger-text: #f87171;
-  --status-danger-dot: #ef4444;;
+  --status-danger-dot: #ef4444;
+  /* 分类标签（深色）：同一套语义槽位，只换色值。 */
+  --tag-person-text: #c4b5fd;
+  --tag-person-bg: #221a3f;
+  --tag-person-border: #43307a;
+  --tag-equipment-text: #5eead4;
+  --tag-equipment-bg: #0d2a26;
+  --tag-equipment-border: #245049;
+  --tag-credential-text: #c4b5fd;
+  --tag-credential-bg: #1f1a3d;
+  --tag-credential-border: #43307a;
+  --tag-testing-text: #5eead4;
+  --tag-testing-bg: #0d2b26;
+  --tag-testing-border: #245049;
+  --tag-system-text: #f9a8d4;
+  --tag-system-bg: #2e0f27;
+  --tag-system-border: #5a2642;
+  --tag-other-text: #bccbe0;
+  --tag-other-bg: #111a2c;
+  --tag-other-border: #2a3648;
+;
 }
 
 /* 深色下焦点环必须比浅色更亮，否则在深底上不可见；只改颜色，宽度/偏移沿用各模块。 */
