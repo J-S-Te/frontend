@@ -1,33 +1,32 @@
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
+import { openNotificationTarget, notificationTarget } from '../../shared/utils/notificationNavigation.js'
 import { formatUserError } from '../../shared/utils/userError.js'
 import { formatBusinessDateTime } from '../../shared/utils/businessTime.js'
 import { deleteReadNotifications, getNotification, listInbox, markNotificationRead } from '@/modules/platform/notifications/api/notifications'
 import PaginationBar from '@/modules/shared/components/PaginationBar.vue'
 import ConfirmDialog from '@/modules/shared/components/ConfirmDialog.vue'
 import { useConfirmDialog } from '@/modules/shared/composables/useConfirmDialog.js'
+import { projectApprovalTarget } from '../approvalTasks.js'
 
-const emit = defineEmits(['read'])
+const emit = defineEmits(['read', 'open-approval', 'read-error'])
+const router = useRouter()
 const { dialog: confirmDialog, askConfirm, accept: acceptConfirm, cancel: cancelConfirm } = useConfirmDialog()
 const items = ref([]), total = ref(0), page = ref(1), unreadOnly = ref(false)
 const tab = ref('all'), tabs = [{ key: 'all', label: '全部' }, { key: 'local', label: '本系统' }, { key: 'cross', label: '跨系统' }]
 const loading = ref(false), error = ref(''), detail = ref(null), actionID = ref('')
 const pageSize = 20
 let loadSequence = 0
+let disposed = false
 const pages = computed(() => Math.max(1, Math.ceil(total.value / pageSize)))
 const formatDate = (value) => value ? (formatBusinessDateTime(value) || '—') : '—'
 
-// 通知目标为可选项。绝不能将任意 URL 或类别
-// 转换为项目路由，也不能绕过目标页面自身的授权校验。
-const projectTarget = computed(() => {
-  if (!detail.value?.target_url) return ''
-  try {
-    const url = new URL(detail.value.target_url, window.location.origin)
-    return url.origin === window.location.origin && url.pathname.startsWith('/project_management/')
-      ? `${url.pathname}${url.search}${url.hash}` : ''
-  } catch { return '' }
-})
+const projectTarget = computed(() => notificationTarget(detail.value))
 
+// 用途：读取当前用户通知分页，并忽略已过期或卸载后的回执。
+// 参数：无；使用当前页签、分页与未读筛选。
+// 返回值：无；失败显示可重试提示。
 async function load() {
   const sequence = ++loadSequence
   loading.value = true
@@ -35,34 +34,74 @@ async function load() {
   try {
     const scope = tab.value === 'local' ? { sourceApplication: 'project_management' } : tab.value === 'cross' ? { excludeSourceApplication: 'project_management' } : {}
     const result = await listInbox({ page: page.value, pageSize, unreadOnly: unreadOnly.value, ...scope })
-    if (sequence !== loadSequence) return
+    if (disposed || sequence !== loadSequence) return
     if (!Array.isArray(result?.items) || !Number.isFinite(Number(result.total))) throw new Error('通知列表响应异常，请重试。')
     items.value = result.items
     total.value = Number(result.total)
     if (page.value > pages.value) { page.value = pages.value; await load() }
   } catch (value) {
-    if (sequence !== loadSequence) return
+    if (disposed || sequence !== loadSequence) return
     items.value = []
     error.value = formatUserError(value, { fallback: '个人通知加载失败，请重试。' })
-  } finally { if (sequence === loadSequence) loading.value = false }
+  } finally { if (!disposed && sequence === loadSequence) loading.value = false }
 }
 function changeFilter() { page.value = 1; detail.value = null; load() }
 function changeTab(next) { tab.value = next; page.value = 1; detail.value = null; load() }
 function changePage(next) { page.value = next; load() }
+// 用途：从真实通知详情进入统一项目审批，已读失败仍允许处理。
+// 参数：result 为当前用户的通知详情，target 为已核对引用的审批路径。
+// 返回值：无；组件卸载后不再发出导航或提示。
+async function openApprovalNotification(result, target) {
+  try {
+    if (!result.read_at) {
+      await markNotificationRead(result.delivery_id)
+      if (!disposed) emit('read')
+    }
+  } catch (value) {
+    const reason = formatUserError(value, { fallback: '请稍后重试。' })
+    if (!disposed) emit('read-error', `通知已读状态未保存：${reason}，仍可进入审批申请。`)
+  }
+  if (!disposed) emit('open-approval', target)
+}
+
+// 用途：读取已授权通知后直达统一审批或跨系统处理页面。
+// 参数：item 为当前用户的通知摘要。
+// 返回值：无；无目标保留正文，失败显示错误。
 async function open(item) {
-  if (actionID.value) return
+  if (disposed || !item?.delivery_id || actionID.value) return
   actionID.value = item.delivery_id
   error.value = ''
   try {
     const result = await getNotification(item.delivery_id)
+    if (disposed) return
+    if (!result || String(result.delivery_id || '') !== String(item.delivery_id)) {
+      throw new Error('通知详情无法确认，请刷新后重试。')
+    }
+    const target = projectApprovalTarget(result, window.location.origin)
+    if (target) {
+      await openApprovalNotification(result, target)
+      return
+    }
+    if (String(result.reference_type || '').trim().toUpperCase() === 'PROJECT_APPROVAL') {
+      throw new Error('审批通知的申请编号与目标不一致，请从审批待办重新进入。')
+    }
     detail.value = result
     if (!result.read_at) {
-      await markNotificationRead(item.delivery_id)
-      detail.value = { ...result, read_at: new Date().toISOString() }
-      emit('read')
-      await load()
+      try {
+        await markNotificationRead(item.delivery_id)
+        if (disposed) return
+        detail.value = { ...result, read_at: new Date().toISOString() }
+        emit('read')
+        await load()
+      } catch (value) {
+        if (disposed) return
+        error.value = formatUserError(value, { fallback: '已读状态保存失败，可继续处理。' })
+      }
     }
-  } catch (value) { error.value = formatUserError(value, { fallback: '通知读取失败，请重试。' }) }
+    if (!disposed) await openNotificationTarget(result, router)
+  } catch (value) {
+    if (!disposed) error.value = formatUserError(value, { fallback: '通知读取失败，请重试。' })
+  }
   finally { actionID.value = '' }
 }
 const hasReadItems = computed(() => items.value.some((item) => item.read_at))
@@ -88,6 +127,7 @@ async function deleteRead() {
   } finally { loading.value = false }
 }
 onMounted(load)
+onBeforeUnmount(() => { disposed = true; loadSequence += 1 })
 </script>
 
 <template>
@@ -101,10 +141,10 @@ onMounted(load)
       <PaginationBar class="pm-personal-pagination" label="个人通知分页" :page="page" :total="total" :page-size="pageSize" :loading="loading" :disabled="!!actionID" @change="changePage" />
     </template>
     <ConfirmDialog :open="Boolean(confirmDialog)" v-bind="confirmDialog || {}" @confirm="acceptConfirm" @cancel="cancelConfirm" />
-    <aside v-if="detail" class="pm-personal-detail" aria-label="通知详情"><header><h3>{{ detail.title }}</h3><button type="button" class="pm-button" @click="detail = null">关闭详情</button></header><p>{{ detail.content }}</p><small>送达时间：{{ formatDate(detail.delivered_at) }}</small><a v-if="projectTarget" class="pm-button" :href="projectTarget">查看项目关联内容</a></aside>
+    <aside v-if="detail" class="pm-personal-detail" aria-label="通知详情"><header><h3>{{ detail.title }}</h3><button type="button" class="pm-button" @click="detail = null">关闭详情</button></header><p>{{ detail.content }}</p><small>送达时间：{{ formatDate(detail.delivered_at) }}</small><button v-if="projectTarget" type="button" class="pm-button pm-notification-target" :disabled="!!actionID" @click="open(detail)">进入关联处理页面</button></aside>
   </section>
 </template>
 
 <style scoped>
-.pm-personal-notifications>header,.pm-personal-detail>header,.pm-personal-pagination{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap}.pm-personal-notifications h2,.pm-personal-detail h3{margin:0}.pm-personal-notifications header p,.pm-personal-pagination,.pm-personal-list time{color:var(--pm-muted,#64748b)}.pm-personal-list{display:grid;gap:10px;margin:20px 0}.pm-personal-list>button{display:grid;gap:8px;text-align:left;padding:18px;border:1px solid var(--pm-border,#e2e8f0);border-radius:12px;background:transparent;color:inherit;cursor:pointer}.pm-personal-list>button.unread{border-left:4px solid #2563eb}.pm-personal-title{display:flex;justify-content:space-between;gap:16px;font-weight:600}.pm-personal-title small{font-weight:400;color:#64748b}.pm-personal-content{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.pm-personal-empty{padding:64px 20px;text-align:center;color:#64748b}.pm-personal-detail{margin-top:24px;padding:20px;border:1px solid var(--pm-border,#e2e8f0);border-radius:12px}.pm-personal-detail p{white-space:pre-wrap;overflow-wrap:anywhere}.pm-personal-detail a{display:inline-flex;margin:12px}.pm-notification-error{color:#b91c1c}.pm-notification-tabs{--pm-tab-border:#e2e8f0;--pm-tab-active:#2563eb;--pm-tab-on:#fff;display:inline-flex;gap:4px;margin-right:8px}.pm-notification-tabs button{padding:6px 10px;border:1px solid var(--pm-tab-border);border-radius:8px;background:transparent;color:inherit;cursor:pointer}.pm-notification-tabs button.active{background:var(--pm-tab-active);border-color:var(--pm-tab-active);color:var(--pm-tab-on)}
+.pm-personal-notifications>header,.pm-personal-detail>header,.pm-personal-pagination{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap}.pm-personal-notifications h2,.pm-personal-detail h3{margin:0}.pm-personal-notifications header p,.pm-personal-pagination,.pm-personal-list time{color:var(--pm-muted,#64748b)}.pm-personal-list{display:grid;gap:10px;margin:20px 0}.pm-personal-list>button{display:grid;gap:8px;text-align:left;padding:18px;border:1px solid var(--pm-border,#e2e8f0);border-radius:12px;background:transparent;color:inherit;cursor:pointer}.pm-personal-list>button.unread{border-left:4px solid #2563eb}.pm-personal-title{display:flex;justify-content:space-between;gap:16px;font-weight:600}.pm-personal-title small{font-weight:400;color:#64748b}.pm-personal-content{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.pm-personal-empty{padding:64px 20px;text-align:center;color:#64748b}.pm-personal-detail{margin-top:24px;padding:20px;border:1px solid var(--pm-border,#e2e8f0);border-radius:12px}.pm-personal-detail p{white-space:pre-wrap;overflow-wrap:anywhere}.pm-personal-detail .pm-notification-target{display:inline-flex;margin:12px}.pm-notification-error{color:#b91c1c}.pm-notification-tabs{--pm-tab-border:#e2e8f0;--pm-tab-active:#2563eb;--pm-tab-on:#fff;display:inline-flex;gap:4px;margin-right:8px}.pm-notification-tabs button{padding:6px 10px;border:1px solid var(--pm-tab-border);border-radius:8px;background:transparent;color:inherit;cursor:pointer}.pm-notification-tabs button.active{background:var(--pm-tab-active);border-color:var(--pm-tab-active);color:var(--pm-tab-on)}
 </style>

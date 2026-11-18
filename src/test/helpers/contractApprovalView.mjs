@@ -23,7 +23,10 @@ export function contractApprovalViewParts() {
   const program = parse(source, { sourceType: 'module' }).program
   const names = ['normalizeApproval', 'setInitiatedApprovals', 'refreshApprovalRealtime',
     'processApproval', 'displayNameFor']
-  const functions = names.map(name => {
+  const notificationFunctions = readFileSync(new URL(
+    '../../modules/contract_management/utils/notificationApproval.js', import.meta.url), 'utf8')
+    .replace(/^export /gm, '')
+  const functions = notificationFunctions + '\n' + names.map(name => {
     const node = program.body.find(node => node.type === 'FunctionDeclaration' && node.id.name === name)
     if (!node) throw new Error('缺少真实审批函数：' + name)
     return source.slice(node.start, node.end)

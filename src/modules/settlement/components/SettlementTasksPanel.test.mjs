@@ -181,12 +181,25 @@ test("待办面板复现提取前 golden：有任务项、超过 8 项折叠提�
   assert.equal(await render("populated"), GOLDENS["populated"])
 })
 
-test("待办面板以 navigate(section) / reload 事件与父级交互，不再直接引用视图的 go/load", () => {
-  const source = readFileSync(new URL('./SettlementTasksPanel.vue', import.meta.url), 'utf8')
-  assert.ok(source.includes("$emit('navigate', group.section)"), "$emit('navigate', group.section)")
-  assert.ok(source.includes("$emit('reload')"), "$emit('reload')")
-  assert.ok(source.includes("taskGroups: { type: Array, required: true }"), "taskGroups: { type: Array, required: true }")
-  assert.doesNotMatch(source, /go\(/)
-  assert.doesNotMatch(source, /active ===/)
-  assert.doesNotMatch(source, /window\.prompt/)
+test("待办面板点击具体任务传递真实业务坐标，刷新独立发出 reload", () => {
+  const nodes = [], navigated = [], reloaded = []
+  const renderer = Vue.createRenderer({
+    createElement: type => { const node = { type, props: {} }; nodes.push(node); return node },
+    createComment: () => ({}), createText: () => ({}), insert() {}, remove() {},
+    parentNode: () => null, nextSibling: () => null, setText() {}, setElementText() {},
+    patchProp: (node, key, _old, value) => { node.props[key] = value },
+  })
+  const task = { id: 'REQ-7', kind: 'invoices', section: 'invoices',
+    key: 'inv-REQ-7', label: 'KP-7', meta: '待财务审核' }
+  const app = renderer.createApp(component, {
+    taskGroups: [{ key: 'invoices', label: '待审核', section: 'invoices', items: [task] }],
+    onNavigate: value => navigated.push(value), onReload: () => reloaded.push(true),
+  })
+  app.mount({})
+  try {
+    nodes.find(node => node.props.class === 'settlement-task-item').props.onClick()
+    nodes.find(node => node.props.class === 'console-button secondary').props.onClick()
+    assert.deepEqual(navigated, [task])
+    assert.deepEqual(reloaded, [true])
+  } finally { app.unmount() }
 })

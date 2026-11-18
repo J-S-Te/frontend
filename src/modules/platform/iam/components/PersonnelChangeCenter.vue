@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { cancelPersonnelChange, completePersonnelHandoverItem, createPersonnelChange, listPersonnelChanges, listPersonnelHandoverItems, previewPersonnelChange, retryPersonnelHandover, submitPersonnelChange, transitionPersonnelChange } from '../api/personnelChanges.js'
 import { listMemberships, listOrgUnits, listPositions, listUsers } from '../api/iam.js'
 import { loadAllCatalogPages } from '../utils/paginatedCatalog.js'
@@ -17,6 +17,7 @@ import { formatUserError } from '../../../shared/utils/userError.js'
 const props = defineProps({
   // 从用户详情「办理离职」进入时预填的人员标识；异动中心负责创建离职申请。
   prefillUserId: { type: String, default: '' },
+  initialRequestId: { type: String, default: '' },
 })
 
 const emit = defineEmits(['toast', 'employee-onboarding', 'prefill-consumed'])
@@ -25,6 +26,11 @@ const saving = ref(false)
 const error = ref('')
 const showForm = ref(false)
 const records = ref([])
+const referencedRecord = ref(null)
+const requestReferenceLoading = ref(false)
+const requestReferenceNotice = ref('')
+const requestReferenceError = ref('')
+let requestReferenceSeq = 0
 const users = ref([])
 const positions = ref([])
 const organizations = ref([])
@@ -276,6 +282,48 @@ async function save() {
 }
 
 function recordId(item) { return item.id || item.change_id }
+
+// 用途：读取通知对应的真实异动，待审且有权限时打开既有审批弹窗。
+// 参数：value 为通知中的异动编号；空值表示清理先前定位。
+// 返回值：无；读取失败和未定位分别写入页面提示，不执行流程写入。
+async function openReferencedRequest(value) {
+  const seq = ++requestReferenceSeq
+  const requestId = String(value || '').trim()
+  referencedRecord.value = null
+  requestReferenceNotice.value = ''
+  requestReferenceError.value = ''
+  requestReferenceLoading.value = false
+  if (workflowAction.value && !workflowSaving.value) closeWorkflowAction()
+  if (!requestId) return
+  if (!canRead.value) {
+    requestReferenceNotice.value = '当前账号没有人员异动读取权限，请联系管理员。'
+    return
+  }
+  requestReferenceLoading.value = true
+  try {
+    // 服务端关键词包含异动编号；候选仍须严格匹配，不能打开相似编号。
+    const result = await listPersonnelChanges({ keyword: requestId })
+    if (seq !== requestReferenceSeq || !canRead.value) return
+    const record = result.items.find((item) => String(recordId(item)) === requestId)
+    if (!record) {
+      requestReferenceNotice.value = '在当前可见异动记录中未定位到该异动单，请核对通知或刷新重试。'
+      return
+    }
+    referencedRecord.value = record
+    // 草稿入口会直接提交，交接入口会加载交接流程；通知只自动打开待审弹窗。
+    // 正在处理的流程仍持有弹窗状态，不能用另一条通知替换其写入目标。
+    if (String(record.status).toUpperCase() === 'PENDING_APPROVAL'
+      && canProcessApproval.value && !workflowSaving.value) await openWorkflowAction(record)
+  } catch (err) {
+    if (seq !== requestReferenceSeq) return
+    requestReferenceError.value = formatUserError(err, {
+      method: 'GET', fallback: '读取通知关联的异动单失败，请稍后重试。',
+    })
+  } finally {
+    if (seq === requestReferenceSeq) requestReferenceLoading.value = false
+  }
+}
+
 async function openWorkflowAction(item) {
   const status = String(item.status || '').toUpperCase()
   if (status === 'DRAFT') {
@@ -542,6 +590,8 @@ useRelatedDataInvalidation((event) => {
 })
 
 onMounted(() => { if (canRead.value) load() })
+watch(() => props.initialRequestId, openReferencedRequest, { immediate: true, flush: 'sync' })
+onBeforeUnmount(() => { requestReferenceSeq++ })
 </script>
 
 <template>
@@ -558,6 +608,26 @@ onMounted(() => { if (canRead.value) load() })
       <div class="personnel-change-flow" aria-label="人员异动流程"><div class="personnel-flow-title"><strong>人员异动流程</strong><small>离职必须完成审批与交接，其他异动按账号权限进入审批或排期</small></div><ol><li><b>01</b><span>选择人员与任职</span></li><li><b>02</b><span>配置并校验异动</span></li><li><b>03</b><span>审批与离职交接</span></li><li><b>04</b><span>按期或立即生效</span></li></ol></div>
       <div v-if="canRead" class="personnel-change-toolbar"><label class="personnel-change-search"><ConsoleIcon name="search" /><input v-model="filters.keyword" placeholder="搜索人员姓名、异动编号或审批凭据" @keyup.enter="load"  maxlength="100"/></label><label class="personnel-change-select"><span>类型</span><select v-model="filters.type" @change="load"><option value="">全部类型</option><option v-for="[key, label] in typeOptions" :key="key" :value="key">{{ label }}</option></select></label><label class="personnel-change-select"><span>状态</span><select v-model="filters.status" @change="load"><option value="">全部状态</option><option v-for="(label, key) in statusLabels" :key="key" :value="key">{{ label }}</option></select></label><button class="console-button secondary" type="button" :disabled="loading" @click="load"><ConsoleIcon name="reset" />刷新</button></div>
       <p v-if="error" class="login-target-module__error" role="alert">{{ error }}</p>
+      <p v-if="requestReferenceLoading" class="console-card-hint" role="status">正在读取通知关联的异动单…</p>
+      <p v-if="requestReferenceNotice" class="console-card-hint" role="status">{{ requestReferenceNotice }}</p>
+      <p v-if="requestReferenceError" class="login-target-module__error" role="alert">
+        {{ requestReferenceError }}
+        <button class="console-button ghost small" type="button" :disabled="requestReferenceLoading"
+          @click="openReferencedRequest(initialRequestId)">重试读取</button>
+      </p>
+      <section v-if="referencedRecord" class="personnel-reference-detail" aria-label="通知关联异动详情">
+        <header>
+          <strong>{{ userLabel(referencedRecord) }} · {{ typeLabel(referencedRecord.change_type || referencedRecord.type) }}</strong>
+          <span class="console-badge" :class="statusTone(referencedRecord.status)">
+            {{ statusLabels[referencedRecord.status] || referencedRecord.status || '状态待确认' }}
+          </span>
+        </header>
+        <p class="console-mono">异动编号：{{ recordId(referencedRecord) }}</p>
+        <p>目标任职：{{ targetAssignmentLabel(referencedRecord) }}</p>
+        <p>生效日期：{{ referencedRecord.effective_at || referencedRecord.effective_date || '—' }}</p>
+        <p>变更原因：{{ referencedRecord.reason || '未填写' }}</p>
+        <p v-if="referencedRecord.approval_reference">审批凭据：{{ referencedRecord.approval_reference }}</p>
+      </section>
       <div v-if="!canRead" class="settings-empty"><span class="settings-empty-icon"><ConsoleIcon name="organization" /></span><h3>没有人员异动读取权限</h3><p>请联系平台管理员授予 platform:user:read 后再查看异动单。</p></div>
       <div v-else-if="loading" class="personnel-change-loading"><span class="personnel-loading-dot" />正在加载异动单…</div>
       <div v-else-if="!visibleRecords.length" class="settings-empty"><span class="settings-empty-icon"><ConsoleIcon name="organization" /></span><template v-if="error"><h3>异动信息暂时无法展示</h3><p>请处理上方提示后刷新，当前不能确认是否存在异动单。</p></template><template v-else><h3>暂无人员异动配置</h3><p>管理员创建异动配置后，系统会按生效日期自动执行，已排期异动也可由管理员立即执行。</p></template></div>
@@ -614,6 +684,9 @@ onMounted(() => { if (canRead.value) load() })
 
 <style scoped>
 .personnel-change-center > .console-card-body { padding: 0; }
+.personnel-reference-detail { margin: 1rem 1.9rem; padding: 1rem; border: 1px solid var(--border); border-radius: .75rem; background: var(--surface-muted); overflow-wrap: anywhere; }
+.personnel-reference-detail header { display: flex; justify-content: space-between; gap: 1rem; align-items: center; }
+.personnel-reference-detail p { margin: .55rem 0 0; color: var(--text-secondary); }
 .personnel-change-hero { display: flex; justify-content: space-between; gap: 2rem; padding: 1.75rem 1.9rem 1.55rem; background: linear-gradient(135deg, #f8fbff 0%, #eef5ff 100%); border-bottom: 1px solid #e5edf7; }
 .personnel-change-hero-copy { display: grid; gap: .75rem; min-width: 0; }
 .personnel-change-hero h2 { margin: 0; color: #18253a; font-size: 22px; letter-spacing: -.02em; }

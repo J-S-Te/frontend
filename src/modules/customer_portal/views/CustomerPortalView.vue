@@ -284,13 +284,14 @@ function childNotice(value) { notice.value = value }
 
 // 用途：先清掉上一轮的列表失败原因，再按当前栏目重新加载。
 // 参数：无。
-// 返回值：load() 的 Promise。
+// 返回值：列表与通知目标详情加载完成的 Promise。
 // 「这一次列表重新开始」的入口都走这里（栏目切换、三态里的「重新加载」、写操作后的列表刷新），
 // 失败原因因此不会在请求成功、列表回到空态后继续粘在列表位置上。
 async function reloadList() {
   projectListError.value = ''
   feedbackListError.value = ''
   await load()
+  await openPortalTarget()
 }
 // 用途：清理已失效客户边界下的工作区，保留未提交的表单草稿。
 // 参数：无；使用当前页面数据及异步读取代际。
@@ -331,6 +332,32 @@ function clearPortalAuthorizationData() {
   feedbackTotal.value = 0
   reportNotificationUnreadCount.value = null
   feedbackNotificationUnreadCount.value = null
+}
+
+// 用途：按通知深链直接读取当前客户的报告或反馈详情。
+// 参数：无；查询参数仅作为资源坐标，详情接口重新校验当前会话权限。
+// 返回值：异步完成；坐标非法、无权限或读取失败时保留可理解提示。
+async function openPortalTarget() {
+  if (!session.value || loading.value || !['reports', 'feedback'].includes(section.value)) return
+  const report = section.value === 'reports'
+  const raw = route.query[report ? 'request_id' : 'feedback_id']
+  if (raw === undefined || raw === null || raw === '') return
+  const id = Array.isArray(raw) ? (raw.length === 1 ? raw[0] : '') : raw
+  if (typeof id !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(id)) {
+    error.value = '通知中的详情入口无效，请从当前列表重新打开。'
+    return
+  }
+  if (!hasPermission(report ? 'report.read' : 'feedback.read')) {
+    error.value = report ? '当前账号没有报告读取权限。' : '当前账号没有反馈读取权限。'
+    return
+  }
+  const selectedID = report ? selectedReport.value?.id : selectedFeedback.value?.feedback?.id
+  if (String(selectedID || '') === id) return
+  if (report) await openReport({ id })
+  else {
+    closeFeedbackDetail()
+    await openFeedback({ id })
+  }
 }
 
 // 用途：读取最新会话及能力交集，再加载当前授权下的工作区。
@@ -458,20 +485,33 @@ async function loadFeedbackNotifications() {
   }
 }
 
-// openFeedbackNotification 标记当前通知已读并打开关联反馈。
+// openFeedbackNotification 尝试保存已读状态，并独立打开关联反馈。
 // 参数：item 为当前客户通知记录。
-// 返回值：异步完成；失败保留通知并展示提示。
+// 返回值：异步完成；已读未确认时保留通知和计数，仍读取授权详情。
 async function openFeedbackNotification(item) {
   if (!hasPermission('feedback.read') || section.value !== 'feedback' || feedbackNotificationOpening.has(item.id)) return
   const intent = ++feedbackDetailGeneration
   feedbackNotificationOpening.add(item.id)
+  feedbackNotificationError.value = ''
   try {
-    if (item.status === 'UNREAD') await readFeedbackNotification(item.id)
+    let readConfirmed = item.status !== 'UNREAD'
+    if (!readConfirmed) {
+      try {
+        await readFeedbackNotification(item.id)
+        readConfirmed = true
+      } catch {
+        if (intent === feedbackDetailGeneration && section.value === 'feedback') {
+          feedbackNotificationError.value = '反馈通知已读状态暂未确认，请稍后刷新核对。'
+        }
+      }
+    }
     if (intent !== feedbackDetailGeneration || section.value !== 'feedback' || !hasPermission('feedback.read')) return
-    const unread = feedbackNotifications.value.some(value => value.id === item.id && value.status === 'UNREAD')
-    feedbackNotifications.value = feedbackNotifications.value.filter(value => value.id !== item.id)
-    if (unread && feedbackNotificationUnreadCount.value !== null) {
-      feedbackNotificationUnreadCount.value = Math.max(0, feedbackNotificationUnreadCount.value - 1)
+    if (readConfirmed) {
+      const unread = feedbackNotifications.value.some(value => value.id === item.id && value.status === 'UNREAD')
+      feedbackNotifications.value = feedbackNotifications.value.filter(value => value.id !== item.id)
+      if (unread && feedbackNotificationUnreadCount.value !== null) {
+        feedbackNotificationUnreadCount.value = Math.max(0, feedbackNotificationUnreadCount.value - 1)
+      }
     }
     await openFeedback({ id: item.feedback_id }, intent)
   } catch (value) {
@@ -815,20 +855,33 @@ async function openReport(item, intent = null) {
     if (current()) reportDetailLoading.value = false
   }
 }
-// openReportNotification 标记报告通知已读并打开关联申请。
+// openReportNotification 尝试保存已读状态，并独立打开关联报告申请。
 // 参数：item 为当前客户的报告通知。
-// 返回值：异步完成；通知错误不影响主申请列表。
+// 返回值：异步完成；已读未确认时保留通知和计数，仍读取授权详情。
 async function openReportNotification(item) {
   if (!hasPermission('report.read') || section.value !== 'reports' || reportNotificationOpening.has(item.id)) return
   const intent = ++reportDetailGeneration
   reportNotificationOpening.add(item.id)
+  reportNotificationError.value = ''
   try {
-    if (item.status === 'UNREAD') await readReportNotification(item.id)
+    let readConfirmed = item.status !== 'UNREAD'
+    if (!readConfirmed) {
+      try {
+        await readReportNotification(item.id)
+        readConfirmed = true
+      } catch {
+        if (intent === reportDetailGeneration && section.value === 'reports') {
+          reportNotificationError.value = '报告通知已读状态暂未确认，请稍后刷新核对。'
+        }
+      }
+    }
     if (intent !== reportDetailGeneration || section.value !== 'reports' || !hasPermission('report.read')) return
-    const unread = reportNotifications.value.some(current => current.id === item.id && current.status === 'UNREAD')
-    reportNotifications.value = reportNotifications.value.filter(current => current.id !== item.id)
-    if (unread && reportNotificationUnreadCount.value !== null) {
-      reportNotificationUnreadCount.value = Math.max(0, reportNotificationUnreadCount.value - 1)
+    if (readConfirmed) {
+      const unread = reportNotifications.value.some(current => current.id === item.id && current.status === 'UNREAD')
+      reportNotifications.value = reportNotifications.value.filter(current => current.id !== item.id)
+      if (unread && reportNotificationUnreadCount.value !== null) {
+        reportNotificationUnreadCount.value = Math.max(0, reportNotificationUnreadCount.value - 1)
+      }
     }
     await openReport({ id: item.request_id, request_no: item.request_no }, intent)
   } catch (value) {
@@ -1019,6 +1072,11 @@ watch(section, () => {
   error.value = ''
   notice.value = ''
   void reloadList().then(restorePageTarget)
+})
+watch(() => [route.query.request_id, route.query.feedback_id], () => {
+  closeReport()
+  closeFeedbackDetail()
+  void openPortalTarget()
 })
 watch(anyDialogOpen, (open) => {
   document.body.style.overflow = open ? 'hidden' : ''

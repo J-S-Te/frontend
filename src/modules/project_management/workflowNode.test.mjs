@@ -12,12 +12,14 @@ const assignedItem = {
 }
 
 // 用途：执行真实页面的分配队列计算和选择清理，隔离外部请求。
-// 参数：rows 为服务项快照，projectStatus 为父项目阶段，后两项为执行及团队分配权限。
+// 参数：rows 为授权服务项，projectStatus 为父项目阶段，后续参数为分配权限及回退事件。
 // 返回值：可刷新的快照、真实队列与选择状态及测试清理作用域。
-function allocationQueueState(rows, projectStatus = '待分配', executionAllowed = true, teamAllowed = true) {
+function allocationQueueState(rows, projectStatus = '待分配', executionAllowed = true,
+  teamAllowed = true, events = []) {
   const scope = effectScope()
   const state = {
     projects: ref([{ id: 'P-QUEUE', status: projectStatus }]), serviceItems: ref(rows),
+    deliveryEvents: ref(events),
     canExecutionAssign: ref(executionAllowed), canAssignTeam: ref(teamAllowed),
     selectedServiceItemIDs: ref(rows.map(row => row.id)),
     activeSection: ref('allocation'), loading: ref(false),
@@ -30,11 +32,17 @@ function allocationQueueState(rows, projectStatus = '待分配', executionAllowe
     const index = viewSource.indexOf(`const ${name} = computed(`)
     return viewSource.slice(index, viewSource.indexOf('\n', index))
   }).join('\n')
+  const inboxStart = viewSource.indexOf('const pendingRollbackRequests = computed(')
+  const inboxCode = viewSource.slice(inboxStart,
+    viewSource.indexOf('\nconst planningItems', inboxStart))
   const queues = scope.run(() => new Function(...Object.keys(context),
-    `${code}\n${otherQueues}\nreturn { pending: allocationItems, inbox: inboxItems, assignments: assignmentItems }`)(
+    `${code}\n${otherQueues}\n${inboxCode}
+    return { pending: allocationItems, inbox: inboxWorkflowItems, assignments: assignmentItems }`)(
     ...Object.values(context)))
   const selectionStart = viewSource.indexOf('watch([activeSection, activeNodeItems, loading,')
-  const selection = viewSource.slice(selectionStart, viewSource.indexOf('// 会话权限', selectionStart))
+  const selectionEnd = viewSource.indexOf('}, { immediate: true })', selectionStart)
+    + '}, { immediate: true })'.length
+  const selection = viewSource.slice(selectionStart, selectionEnd)
   const selectionContext = { ...context, activeNodeItems: queues.pending }
   scope.run(() => new Function(...Object.keys(selectionContext), selection)(
     ...Object.values(selectionContext)))
@@ -131,5 +139,21 @@ test('团队分配待办完成不应清空收件箱和能力处理节点的阶�
     assert.deepEqual(state.pending.value, [])
     assert.deepEqual(state.inbox.value.map(row => row.id), ['ready'])
     assert.deepEqual(state.assignments.value.map(row => row.id), ['ready'])
+  } finally { state.scope.stop() }
+})
+
+test('真实收件箱包含授权快照中的回退待审项，并随驳回事件关闭', () => {
+  const assigned = { ...assignedItem, id: 'assigned', project_manager_id: '', engineer_ids: [] }
+  const rollback = { ...assignedItem, id: 'rollback', status: '实施中' }
+  const state = allocationQueueState([assigned, rollback], '待分配', true, true, [
+    { id: 'request-visible', type: 'ROLLBACK_REQUESTED', service_item_id: 'rollback' },
+    { id: 'request-hidden', type: 'ROLLBACK_REQUESTED', service_item_id: 'hidden' },
+  ])
+  try {
+    assert.deepEqual(state.inbox.value.map(item => item.id), ['assigned', 'rollback'])
+    state.deliveryEvents.value.push({ type: 'ROLLBACK_REJECTED', service_item_id: 'rollback',
+      payload: { request_id: 'request-visible' } })
+    assert.deepEqual(state.inbox.value.map(item => item.id), ['assigned'])
+    assert.deepEqual(state.pending.value.map(item => item.id), ['assigned'])
   } finally { state.scope.stop() }
 })

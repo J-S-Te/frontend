@@ -1,10 +1,12 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import { deleteReadNotifications, getNotification, listInbox, markNotificationRead } from '@/modules/platform/notifications/api/notifications'
 import { formatBusinessDateTime } from '@/modules/shared/utils/businessTime.js'
 import { formatUserError } from '@/modules/shared/utils/userError.js'
 import ConfirmDialog from '@/modules/shared/components/ConfirmDialog.vue'
 import { useConfirmDialog } from '@/modules/shared/composables/useConfirmDialog.js'
+import { openNotificationTarget, notificationTarget } from '../utils/notificationNavigation.js'
 
 // 共享站内通知列表：平台统一收件箱按来源收窄，供各子系统铃铛内嵌。
 // scope 固定为 all/local/cross 时隐藏页签，用于 CRM 的“跨系统”独立入口。
@@ -14,6 +16,7 @@ const props = defineProps({
   pageSize: { type: Number, default: 10 },
 })
 const emit = defineEmits(['unread-change'])
+const router = useRouter()
 const { dialog: confirmDialog, askConfirm, accept: acceptConfirm, cancel: cancelConfirm } = useConfirmDialog()
 
 const tab = ref('all')
@@ -63,18 +66,26 @@ function changePage(next) {
   load()
 }
 
+// 用途：读取本人通知并直接进入处理页面，已读失败不阻断业务处理。
+// 参数：item 为收件箱摘要或当前详情。
+// 返回值：无；读取或导航失败时展示可重试错误。
 async function open(item) {
-  if (busy.value) return
+  if (!item?.delivery_id || busy.value) return
   busy.value = true
   error.value = ''
   try {
     const result = await getNotification(item.delivery_id)
     detail.value = result
     if (!result.read_at) {
-      await markNotificationRead(item.delivery_id)
-      detail.value = { ...result, read_at: new Date().toISOString() }
-      await load()
+      try {
+        await markNotificationRead(item.delivery_id)
+        detail.value = { ...result, read_at: new Date().toISOString() }
+        await load()
+      } catch (e) {
+        error.value = formatUserError(e, { fallback: '已读状态保存失败，可继续处理。' })
+      }
     }
+    await openNotificationTarget(result, router)
   } catch (e) {
     error.value = formatUserError(e, { fallback: '通知读取失败，请重试。' })
   } finally { busy.value = false }
@@ -133,6 +144,7 @@ onMounted(load)
     <aside v-if="detail" class="shared-inbox-detail">
       <header><h3>{{ detail.title }}</h3><button type="button" @click="detail = null">关闭</button></header>
       <p>{{ detail.content }}</p>
+      <button v-if="notificationTarget(detail)" type="button" :disabled="busy" @click="open(detail)">进入处理页面</button>
       <small>来源：{{ detail.source_application }} · 送达：{{ formatBusinessDateTime(detail.delivered_at) }}</small>
     </aside>
   </section>

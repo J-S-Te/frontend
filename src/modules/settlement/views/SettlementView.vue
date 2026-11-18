@@ -44,6 +44,7 @@ import { useReportExport } from "@/modules/settlement/composables/useReportExpor
 import { useReceivablePlans } from "@/modules/settlement/composables/useReceivablePlans";
 import { useReceiptRegistration } from "@/modules/settlement/composables/useReceiptRegistration";
 import { useInvoiceRequests } from "@/modules/settlement/composables/useInvoiceRequests";
+import { useSettlementTaskNavigation } from "../composables/useSettlementTaskNavigation.js";
 import { canRequestRedFlush } from "@/modules/settlement/utils/invoiceStatus";
 import { formatSettlementError } from "../utils/errors.js";
 import { closeSubsystemTabOrFallback } from "@/modules/shared/utils/returnToPortal";
@@ -317,6 +318,7 @@ const taskGroups = computed(() => [
     items: plans.value
       .filter((item) => item.status === "PENDING_CONFIRMATION")
       .map((item) => ({
+        id: item.id, kind: "plans", section: "receivables",
         key: `plan-${item.id}`,
         label: `${item.contract_no || "未关联合同"} · 第 ${item.installment_no || "—"} 期`,
         meta: `计划收款日 ${item.due_date || "—"} · 金额 ${formatSettlementAmount(item.planned_amount)}`,
@@ -332,6 +334,7 @@ const taskGroups = computed(() => [
     items: invoiceRequests.value
       .filter((item) => (item.status === "SUBMITTED" && can("settlement.invoice.approve")) || (item.status === "SPECIAL_REVIEW" && can("settlement.invoice.special_approve")))
       .map((item) => ({
+        id: item.id, kind: "invoices", section: "invoices",
         key: `inv-${item.id}`,
         label: item.request_no,
         meta: `${item.buyer_name || "未填写购方"} · ${formatSettlementAmount(item.amount_incl_tax)}`,
@@ -347,6 +350,7 @@ const taskGroups = computed(() => [
     items: allocations.value
       .filter((item) => item.status !== "REVERSED" && item.status !== "CONFIRMED")
       .map((item) => ({
+        id: item.id, kind: "allocations", section: "allocations",
         key: `alloc-${item.id}`,
         label: item.allocation_no,
         meta: `${item.receivable_no || "未关联应收"} · ${formatSettlementAmount(item.amount, item.currency)}`,
@@ -362,6 +366,7 @@ const taskGroups = computed(() => [
     items: dunningCases.value
       .filter((item) => item.status === "ACTIVE")
       .map((item) => ({
+        id: item.id, kind: "dunning", section: "dunning",
         key: `case-${item.id}`,
         label: item.receivable_no || `案件 ${item.id}`,
         meta: `剩余 ${formatSettlementAmount(item.open_amount)} · 逾期 ${item.level || 0} 级`,
@@ -868,6 +873,68 @@ async function load() {
   initialized.value = true;
   return failures.length === 0;
 }
+
+// 用途：为单条待办提供真实授权列表与既有办理入口，不在导航时提交业务。
+// 参数：无；读取当前业务列表、权限和表单控制器。
+// 返回值：按业务类型登记的读取源、坐标、分页与表单打开方法。
+function settlementTaskSources() {
+  return {
+    plans: { section: "receivables", keys: ["plan_id"], rows: plans,
+      read: listReceivablePlans, canRead: () => canLoad(listReceivablePlans),
+      selectPage: page => { listPages.value[0] = page; },
+      close: () => { planEditorOpen.value = false; },
+      open: item => {
+        if (item.status !== "PENDING_CONFIRMATION" || !can("settlement.receivable.confirm"))
+          return "已定位计划，该记录已处理或当前账号不能确认。";
+        resetPlanFilters(); confirmFinancialPlan(item);
+        return "已定位收款计划，请核对确认表单后提交。";
+      } },
+    invoices: { section: "invoices", keys: ["request_id"], rows: invoiceRequests,
+      read: listInvoiceRequests, canRead: () => canLoad(listInvoiceRequests),
+      selectPage: page => { listPages.value[4] = page; },
+      close: () => { invoiceReviewOpen.value = false; specialReview.value = null; },
+      open: item => {
+        invoiceTab.value = "requests"; resetInvoiceFilters();
+        if (item.status === "SUBMITTED" && can("settlement.invoice.approve")) approveInvoice(item);
+        else if (item.status === "SPECIAL_REVIEW" && can("settlement.invoice.special_approve")) reviewSpecialInvoice(item);
+        else return "已定位开票申请，该申请已处理或当前账号不能审核。";
+        return "已定位开票申请，请核对审核表单后确认。";
+      } },
+    allocations: { section: "allocations", keys: ["allocation_id"], rows: allocations,
+      read: listReceiptAllocations, canRead: () => canLoad(listReceiptAllocations),
+      selectPage: page => { listPages.value[3] = page; },
+      open: item => {
+        allocationTab.value = item.status === "REVERSED" ? "reversals" : "allocations";
+        return "已定位核销单，请核对当前记录及其可用操作。";
+      } },
+    dunning: { section: "dunning", keys: ["case_id", "receivable_id"], rows: dunningCases,
+      read: listDunningCases, canRead: () => canLoad(listDunningCases),
+      selectPage: page => { listPages.value[7] = page; },
+      matches: (item, selection) => String(selection.key === "receivable_id" ? item.receivable_id : item.id) === selection.id,
+      close: () => { dunningActionDialog.value = null; },
+      open: item => {
+        const actions = dunningActions.value.filter(action =>
+          (action.case_id === item.id || (action.receivable_id && action.receivable_id === item.receivable_id))
+          && canCompleteDunningAction(action));
+        if (actions.length === 1) completeDunningAction(actions[0]);
+        return "已定位催收案件，可核对本页案件及跟进记录后办理。";
+      } },
+  };
+}
+
+const { target: taskTarget, targetMessage: taskTargetMessage,
+  openTask: openSettlementTask, clearTarget: clearSettlementTaskTarget } = useSettlementTaskNavigation({
+  route, router, active, loading, saving, sources: settlementTaskSources(),
+});
+const focusedAllocations = computed(() => taskTarget.value?.kind === "allocations"
+  ? [taskTarget.value.item] : allocations.value);
+const focusedDunningCases = computed(() => taskTarget.value?.kind === "dunning"
+  ? [taskTarget.value.item] : dunningCases.value);
+const focusedDunningActions = computed(() => taskTarget.value?.kind === "dunning"
+  ? dunningActions.value.filter(item => item.case_id === taskTarget.value.item.id
+    || (item.receivable_id && item.receivable_id === taskTarget.value.item.receivable_id))
+  : dunningActions.value);
+
 // 用途：选择回款匹配建议进入核销。
 // 参数：match 为服务端匹配建议。
 // 返回值：导航完成的 Promise。
@@ -1046,6 +1113,10 @@ watch(invoiceDetailID, load);
         <ErrorState v-if="error" :error="error" title="结算数据读取失败" @retry="load" />
         <LoadingState v-if="loading && !initialized" title="正在读取结算数据…" />
         <template v-else-if="active">
+          <p v-if="taskTargetMessage" class="settlement-detail-notice" role="status">
+            {{ taskTargetMessage }}
+            <button type="button" class="console-text-button" @click="clearSettlementTaskTarget">查看全部记录</button>
+          </p>
           <SettlementRecognitionPanel v-if="active === 'recognition' && can('settlement.recognition.read')" :api="recognitionAPI" :can="can" :session="settlementSession" :initial-claim="String(route.query.claim_id || '')" />
           <SettlementNativeFinancialPanel
             v-if="active === 'receivables' && can('settlement.receivable.read')"
@@ -1116,7 +1187,7 @@ watch(invoiceDetailID, load);
           <template v-else-if="active === 'allocations'">
             <SettlementAllocationsPanel
               :can="can"
-              :allocations="allocations"
+              :allocations="focusedAllocations"
               :receipts="receipts"
               :receivables="receivables"
               :saving="saving"
@@ -1183,8 +1254,8 @@ watch(invoiceDetailID, load);
               :dunning-coverage="dunningCoverage"
               :dunning-kpis="dunningKpis"
               :aging-rows="agingRows"
-              :dunning-cases="dunningCases"
-              :dunning-actions="dunningActions"
+              :dunning-cases="focusedDunningCases"
+              :dunning-actions="focusedDunningActions"
               :dunning-recipients="dunningRecipients"
               :dunning-recipients-loading="dunningRecipientsLoading"
               :dunning-recipients-error="dunningRecipientsError"
@@ -1207,7 +1278,7 @@ watch(invoiceDetailID, load);
           <template v-else-if="active === 'tasks'">
             <SettlementTasksPanel
               :task-groups="taskGroups"
-              @navigate="go"
+              @navigate="openSettlementTask"
               @reload="load"
             />
             <SettlementListPager :entries="listPagerEntries('tasks')" :page-size="LIST_PAGE_SIZE" :loading="loading" :saving="saving" @change="changeListPage" />

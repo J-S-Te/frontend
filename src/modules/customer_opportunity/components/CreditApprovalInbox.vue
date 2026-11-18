@@ -1,18 +1,23 @@
 <script setup>
 import { formatCRMError } from '../api/errorMessages.js'
-import { onMounted, ref } from 'vue'
+import { computed, onScopeDispose, ref, watch } from 'vue'
 import { approveCustomerCreditApplication, listPendingCustomerCreditApplications, rejectCustomerCreditApplication } from '../api/credit.js'
 import { createIdempotencyKey } from '../api/client.js'
 import { listOwnerDirectory } from '../api/ownerDirectory.js'
 import { formatBusinessDateTime } from '@/modules/shared/utils/businessTime.js'
 import PromptDialog from '@/modules/shared/components/PromptDialog.vue'
 import { usePromptDialog } from '@/modules/shared/composables/usePromptDialog.js'
+import { crmResourceID } from '../navigation.js'
 
 const props = defineProps({
   permissions: { type: Array, default: () => [] },
   roles: { type: Array, default: () => [] },
+  applicationId: { type: [String, Array], default: '' },
+  customerId: { type: [String, Array], default: '' },
 })
+defineEmits(['clear-target'])
 const items = ref([]); const loading = ref(false); const error = ref(''); const actionID = ref(''); const applicantNames = ref({})
+let loadSequence = 0
 const { dialog: promptDialog, askPrompt, accept: acceptPrompt, cancel: cancelPrompt } = usePromptDialog()
 const CREDIT_APPROVAL_ROLES = new Set(['sales_director', 'crm_super_admin'])
 // 现有会话可能携带已签名的审批角色，却缺少后续权限目录发布时
@@ -23,6 +28,18 @@ const applicationID = (item) => String(item?.id || item?.application_id || '').t
 // 使用显式布尔值，避免将 ref 对象本身绑定到
 // 原生 disabled 属性。执行一次写操作期间锁定所有行。
 const actionInProgress = () => actionID.value !== ''
+const hasTarget = computed(() => Boolean(props.applicationId || props.customerId))
+const invalidTarget = computed(() => (props.applicationId && !crmResourceID(props.applicationId))
+  || (props.customerId && !crmResourceID(props.customerId)))
+const visibleItems = computed(() => items.value.filter(item => !invalidTarget.value
+  && (!props.applicationId || applicationID(item) === String(crmResourceID(props.applicationId)))
+  && (!props.customerId || String(item.customer_id) === String(crmResourceID(props.customerId)))))
+const targetMessage = computed(() => {
+  if (!hasTarget.value || loading.value || error.value) return ''
+  if (invalidTarget.value) return '信用审批入口无效，请从通知或待办列表重新打开。'
+  return visibleItems.value.length ? '已定位到通知对应的信用调整申请。'
+    : '该信用调整申请已处理、当前账号不可见或不存在，请查看全部待办或刷新核对。'
+})
 // 审批时间按北京口径展示，24 小时制；非法取值保留破折号占位。
 function dateLabel(value) { return value ? (formatBusinessDateTime(value) || '—') : '—' }
 function rememberApplicantNames(users) { for (const user of users || []) { if (user?.user_id) applicantNames.value[user.user_id] = String(user.username || user.account_name || user.display_name || '').trim() || '未命名用户' } }
@@ -31,7 +48,25 @@ async function resolveApplicantNames(applicationItems) {
   const IDs = [...new Set(applicationItems.map((item) => item?.applicant_id).filter((id) => id && !applicantNames.value[id]))]
   await Promise.all(IDs.map(async (id) => { try { const result = await listOwnerDirectory({ user_id: id, page: 1, page_size: 1 }); rememberApplicantNames(result?.items || []) } catch { /* 目录不可用时显示通用名称，不向业务用户暴露内部 ID。 */ } }))
 }
-async function load() { loading.value = true; error.value = ''; try { const result = await listPendingCustomerCreditApplications({ page: 1, page_size: 50 }); items.value = Array.isArray(result?.items) ? result.items : Array.isArray(result) ? result : []; await resolveApplicantNames(items.value) } catch (value) { error.value = value?.status === 403 ? '当前账号无审批权限。' : formatCRMError(value, { fallback: '待审批列表加载失败。' }) } finally { loading.value = false } }
+// 用途：读取完整授权待审集合，并隔离通知切换或卸载后的迟到响应。
+// 参数：无；筛选坐标只控制展示，服务端仍按当前会话裁剪待办。
+// 返回值：异步完成；读取失败显式提示，不把失败当作申请已处理。
+async function load() {
+  const sequence = ++loadSequence
+  error.value = ''; items.value = []
+  if (!canApprove()) { loading.value = false; error.value = '当前账号无审批权限。'; return }
+  loading.value = true
+  try {
+    // 此接口返回全部授权 PENDING 记录；不以第一页查找结果判断通知目标是否存在。
+    const result = await listPendingCustomerCreditApplications()
+    const records = Array.isArray(result?.items) ? result.items : Array.isArray(result) ? result : []
+    await resolveApplicantNames(records)
+    if (sequence === loadSequence) items.value = records
+  } catch (value) {
+    if (sequence === loadSequence) error.value = value?.status === 403
+      ? '当前账号无审批权限。' : formatCRMError(value, { fallback: '待审批列表加载失败。' })
+  } finally { if (sequence === loadSequence) loading.value = false }
+}
 // 用途：收集审批意见，在弹窗结束后复核申请版本和权限再提交信用审批。
 // 参数：item 为待审批申请，action 为通过或驳回动作。
 // 返回值：无；取消或状态变化不提交，失败写入错误提示。
@@ -62,7 +97,11 @@ async function decide(item, action) {
     error.value = formatCRMError(value, { fallback: '审批操作失败，请刷新后重试。' })
   } finally { actionID.value = '' }
 }
-onMounted(load)
+watch(() => [props.applicationId, props.customerId, canApprove()], () => {
+  cancelPrompt()
+  void load()
+}, { immediate: true })
+onScopeDispose(() => { loadSequence++ })
 </script>
 
 <template>
@@ -72,7 +111,7 @@ onMounted(load)
         <div class="crm-credit-approval-eyebrow">销售总监工作台</div>
         <div class="crm-credit-approval-title-row">
           <h2 id="credit-approval-heading">信用审批待办</h2>
-          <span class="crm-credit-approval-count">{{ items.length }} 条待处理</span>
+          <span class="crm-credit-approval-count">{{ visibleItems.length }} 条待处理</span>
         </div>
         <p class="crm-note">仅展示当前账号可审批的信用等级调整申请。审批时服务端会重新校验申请基准等级。</p>
       </div>
@@ -81,9 +120,12 @@ onMounted(load)
       </button>
     </div>
     <p v-if="error" class="crm-alert error" role="alert">{{ error }}</p>
-    <p v-if="!loading && !items.length" class="crm-empty">暂无待审批申请</p>
+    <p v-if="targetMessage" class="crm-note" role="status">{{ targetMessage }}</p>
+    <button v-if="hasTarget" type="button" class="crm-credit-refresh"
+      @click="$emit('clear-target')">查看全部待办</button>
+    <p v-if="!loading && !error && !hasTarget && !visibleItems.length" class="crm-empty">暂无待审批申请</p>
     <div v-else class="crm-credit-approval-list">
-      <article v-for="item in items" :key="item.id || item.application_id" class="crm-credit-approval-item">
+      <article v-for="item in visibleItems" :key="item.id || item.application_id" class="crm-credit-approval-item">
         <div class="crm-credit-approval-main">
           <div class="crm-credit-approval-meta">
             <span class="crm-credit-pending-tag">待审批</span>

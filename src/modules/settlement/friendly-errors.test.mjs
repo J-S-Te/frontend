@@ -17,7 +17,10 @@ import { useReportExport } from './composables/useReportExport.js'
 import { useReceivablePlans } from './composables/useReceivablePlans.js'
 import { useReceiptRegistration } from './composables/useReceiptRegistration.js'
 import { useInvoiceRequests } from './composables/useInvoiceRequests.js'
+import { useSettlementTaskNavigation } from './composables/useSettlementTaskNavigation.js'
 import { createNativeFinancialAPI } from './api/nativeFinancial.js'
+import { computed, effectScope, nextTick, reactive, ref, watch } from 'vue'
+import { createMemoryHistory, createRouter } from 'vue-router'
 
 // useSettlementActions 在 Node 域执行，notify 的 3.2 秒自动清除需要 window.setTimeout 桩。
 globalThis.window = { setTimeout() {} }
@@ -253,18 +256,31 @@ test('结算通用500保留未知结果和幂等键且不覆盖共享核对提�
   assert.equal(keys[0], keys[1])
 })
 
-// viewHarness 为真实结算视图提供完整模块绑定并验证错误及未知结果语义。
+const viewCleanups = []
+test.afterEach(() => viewCleanups.splice(0).forEach(cleanup => cleanup()))
+
+// 用途：在真实响应式作用域和内存路由中执行结算视图，验证错误及未知结果语义。
 // 参数：overrides为本用例明确替换的接口或依赖。
-// 返回值：视图实际操作状态；不访问真实结算服务。
+// 返回值：视图实际操作状态；用例结束时销毁监听，不访问真实结算服务。
 async function viewHarness(overrides = {}) {
   const component = await readFile(new URL('./views/SettlementView.vue', import.meta.url), 'utf8')
   const apiNames = component.match(/import \{([^}]+)\} from "@\/modules\/settlement\/api\/settlement";/)[1].split(',').map(value => value.trim()).filter(value => /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(value))
   const bindings = Object.fromEntries(apiNames.map(name => [name, async () => []]))
   const script = component.match(/<script setup>([\s\S]*?)<\/script>/)[1].replace(/^import[\s\S]*?;\n/gm, '')
+  const scope = effectScope()
+  const router = createRouter({ history: createMemoryHistory(), routes: [
+    { path: '/settlement/:section?', name: 'settlement', component: {} },
+  ] })
+  await router.push({ name: 'settlement', params: { section: 'receipts' } })
+  const route = reactive({
+    get params() { return router.currentRoute.value.params },
+    get query() { return router.currentRoute.value.query },
+    get fullPath() { return router.currentRoute.value.fullPath },
+  })
   const context = vm.createContext({
-    ref: value => ({ value }), computed: getter => ({ get value() { return getter() } }), watch() {},
+    ref, computed, watch,
     useLoginUsername: () => ({ value: '当前用户' }),
-    useRoute: () => ({ params: { section: 'receipts' }, query: {} }), useRouter: () => ({ push() {}, replace() {} }),
+    useRoute: () => route, useRouter: () => router,
     window: { setTimeout() {}, confirm: () => false }, formatSettlementError, ...bindings,
     createRequestScope, allowedSections, permissionCheck, canLoad, canLoadKey: canLoad,
     useSettlementActions,
@@ -275,12 +291,16 @@ async function viewHarness(overrides = {}) {
     useReceivablePlans,
     useReceiptRegistration,
     useInvoiceRequests,
+    useSettlementTaskNavigation,
     usePromptDialog: () => ({ dialog: { value: null }, askPrompt: async () => null, accept() {}, cancel() {} }),
     useConfirmDialog: () => ({ dialog: { value: null }, askConfirm: async () => true, accept() {}, cancel() {} }),
     useDunningCenter: () => ({ dunningCases: { value: [] }, dunningActions: { value: [] }, dunningPolicies: { value: [] }, dunningRecipients: { value: [] }, dunningOverview: { value: {} }, dunningCoverage: { value: {} }, policyForm: { value: { recipient_rule: '' } }, dunningActionDialog: { value: null } }),
     getSettlementSession: async () => ({permissions:["settlement.receipt.record","settlement.receivable.read","settlement.allocation.confirm"]}), ...overrides,
   })
-  vm.runInContext(`${script}\nsettlementSession.value = { permissions: ["settlement.receipt.record", "settlement.allocation.confirm", "settlement.receivable.read"] };\nglobalThis.ui = { submitReceipt, act, message, receiptComposerOpen, receiptMatchFor, receiptMatches, error };`, context)
+  scope.run(() => vm.runInContext(`${script}\nsettlementSession.value = { permissions: ["settlement.receipt.record", "settlement.allocation.confirm", "settlement.receivable.read"] };\nglobalThis.ui = { submitReceipt, act, message, receiptComposerOpen, receiptMatchFor, receiptMatches, error };`, context))
+  viewCleanups.push(() => scope.stop())
+  await nextTick()
+  await new Promise(resolve => setImmediate(resolve))
   return context.ui
 }
 

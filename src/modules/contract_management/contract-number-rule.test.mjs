@@ -94,11 +94,12 @@ test('编号规则面板的可编辑性绑定专用高权权限码，不再由�
   assert.doesNotMatch(panelSource, /修改需要模板管理权限/)
 })
 
-test('模板编号格式改为只读展示，并说明实际编号由系统级规则生成', () => {
-  assert.match(viewSource, /<span>合同编号格式（只读）<\/span><input :value="templateEditForm\.number_format" readonly maxlength="160" \/>/)
+test('模板编辑隐藏历史编号格式，保留系统编号提示和存储兼容', () => {
+  assert.doesNotMatch(viewSource, /合同编号格式（只读）/)
+  assert.doesNotMatch(viewSource, /:value="templateEditForm\.number_format"/)
   assert.doesNotMatch(viewSource, /v-model="templateEditForm\.number_format"/)
-  assert.match(viewSource, /实际合同编号由系统级编号规则生成；此格式只保留用于展示历史\/旧规则，修改后不会影响新合同编号。/)
-  // 只读不改存储：保存模板时仍完整回传既有格式，避免清空历史配置。
+  assert.match(viewSource, /实际合同编号由系统级编号规则生成/)
+  // 隐藏不改存储：保存模板时仍完整回传既有格式，避免清空历史配置。
   assert.match(viewSource, /number_format: templateEditForm\.value\.number_format\.trim\(\)/)
   assert.match(viewSource, /历史编号格式：\{\{ item\.number_format \|\| 'HT-\{YYYYMMDD\}-\{ID8\}' \}\}（不参与新编号）/)
   // 「审批通过后自动生成编号」的既有承诺不能被新面板冲淡（草稿字段区与页面两处口径）。

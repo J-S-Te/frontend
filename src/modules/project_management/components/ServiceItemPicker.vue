@@ -1,7 +1,7 @@
 <script setup>
 import { computed, ref } from 'vue'
 import ConsoleIcon from '@/modules/shared/components/ConsoleIcon.vue'
-import { serviceItemLabel, statusTone } from '../projectDisplay.js'
+import { serviceItemLabel, serviceItemStatusBadges, statusTone } from '../projectDisplay.js'
 
 const props = defineProps({
   items: { type: Array, default: () => [] },
@@ -16,13 +16,21 @@ const emit = defineEmits(['select', 'toggle'])
 
 const keyword = ref('')
 const projectByID = computed(() => new Map(props.projects.map(project => [project.id, project])))
+// 用途：兼容分配子阶段标签，并复用其他节点的主状态及报告徽章。
+// 参数：item 为队列中的当前服务项快照。
+// 返回值：本节点实际显示和检索的状态徽章，不改变服务项业务状态。
+function pickerStatusBadges(item) {
+  if (!props.statusLabel) return serviceItemStatusBadges(item)
+  const label = props.statusLabel(item)
+  return [{ key: 'status', label, tone: statusTone(label) }]
+}
 const filteredItems = computed(() => {
   const query = keyword.value.trim().toLowerCase()
   if (!query) return props.items
   return props.items.filter((item) => [
     projectByID.value.get(item.project_id)?.name,
     item.id, item.site, item.category, item.batch, item.system, item.status,
-    props.statusLabel?.(item),
+    ...pickerStatusBadges(item).map(badge => badge.label),
   ].join(' ').toLowerCase().includes(query))
 })
 // 用途：按稳定编号判断服务项是否被选中。
@@ -71,10 +79,8 @@ function choose(item) {
         </span>
         <span class="pm-picker-meta">
           <em v-if="item.batch" class="pm-picker-batch">{{ item.batch }}</em>
-          <span class="pm-badge"
-            :class="statusLabel ? statusTone(statusLabel(item)) : 'normal'">
-            {{ statusLabel ? statusLabel(item) : item.status }}
-          </span>
+          <span v-for="badge in pickerStatusBadges(item)" :key="badge.key"
+            class="pm-badge" :class="badge.tone">{{ badge.label }}</span>
         </span>
       </button>
       <p v-if="!filteredItems.length" class="pm-picker-empty">{{ items.length ? '没有匹配的服务项' : emptyText }}</p>

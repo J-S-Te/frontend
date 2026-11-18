@@ -1581,9 +1581,9 @@ test('状态字段统一为语义化胶囊标签（statusTone 单一映射）', 
   assert.match(source, /:tone="statusTone\(row\.state\)"/)
   assert.match(source, /:class="statusTone\(item\.identity_status\)"/)
   // 纯文本状态（操作台当前项 / 复核状态 / 当前报告阶段）收口为胶囊。
-  assert.match(source, /:class="statusTone\(selectedServiceItem\.status\)"/)
+  assert.match(source, /v-for="badge in serviceItemStatusBadges\(selectedServiceItem\)"/)
   assert.match(source, /<b class="pm-badge" :class="statusTone\(item && reportTechReviewLabel\(item\.tech_review_status\)\)"/)
-  assert.match(source, /<b class="pm-badge" :class="statusTone\(reportStatusLabel\[selectedServiceItem\.report_status\] \|\| selectedServiceItem\.report_status\)"/)
+  assert.match(source, /<b class="pm-badge" :class="selectedReportStage\.tone"/)
   // 修复未定义的 warning 色调：设备在位改 amber，使用范围改关注，CSS 提供兼容别名。
   assert.match(equipmentPanelSource, /item\.presence === 'OUT_OF_COMPANY' \? 'amber' : 'normal'/)
   assert.match(source, /item\.usage_scope === 'COMPANY_ONLY' \? '关注' : 'neutral'/)
@@ -1632,14 +1632,12 @@ test('报告编制版本先上传网关文件再进入审核', () => {
 
 test('已签发或归档报告支持受控更正申请与职责分离审批', () => {
   assert.ok(source.includes("canRequestReportCorrection = computed(() => permissionSet.value.has('project.report.correction.request'))"))
-  assert.ok(source.includes("canApproveReportCorrection = computed(() => permissionSet.value.has('project.report.correction.approve'))"))
   assert.match(source, /\['ISSUED', 'ARCHIVED'\]\.includes\(selectedServiceItem\.value\?\.report_status\)/)
   assert.match(source, /selectedReportCorrectionRequests\.value\.length === 0/)
   assert.match(source, /await requestReportCorrection\(item\.id, \{ reason, expected_version: Number\(item\.version\) \|\| 0 \}\)/)
   assert.match(source, /request\.actor_user_id === session\.value\?\.user_id/)
-  assert.match(source, /await decideReportCorrection\(item\.id, request\.id, \{ decision, comment, expected_version: Number\(item\.version\) \|\| 0 \}\)/)
   assert.match(displaySource, /REPORT_CORRECTION_REQUESTED: '报告更正已申请'/)
-  assert.match(source, /批准更正/)
+  assert.match(source, /查看更正审批申请/)
   assert.match(source, /审批通过后旧版本作废并生成下一报告版本/)
   assert.match(pmApiSource, /export function requestReportCorrection\(itemID, payload\)/)
   assert.match(pmApiSource, /export function decideReportCorrection\(itemID, requestID, payload\)/)

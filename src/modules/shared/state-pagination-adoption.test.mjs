@@ -144,7 +144,7 @@ const PLATFORM_SURFACES = [
       /@change="changePage"/,
     ],
     states: [
-      /<ListState[\s\S]{0,200}v-if="alertListState"[\s\S]{0,400}:error="error"[\s\S]{0,400}@retry="load"/,
+      /<ListState[\s\S]{0,200}v-if="alertListState"[\s\S]{0,400}:error="error"[\s\S]{0,400}@retry="refreshAlerts"/,
     ],
     forbidden: [/共 \{\{ total \}\} 条 · 第 \{\{ page \}\} \/ \{\{ pageCount \}\} 页/, /<EmptyState v-if="filteredAlerts\.length === 0"/],
   },
@@ -303,6 +303,8 @@ test('平台 / 预警中心的列表失败走 :error + @retry，不再渲染成�
   assert.match(byName['平台控制台审计日志'], /:error="auditError"[\s\S]{0,400}@retry="loadAuditEvents"/)
   assert.match(byName['异步任务运维'], /:error="listError"[\s\S]{0,300}@retry="loadJobs"/)
   assert.match(byName['应用登录目标'], /:error="listError"[\s\S]{0,400}@retry="loadTargets"/)
+  // 通知定位重试仍调用真实 load，同时保留 alert_id，不能退回无坐标第一页。
+  assert.match(byName['预警中心'], /function refreshAlerts\(\) \{\s*return load\(\{ referenceId: route\.query\.alert_id \|\| "" \}\)/)
 })
 
 // 三态优先级（loading > error > empty）必须写进各自的闸门表达式：

@@ -5,6 +5,7 @@ import { useSidebarNavigation } from '@/modules/shared/composables/useSidebarNav
 import { readSidebarCollapsed } from '@/modules/shared/utils/shellPreferences.js'
 import OperationToast from '@/modules/shared/components/OperationToast.vue'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { notificationApprovalFilters, resolveNotificationApproval } from '../utils/notificationApproval.js'
 import { formatUserError } from '../../shared/utils/userError.js'
 import { authorizationScopeKey } from '../../shared/authz/authorizationSnapshot.js'
 import { useConfirmDialog } from '../../shared/composables/useConfirmDialog.js'
@@ -20,7 +21,7 @@ import PaginationBar from '@/modules/shared/components/PaginationBar.vue'
 import OperationInboxPanel from '../../shared/components/OperationInboxPanel.vue'
 import { usePersistentResult } from '../../shared/composables/usePersistentResult.js'
 import { useOperationInbox } from '../../shared/composables/useOperationInbox.js'
-import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router'
+import { onBeforeRouteLeave, onBeforeRouteUpdate, useRoute, useRouter } from 'vue-router'
 import { AuthError, logoutCurrentSession } from '@/modules/platform/auth/api/auth'
 import ConsoleIcon from '@/modules/platform/shared/components/ConsoleIcon.vue'
 import { useDictionaryOptions } from '@/modules/platform/dictionaries/composables/useDictionaryOptions.js'
@@ -62,6 +63,7 @@ import {
   getContractDashboard,
   getContract,
   getContractSession,
+  getMyCustomer,
   ensureContractCRMDirectorySession,
   openContractCRMLogin,
   waitForContractCRMDirectorySession,
@@ -69,6 +71,7 @@ import {
   getOpportunityIntake,
   listApprovals,
   listMyCustomers,
+  listMyCustomerContacts,
   listMyOpportunities,
   listSigningRecords,
   listApprovalRules,
@@ -138,6 +141,7 @@ import ContractAuditOutboxPanel from '@/modules/contract_management/components/C
 import { useSigningLedger } from '@/modules/contract_management/composables/useSigningLedger'
 import { useApprovalDetail } from '@/modules/contract_management/composables/useApprovalDetail'
 import { useContractDraftEditor } from '@/modules/contract_management/composables/useContractDraftEditor'
+import { useContractCRMPrefill } from '@/modules/contract_management/composables/useContractCRMPrefill'
 import { canEditContractDraft, saveContractDraft } from '@/modules/contract_management/utils/contractDraft'
 import { normalizePaymentTerms, paymentAmountMinor } from '@/modules/contract_management/utils/paymentTerms'
 import { contractSystemLevels, externalContractTypes, isContractDOCXFile, validateContractSourceFile, validateContractForm, localContractReferencePayload } from '@/modules/contract_management/utils/contractPayload'
@@ -533,6 +537,11 @@ const detectionCategoryLoading = ref(false)
 const detectionCategoryError = ref('')
 let detectionCategoryRequestID = 0
 const isExternalContractMode = computed(() => contractCreationMode.value === 'external')
+const { autofillCustomer, autofillOpportunity, clearCRMCustomerPrefill,
+  clearCRMOpportunityPrefill, crmPrefillLoading, crmPrefillError, crmPrefillNotice,
+} = useContractCRMPrefill({ newContract, selectedContractTemplate, createDialogOpen,
+  contractCreating, editingContract, listContacts: listMyCustomerContacts,
+  onError: recordCRMDirectoryError, formatError: formatUserError })
 const canSaveNewContract = computed(() => {
   if (contractCreating.value) return false
   if (draftEditConflict.value) return false
@@ -721,7 +730,7 @@ const {
   approvalDetailScope, selectedApproval, approvalDetail, approvalDetailLoading,
   approvalContractPreviewHTML, approvalContractPreviewPDF, approvalContractPreviewLoading, approvalContractPreviewError,
   approvalComment, approvalTargetUser, approvalTargetNode, approvalCommandBusy,
-  openApproval, closeApproval, executeApprovalCommand,
+  openApproval, closeApproval: closeApprovalDetail, executeApprovalCommand,
 } = useApprovalDetail({
   getApproval, previewApprovalContract, commandApproval, can, session, showToast, formatUserError,
   refreshApprovalRealtime: refreshApprovalMutation,
@@ -732,6 +741,8 @@ const canActOnApproval = computed(() => can('approval.process')
   && selectedApproval.value?.status === 'active'
   && !approvalDetail.value?.state_unavailable)
 const approvalRealtimeScope = createRequestScope()
+const contractNotificationReady = ref(false)
+let contractNotificationSequence = 0
 const signingDetailScope = createRequestScope()
 let signingDetailTicket = null
 const signingRealtimeScope = createRequestScope()
@@ -1529,6 +1540,76 @@ function normalizeApproval(item) {
   }
 }
 
+// 用途：在会话就绪后读取通知关联审批或合同，历史提醒不猜测审批身份。
+// 参数：reload 表示同页切换提醒时重读当前区域，使用路由的业务标识。
+// 返回值：无；无权限、多个流程或失效提醒以真实结果提示。
+async function openContractNotificationRoute({ reload = false } = {}) {
+  const ticket = ++contractNotificationSequence
+  if (!contractNotificationReady.value) return
+  const isCurrent = () => ticket === contractNotificationSequence
+  approvalRealtimeScope.invalidate()
+  if (!['approvals', 'contracts'].includes(activeSection.value)) return
+  if (!route.query.approval_id && !route.query.contract_id) {
+    if (reload) await loadBusinessData()
+    return
+  }
+  if (approvalCommandBusy.value) {
+    showToast('当前审批操作仍在处理，请完成后再打开其他提醒。')
+    return
+  }
+  closeApprovalDetail()
+  try {
+    const filters = notificationApprovalFilters(route.query)
+    if (reload) {
+      await loadBusinessData()
+      if (!isCurrent()) return
+    }
+    if (activeSection.value === 'contracts' && filters.contract_id) {
+      contractDetailSequence++
+      selectedContract.value = null
+      const contract = await getContract(filters.contract_id)
+      if (isCurrent()) await openContract(normalizeContract(contract))
+      return
+    }
+    const result = await resolveNotificationApproval(route.query, {
+      canProcess: can('approval.process'), listApprovalTasks, listApprovals, isCurrent,
+    })
+    if (!result || !isCurrent()) return
+    approvals.value = result.tasks.map(normalizeApproval)
+    setInitiatedApprovals(result.summaries)
+    if (result.approval) await openApproval(normalizeApproval(result.approval))
+    else {
+      if (result.summaries.length) approvalTab.value = 'initiated'
+      showToast(result.tasks.length || result.summaries.length
+        ? '该合同关联多个审批流程，请在合同审批记录中选择对应流程。'
+        : '当前可见范围内没有该合同的审批记录，待办可能已处理或访问权限已变化。')
+    }
+  } catch (failure) {
+    if (isCurrent()) showToast(formatUserError(failure, { fallback: '通知关联记录读取失败，请重试。' }))
+  }
+}
+
+// 用途：关闭通知审批详情后移除定位坐标，使再次点击同一提醒可以重新打开。
+// 参数：无；仅移除当前审批工作区的业务坐标，保留其余筛选和锚点。
+// 返回值：异步完成；导航失败时提示重新选择待办。
+async function clearApprovalNotificationRoute() {
+  if (activeSection.value !== 'approvals'
+    || (!route.query.approval_id && !route.query.contract_id)) return
+  const query = { ...route.query }
+  delete query.approval_id
+  delete query.contract_id
+  try { await router.replace({ name: route.name, params: route.params, query, hash: route.hash }) }
+  catch (failure) { showToast(formatUserError(failure, { fallback: '审批定位未能清理，请重试。' })) }
+}
+
+// 用途：关闭用户主动退出的审批详情，并消费本次通知定位。
+// 参数：无。
+// 返回值：无；清理路由失败会独立提示。
+function closeApproval() {
+  closeApprovalDetail()
+  void clearApprovalNotificationRoute()
+}
+
 function setInitiatedApprovals(items) {
   const normalized = items.map(normalizeApproval)
   const materializedIDs = new Set(normalized.map((item) => item.id))
@@ -1586,8 +1667,9 @@ async function refreshApprovalRealtime({ queueIfBusy = false } = {}) {
   const ticket = approvalRealtimeScope.begin('APPROVAL_REALTIME')
   const isCurrent = () => approvalRealtimeScope.isCurrent(ticket)
   try {
-    const initiatedRequest = listApprovals({ limit: 200 })
-    const taskRequest = can('approval.process') ? listApprovalTasks({ limit: 200 }) : Promise.resolve([])
+    const params = { limit: 200, ...notificationApprovalFilters(route.query) }
+    const initiatedRequest = listApprovals(params)
+    const taskRequest = can('approval.process') ? listApprovalTasks(params) : Promise.resolve([])
     const detailRequest = selectedApproval.value && !selectedApproval.value.initializing && !approvalCommandBusy.value
       ? getApproval(selectedApproval.value.id)
       : Promise.resolve(null)
@@ -1788,7 +1870,9 @@ async function loadBusinessData() {
     requests.push({ label, sections, promise })
   }
   if (can('approval.view') || can('approval.process') || can('contract.create')) {
-    addRequest('我发起的审批', ['dashboard', 'approvals'], listApprovals({ limit: 200 }).then(items => {
+    addRequest('我发起的审批', ['dashboard', 'approvals'], listApprovals({ limit: 200,
+      ...(activeSection.value === 'approvals' ? notificationApprovalFilters(route.query) : {}),
+    }).then(items => {
       if (sequence === businessDataSequence) setInitiatedApprovals(items)
     }))
   }
@@ -1831,7 +1915,9 @@ async function loadBusinessData() {
     addRequest('签署台账', ['signing'], refreshSigningRecords())
   }
   if (can('approval.process')) {
-    addRequest('审批待办', ['dashboard', 'approvals'], listApprovalTasks({ limit: 200 }).then((items) => {
+    addRequest('审批待办', ['dashboard', 'approvals'], listApprovalTasks({ limit: 200,
+      ...(activeSection.value === 'approvals' ? notificationApprovalFilters(route.query) : {}),
+    }).then((items) => {
       if (sequence !== businessDataSequence) return
       approvals.value = items.map(normalizeApproval)
       approvalsKnown.value = true
@@ -2270,18 +2356,29 @@ async function loadMoreCustomerOptions() {
   await loadCustomerOptions({ reset: false })
 }
 
-function selectCustomer(item) {
+// 用途：关联所选客户并补齐联系人，切换客户时清除旧商机自动值。
+// 参数：item为权限范围内选择的CRM客户。
+// 返回值：异步完成联系人读取；手填与提交中表单保持。
+async function selectCustomer(item) {
+  if (contractCreating.value || !createDialogOpen.value) return
   const customerID = String(item.id || item.customer_id || '')
   if (newContract.value.opportunity_id && String(newContract.value.customer_id) !== customerID) {
+    clearCRMOpportunityPrefill()
     newContract.value.opportunity_id = ''
     newContract.value.opportunity_name = ''
   }
   newContract.value.customer_id = customerID
   newContract.value.customer_name = item.name || item.customer_name || ''
   customerPickerOpen.value = false
+  await autofillCustomer(customerID)
 }
 
+// 用途：移除客户及商机关联，只清理由关联自动带入且未被手改的内容。
+// 参数：无。
+// 返回值：无。
 function clearCustomer() {
+  if (contractCreating.value) return
+  clearCRMCustomerPrefill()
   newContract.value.customer_id = ''
   newContract.value.customer_name = ''
   newContract.value.opportunity_id = ''
@@ -2373,7 +2470,9 @@ function ensureOpportunityOptions() {
   void loadOpportunityOptions()
 }
 
-// 表单展开时，CRM 会话已就绪则自动加载可关联商机，用户可直接在下拉框里选择。
+// 用途：把下拉选择转换为真实商机记录并补齐合同空白字段。
+// 参数：event为商机下拉框变更事件。
+// 返回值：异步完成商机关联及联系人读取。
 async function selectOpportunityById(event) {
   const id = String(event?.target?.value || '')
   if (!id) {
@@ -2381,7 +2480,7 @@ async function selectOpportunityById(event) {
     return
   }
   const item = opportunityOptions.value.find((option) => String(option.id || option.opportunity_id || '') === id)
-  if (item) selectOpportunity(item)
+  if (item) await selectOpportunity(item)
 }
 
 watch([selectedContractTemplate, isExternalContractMode], async ([template, external]) => {
@@ -2391,15 +2490,25 @@ watch([selectedContractTemplate, isExternalContractMode], async ([template, exte
   if (crmSessionState.value === 'ready') await loadOpportunityOptions()
 })
 
-function selectOpportunity(item) {
+// 用途：关联所选商机及客户，并带入可确定的合同空白信息。
+// 参数：item为权限范围内选择的CRM商机。
+// 返回值：异步完成关联客户的联系人读取。
+async function selectOpportunity(item) {
+  if (contractCreating.value || !createDialogOpen.value) return
   newContract.value.opportunity_id = String(item.id || item.opportunity_id || '')
   newContract.value.opportunity_name = item.name || item.title || item.opportunity_name || '未命名商机'
   newContract.value.customer_id = String(item.customer_id || item.customer?.id || '')
   newContract.value.customer_name = item.customer_name || item.customer?.name || ''
-  if (!newContract.value.amount && item.expected_amount) newContract.value.amount = item.expected_amount
+  autofillOpportunity(item)
+  await autofillCustomer(newContract.value.customer_id)
 }
 
+// 用途：取消商机关联，并清除仍保持自动值的商机字段。
+// 参数：无。
+// 返回值：无。
 function clearOpportunity() {
+  if (contractCreating.value) return
+  clearCRMOpportunityPrefill()
   newContract.value.opportunity_id = ''
   newContract.value.opportunity_name = ''
 }
@@ -2545,10 +2654,7 @@ async function refreshSelectedCRMAccess(form = newContract.value) {
   }
   await checkCRMDirectorySession()
   const customerID = String(form.customer_id || '')
-  const customers = await listMyCustomers({ keyword: form.customer_name, page: 1, page_size: 100 })
-  if (!customers.items.some((item) => String(item.id || item.customer_id || '') === customerID)) {
-    throw new Error('所选 CRM 客户已失效或不在当前权限范围内，请重新选择。')
-  }
+  await getMyCustomer(customerID)
   if (!form.opportunity_id) return
   const opportunityID = String(form.opportunity_id)
   const opportunities = await listMyOpportunities({ keyword: form.opportunity_name, page: 1, page_size: 100 })
@@ -2950,6 +3056,19 @@ watch(activeSection, () => {
 
 // 路由参数变化（例如从其他页面带 ?import_batch 跳到本模块）同样要校正分区。
 watch(() => route.query.import_batch, () => { ensureImportBatchSection() })
+watch(() => [activeSection.value, route.query.approval_id, route.query.contract_id],
+  ([section], [previous]) => openContractNotificationRoute({ reload: section === previous }))
+watch(approvalCommandBusy, (busy) => {
+  if (!busy && !selectedApproval.value) void clearApprovalNotificationRoute()
+})
+onBeforeRouteUpdate((to, from) => {
+  const changed = to.params.section !== from.params.section
+    || to.query.approval_id !== from.query.approval_id
+    || to.query.contract_id !== from.query.contract_id
+  if (!changed || !approvalCommandBusy.value) return true
+  showToast('当前审批操作仍在处理，请完成后再切换页面。')
+  return false
+})
 
 // 用途：读取原件及业务来源能力，失败保留明确提示且不猜测本地来源。
 // 参数：无；使用当前合同会话。
@@ -2969,6 +3088,8 @@ onMounted(async () => {
     ensureImportBatchSection()
     void loadContractSourceCapabilities()
     await loadBusinessData()
+    contractNotificationReady.value = true
+    await openContractNotificationRoute()
     document.addEventListener('visibilitychange', handleApprovalVisibilityChange)
     document.addEventListener('keydown', closeMenuOnEscape)
     scheduleApprovalRealtime({ immediate: true })
@@ -2980,6 +3101,7 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
+  contractNotificationSequence++
   businessDataSequence++
   resetCRMDirectoryConnection()
   // 卸载后停止正在进行的导出台账分页读取，避免离开页面后继续请求并提示。
@@ -3221,7 +3343,7 @@ onBeforeUnmount(() => {
         <template v-else-if="activeSection === 'approvals'">
           <div class="contract-tabs" role="tablist" aria-label="审批列表">
             <button :class="{ active: approvalTab === 'tasks' }" type="button" role="tab" :aria-selected="approvalTab === 'tasks'" @click="approvalTab = 'tasks'">待我审批 <i>{{ approvals.length }}</i></button>
-            <button :class="{ active: approvalTab === 'initiated' }" type="button" role="tab" :aria-selected="approvalTab === 'initiated'" @click="approvalTab = 'initiated'">我发起的 {{ initiatedApprovals.length }}</button>
+            <button :class="{ active: approvalTab === 'initiated' }" type="button" role="tab" :aria-selected="approvalTab === 'initiated'" @click="approvalTab = 'initiated'">{{ route.query.contract_id ? '合同审批记录' : '我发起的' }} {{ initiatedApprovals.length }}</button>
             <button :class="{ active: approvalTab === 'status' }" type="button" role="tab" :aria-selected="approvalTab === 'status'" @click="approvalTab = 'status'">状态变更审批 <i>{{ statusChangeApprovals.length }}</i></button>
             <button type="button" @click="loadBusinessData">刷新</button>
           </div>
@@ -3415,6 +3537,9 @@ onBeforeUnmount(() => {
           >
             <template #status>
               <p class="contract-form-wide contract-form-required-hint">带 <strong>*</strong> 的为必填项；输入框按字段类型限制长度、格式和数值范围。</p>
+              <p v-if="crmPrefillLoading" class="contract-info-banner contract-form-wide" role="status">正在读取客户联系人；已填写的内容会保留。</p>
+              <p v-if="crmPrefillNotice" class="contract-info-banner contract-form-wide" role="status">{{ crmPrefillNotice }}</p>
+              <p v-if="crmPrefillError" class="contract-session-error contract-form-wide" role="alert">{{ crmPrefillError }} <button type="button" :disabled="contractCreating || crmPrefillLoading" @click="autofillCustomer(newContract.customer_id)">重试带入联系人</button></p>
               <p v-if="editingContract && isExternalContractMode" class="contract-info-banner contract-form-wide">编辑结构化信息时保留原外部 DOCX，不替换合同文件；正文金额等条款如需改变，应创建与新文件一致的合同。</p>
               <p v-if="draftEditError" ref="draftErrorElement" tabindex="-1" class="contract-session-error contract-form-wide" role="alert">{{ draftEditError }} <button v-if="draftEditConflict" type="button" :disabled="contractCreating || draftEditLoading" @click="editContractDraft(editingContract)">重新载入草稿（放弃未保存修改）</button></p>
               <div v-if="crmConnectionRequired && !crmConnecting && !customerPickerOpen" class="contract-session-error contract-form-wide" role="status"><p>{{ crmConnectionMessage }}</p><button class="contract-button secondary" type="button" @click="connectCRM">连接 CRM</button></div>
@@ -3431,7 +3556,7 @@ onBeforeUnmount(() => {
 
 <div v-if="templateUploadDialogOpen" class="contract-modal-mask" @click.self="templateUploadDialogOpen = false"><form class="contract-detail-modal contract-template-upload-modal" @submit.prevent="submitTemplateUpload"><header><div><span class="contract-badge info">超级管理员</span><h2>{{ templateReplacementID ? '替换模板文件' : '上传合同模板' }}</h2><p><span v-if="templateReplacementID">保留模板标识和同名字段配置，已生成合同正文不变。请核对替换后的新字段。</span>上传不超过 10MB 的 DOCX，模板中使用 <code v-pre>{{field_name:字段名称}}</code> 标记填写项。</p></div><button type="button" aria-label="关闭" @click="templateUploadDialogOpen = false"><ConsoleIcon name="close" /></button></header><section><div class="contract-form-grid"><label><span>模板名称</span><input v-model="templateUploadForm.name" :readonly="Boolean(templateReplacementID)" required maxlength="160" placeholder="例如：标准服务合同" /></label><label><span>DOCX 文件</span><input required type="file" accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document" @change="selectTemplateFile" /></label></div><p v-if="templateUploadError" class="contract-template-preview-error" role="alert">{{ templateUploadError }}</p></section><footer><button class="contract-button secondary" type="button" :disabled="templateUploading" @click="templateUploadDialogOpen = false">取消</button><button class="contract-button primary" type="submit" :disabled="templateUploading">{{ templateUploading ? '正在上传…' : (templateReplacementID ? '替换模板' : '上传模板') }}</button></footer></form></div>
 
-    <div v-if="templateEditDialogOpen" class="contract-modal-mask" @click.self="templateEditDialogOpen = false"><form class="contract-detail-modal contract-template-edit-modal" @submit.prevent="saveTemplate"><header><div><span class="contract-badge info">超级管理员</span><h2>编辑合同模板</h2><p>可将需要统一控制的合同信息设为管理员预设；合同编号由系统级编号规则生成，格式字段仅作只读展示。</p></div><button type="button" aria-label="关闭" @click="templateEditDialogOpen = false"><ConsoleIcon name="close" /></button></header><section><div class="contract-template-base-fields"><label class="contract-template-name-field"><span>模板名称</span><input v-model="templateEditForm.name" required maxlength="160" /></label><label class="contract-template-name-field"><span>合同编号格式（只读）</span><input :value="templateEditForm.number_format" readonly maxlength="160" /><small>实际合同编号由系统级编号规则生成；此格式只保留用于展示历史/旧规则，修改后不会影响新合同编号。</small></label></div><div class="contract-template-editor-list"><div v-for="field in templateEditForm.fields" :key="field.name" class="contract-template-editor-row"><label><span>显示名称</span><input v-model="field.label" required maxlength="160" /></label><label><span>{{ field.locked ? '管理员预设值' : '默认值（可选）' }}</span><input v-model="field.default" :required="field.locked" maxlength="1000" :placeholder="field.locked ? '请输入固定值' : '新建合同时仍可修改'" /></label><label class="contract-check-label"><input v-model="field.locked" type="checkbox" /><span>由管理员预设</span></label></div><p v-if="!templateEditForm.fields.length" class="contract-session-error">该 DOCX 中没有可配置字段。</p></div></section><footer><button class="contract-button secondary" type="button" :disabled="templateSaving" @click="templateEditDialogOpen = false">取消</button><button class="contract-button primary" type="submit" :disabled="templateSaving">{{ templateSaving ? '正在保存…' : '保存模板' }}</button></footer></form></div>
+    <div v-if="templateEditDialogOpen" class="contract-modal-mask" @click.self="templateEditDialogOpen = false"><form class="contract-detail-modal contract-template-edit-modal" @submit.prevent="saveTemplate"><header><div><span class="contract-badge info">超级管理员</span><h2>编辑合同模板</h2><p>可将需要统一控制的合同信息设为管理员预设；实际合同编号由系统级编号规则生成。</p></div><button type="button" aria-label="关闭" @click="templateEditDialogOpen = false"><ConsoleIcon name="close" /></button></header><section><div class="contract-template-base-fields"><label class="contract-template-name-field"><span>模板名称</span><input v-model="templateEditForm.name" required maxlength="160" /></label></div><div class="contract-template-editor-list"><div v-for="field in templateEditForm.fields" :key="field.name" class="contract-template-editor-row"><label><span>显示名称</span><input v-model="field.label" required maxlength="160" /></label><label><span>{{ field.locked ? '管理员预设值' : '默认值（可选）' }}</span><input v-model="field.default" :required="field.locked" maxlength="1000" :placeholder="field.locked ? '请输入固定值' : '新建合同时仍可修改'" /></label><label class="contract-check-label"><input v-model="field.locked" type="checkbox" /><span>由管理员预设</span></label></div><p v-if="!templateEditForm.fields.length" class="contract-session-error">该 DOCX 中没有可配置字段。</p></div></section><footer><button class="contract-button secondary" type="button" :disabled="templateSaving" @click="templateEditDialogOpen = false">取消</button><button class="contract-button primary" type="submit" :disabled="templateSaving">{{ templateSaving ? '正在保存…' : '保存模板' }}</button></footer></form></div>
 
     <ConfirmDialog
       :open="Boolean(confirmDialog)"

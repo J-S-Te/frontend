@@ -17,7 +17,7 @@ function harness() {
     isExternalContractMode: ref(true), validateContractForm, localContractReferencePayload,
     normalizePaymentTerms, paymentAmountMinor,
     checkCRMDirectorySession: async () => { calls.push('session') },
-    listMyCustomers: async () => { calls.push('customers'); return { items: [{ id: 7 }] } },
+    getMyCustomer: async (id) => { calls.push(`customer:${id}`); return { id: 7, name: '合成CRM', status: 'ACTIVE' } },
   }
   const names = ['buildNewContractPayload', 'contractDateValue', 'refreshSelectedCRMAccess']
   const functions = names.map((name) => {
@@ -60,5 +60,5 @@ test('本地引用复核不连接CRM，旧CRM引用继续检查同账号可见�
   await h.ui.refreshSelectedCRMAccess(localForm())
   assert.equal(h.calls.length, 0)
   await h.ui.refreshSelectedCRMAccess({ customer_id: '7', customer_name: '合成CRM', opportunity_id: '' })
-  assert.deepEqual(h.calls, ['session', 'customers'])
+  assert.deepEqual(h.calls, ['session', 'customer:7'])
 })

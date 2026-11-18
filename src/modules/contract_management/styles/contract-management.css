@@ -258,7 +258,7 @@
 .contract-template-field-grid label small { color: var(--cm-primary); font-size: var(--fs-xs); }
 .contract-template-edit-modal { width: min(880px,calc(100vw - 32px)); }
 .contract-template-name-field,.contract-template-editor-row>label { display:flex;flex-direction:column;gap:6px;color:var(--cm-secondary);font-size: var(--fs-xs);font-weight:600; }
-.contract-template-base-fields { display:grid;grid-template-columns:1fr 1fr;gap:12px; }
+.contract-template-base-fields { display:grid;grid-template-columns:1fr;gap:12px; }
 .contract-template-name-field small { color:var(--cm-muted);font-size: var(--fs-xs);font-weight:400;line-height:1.5; }
 .contract-template-name-field>input,.contract-template-editor-row label:not(.contract-check-label)>input { height:36px;padding:0 10px;color:var(--cm-text);font-size: var(--fs-xs);border:1px solid var(--cm-border);border-radius:7px;background:var(--surface-input, #fff); }
 .contract-template-editor-list { display:flex;flex-direction:column;gap:10px;margin-top:16px; }

@@ -66,19 +66,22 @@ async function renderFragment(fragment, values = {}) {
 }
 
 // 用途：执行页面已有的节点队列计算，检查隐藏全局搜索不会参与节点筛选。
-// 参数：section 为当前操作栏目，keyword 为其他页面遗留的全局关键字。
-// 返回值：真实节点计算结果和可修改的关键字引用。
-function nodeHarness(section, keyword) {
+// 参数：section 为操作栏目，keyword 为旧页关键字，options 提供授权服务项与回退事件。
+// 返回值：真实节点计算结果、关键字和可追加决定事件的响应式引用。
+function nodeHarness(section, keyword, { rows = items, inboxCandidates = rows, events = [] } = {}) {
   const context = { computed: Vue.computed, activeSection: Vue.ref(section),
-    keyword: Vue.ref(keyword), serviceItems: Vue.ref(items) }
+    keyword: Vue.ref(keyword), serviceItems: Vue.ref(rows), deliveryEvents: Vue.ref(events) }
   for (const name of ['allocationItems', 'inboxItems', 'planningItems', 'preparationItems',
     'assignmentItems', 'methodItems', 'exceptionItems', 'reportItems', 'implementationItems']) {
-    context[name] = Vue.ref(items)
+    context[name] = Vue.ref(rows)
   }
+  context.inboxItems = Vue.ref(inboxCandidates)
+  const inboxStart = source.indexOf('const pendingRollbackRequests = computed(')
+  const inboxCode = source.slice(inboxStart, source.indexOf('\nconst planningItems', inboxStart))
   const start = source.indexOf('const activeNodeItems = computed(')
   const statement = source.slice(start, source.indexOf('\nconst completedProjectCount', start))
-  const result = vm.runInNewContext(`${statement}\nactiveNodeItems`, context)
-  return { result, keyword: context.keyword }
+  const result = vm.runInNewContext(`${inboxCode}\n${statement}\nactiveNodeItems`, context)
+  return { result, keyword: context.keyword, events: context.deliveryEvents }
 }
 
 test('服务项队列以项目和系统名称呈现，编号保留为次要信息', async () => {
@@ -135,6 +138,44 @@ test('队列搜索支持项目系统名称并保留编号场所检索及稳定�
   state.choose(props.items[0])
   assert.equal(events[1][0], 'toggle')
   assert.equal(events[1][1].id, 'SI-ONE')
+})
+
+test('队列状态使用真实色调并带出报告阶段，搜索可定位报告编制项', async () => {
+  const reporting = { ...items[0], status: '现场实施完成', report_status: 'COMPILING' }
+  const exception = { ...items[1], status: '异常处理中', report_status: 'NONE' }
+  const html = await renderToString(Vue.createSSRApp(pickerComponent(), {
+    projects: [project], items: [reporting, exception], selectedIds: [],
+  }))
+  assert.match(html, /class="pm-badge processing"[^>]*>报告编制中<\/span>/)
+  assert.match(html, /class="pm-badge danger"[^>]*>异常处理中<\/span>/)
+  const props = Vue.reactive({ projects: [project], items: [reporting, exception],
+    selectedIds: [], multiple: false })
+  const state = pickerComponent(false).setup(props, { expose: () => {}, emit: () => {} })
+  state.keyword.value = '报告编制中'
+  assert.deepEqual(state.filteredItems.value.map(item => item.id), ['SI-ONE'])
+  props.items[0] = { ...reporting, report_status: 'ARCHIVED' }
+  assert.equal(state.filteredItems.value.length, 0)
+  state.keyword.value = '报告已归档'
+  assert.deepEqual(state.filteredItems.value.map(item => item.id), ['SI-ONE'])
+})
+
+test('操作台摘要与队列同步报告归档，回退后不展示历史报告完成', async () => {
+  for (const [status, reportStatus, expected, absent] of [
+    ['现场实施完成', 'ARCHIVED', '报告已归档', '报告编制中'],
+    ['现场实施完成', 'COMPILING', '报告编制中', '报告已归档'],
+    ['实施中', 'ARCHIVED', '实施中', '报告已归档'],
+    ['现场实施完成', 'FUTURE_PHASE', '未知', '未开始'],
+    ['现场实施完成', undefined, '未提供', '未开始'],
+  ]) {
+    const selected = { ...items[0], status, report_status: reportStatus }
+    const html = await renderFragment(findElement('pm-operation-summary').loc.source, {
+      activeSection: 'reports',
+      selectedServiceItem: selected, selectedServiceProject: project,
+      selectedServiceOwner: '合成人员', selectedServiceDue: '2026-11-19',
+    })
+    assert.ok(html.includes(expected), `${status}/${reportStatus}: ${html}`)
+    assert.ok(!html.includes(absent), `${status}/${reportStatus}: ${html}`)
+  }
 })
 
 test('缺少项目系统名称时诚实显示缺失说明，编号仍可追溯', async () => {
@@ -199,6 +240,19 @@ test('操作台仅保留队列搜索，其他页遗留关键字不会缩小节�
   assert.equal((html.match(/role="option"/g) || []).length, 2)
   h.keyword.value = '另一旧页搜索词'
   assert.deepEqual(h.result.value.map(item => item.id), ['SI-ONE', 'SI-TWO'])
+})
+
+test('展示宿主使用真实回退待审队列，只合入可见服务项并随审批决定移除', () => {
+  const h = nodeHarness('inbox', '旧页面关键字', {
+    inboxCandidates: [items[0]], events: [
+      { id: 'rollback-visible', type: 'ROLLBACK_REQUESTED', service_item_id: 'SI-TWO' },
+      { id: 'rollback-hidden', type: 'ROLLBACK_REQUESTED', service_item_id: 'SI-HIDDEN' },
+    ],
+  })
+  assert.deepEqual(h.result.value.map(item => item.id), ['SI-ONE', 'SI-TWO'])
+  h.events.value.push({ id: 'rollback-approved', type: 'ROLLBACK_APPROVED',
+    service_item_id: 'SI-TWO', payload: { request_id: 'rollback-visible' } })
+  assert.deepEqual(h.result.value.map(item => item.id), ['SI-ONE'])
 })
 
 test('操作台选中摘要以项目系统名称为主信息', async () => {
