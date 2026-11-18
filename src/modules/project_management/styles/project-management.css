@@ -137,6 +137,7 @@
   --pm-t-slow: .25s;
 
   /* 1.13 层级 */
+  --pm-z-base: 1;
   --pm-z-sticky: 20;
   --pm-z-dropdown: 30;
   --pm-z-mask: 40;
@@ -2057,7 +2058,7 @@
 .pm-chip .pm-chip-x:hover { background: var(--pm-primary-border); }
 
 /* 18.10 详情页布局（原型 PG-PRJ-02：摘要卡 + 计数标签页 + 甘特/时间线） */
-.pm-detail-summary { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(210px, 100%), 1fr)); gap: var(--pm-sp-3) var(--pm-sp-4); }
+.pm-detail-summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 20px 24px; padding: 20px 24px; }
 .pm-detail-summary div { min-width: 0; }
 .pm-detail-summary dt { margin-bottom: 2px; color: var(--pm-muted); font-size: var(--pm-fs-label); font-weight: var(--pm-fw-medium); }
 .pm-detail-summary dd { margin: 0; color: var(--pm-ink); font-size: var(--pm-fs-ui); font-weight: var(--pm-fw-semibold); }
@@ -2079,7 +2080,8 @@
 .pm-allocation-preview { color: var(--pm-body); }
 .pm-stepper-panel > .pm-stepper { padding: var(--pm-sp-1) 0; }
 .pm-approval-panel header { margin-bottom: var(--pm-sp-3); }
-.pm-detail-tabs { margin-bottom: var(--pm-sp-4); }
+.pm-detail-stack { display: grid; gap: var(--pm-sp-6); min-width: 0; }
+.pm-detail-tabs { margin-bottom: 0; position: sticky; top: var(--pm-h-topbar, 56px); z-index: var(--pm-z-sticky); padding: 4px 0; background: var(--pm-content, var(--pm-card)); }
 .pm-capability-tabs { flex-basis: 100%; }
 
 /* 18.13 状态胶囊统一：全部状态字段经 statusTone 输出语义色调；
@@ -2748,3 +2750,14 @@
   border-color: var(--tag-other-border);
   border-style: dashed;
 }
+
+/* 项目详情：服务项表横向滚动时冻结首列，避免滚动丢失行上下文。 */
+.pm-detail-items { min-width: 980px; }
+.pm-detail-items th:first-child,
+.pm-detail-items td:first-child {
+  position: sticky;
+  left: 0;
+  z-index: var(--pm-z-base);
+  background: var(--pm-card);
+}
+.pm-detail-items thead th:first-child { background: var(--pm-th-bg, var(--pm-card)); }
