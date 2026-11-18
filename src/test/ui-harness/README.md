@@ -1,6 +1,6 @@
 # UI harness 说明（布局 / 交互证据脚本）
 
-本目录的 `*-browser.mjs` 都是**真实 Chrome 渲染**的隔离夹具脚本，不是单元测试。
+本目录的 `*-browser.mjs` 都是**真实浏览器渲染**的隔离夹具脚本，默认使用 Chrome，不是单元测试。
 它们只读取真实组件/样式，用合成数据在浏览器内渲染，禁止访问业务 API、业务库或写业务数据。
 
 `npm test` 只收集 `*.test.mjs`（`src/test/run-tests.mjs`），所以本目录进入 `npm test`
@@ -13,6 +13,7 @@
 | `responsive-boundaries-browser.mjs` | `page.setContent` 内联渲染 | **是**（`npm run test:layout`，CI `layout` job） | 仅 Chrome |
 | `sidebar-user-browser.mjs` | `page.setContent` 内联渲染 | 否 | 仅 Chrome |
 | `sidebar-username-browser.mjs` | `page.setContent` 内联渲染 | 否 | 仅 Chrome |
+| `sidebar-scrollbars-browser.mjs` | 内联真实 AppShell、原生侧栏模板、ServiceItemPicker 与模块 CSS | 否（opt-in） | 默认 Chrome；可选择已安装的 Playwright WebKit / Firefox |
 | `action-buttons-browser.mjs` | 访问 dev server 的 `action-buttons.html` | 否 | **手工 dev server** |
 | `priority-browser.mjs` | 访问 dev server 的 `priority.html` | 否 | **手工 dev server** |
 | `pagination-layout-browser.mjs` | `page.setContent` 内联渲染真实 PaginationBar + 模块 CSS | 否 | 仅 Chrome |
@@ -61,6 +62,9 @@ login-target` 七种列表页容器里渲染分页条，在 1440 / 1024 / 900 / 
 | 变量 | 作用 | 默认 |
 | --- | --- | --- |
 | `CHROMIUM_PATH` | Chrome/Chromium 可执行文件路径（所有脚本都走 env 兜底） | macOS `/Applications/Google Chrome.app/Contents/MacOS/Google Chrome` |
+| `SIDEBAR_BROWSER` | 侧栏滚动条专项浏览器：`chromium` / `webkit` / `firefox` | `chromium` |
+| `SIDEBAR_CASE` | 侧栏滚动条专项单场景，见下方说明 | 全部 12 种导航 |
+| `SIDEBAR_OUTPUT_DIR` | 侧栏滚动条专项 JSON 与截图目录 | `/tmp/frontend-sidebar-scrollbars` |
 | `HARNESS_BASE_URL` | 手工 dev server 的基地址（`action-buttons-browser.mjs`、`priority-browser.mjs`） | `http://127.0.0.1:5187` / `http://127.0.0.1:5179` |
 | `PAGINATION_RUN_LABEL` | 分页条布局证据子目录名（`[A-Za-z0-9_-]{1,48}`） | `latest` |
 | `PAGINATION_OUTPUT_DIR` | 分页条布局证据输出目录 | `.ai/qa/pagination-bar-layout-20261107/<label>/` |
@@ -69,8 +73,9 @@ login-target` 七种列表页容器里渲染分页条，在 1440 / 1024 / 900 / 
 | `SETTLEMENT_ROLE_BROWSER_CASES` | 选择结算角色用例（逗号分隔） | 全集 |
 | `SETTLEMENT_BROWSER_RESULT_DIR` | 结算浏览器证据输出目录 | `.ai/qa/settlement-role-integration-20261028/browser/` |
 
-`playwright-core` **不下载浏览器**，所以任何环境都必须有可用 Chrome/Chromium；CI 里由
-`layout` job 先解析再导出 `CHROMIUM_PATH`。
+`playwright-core` **不下载浏览器**，默认场景需要可用 Chrome/Chromium；CI 里由
+`layout` job 先解析再导出 `CHROMIUM_PATH`。侧栏专项选择 WebKit / Firefox 时，
+需要预先安装与当前 Playwright 版本对应的引擎；脚本不会自动安装或跳过启动失败。
 
 ## 本地怎么跑
 
@@ -137,6 +142,20 @@ node src/test/ui-harness/priority-browser.mjs
 node src/test/ui-harness/sidebar-user-browser.mjs
 node src/test/ui-harness/sidebar-username-browser.mjs
 ```
+
+侧栏滚动条专项可单独执行一个导航，避免启动全业务验收：
+
+```bash
+SIDEBAR_CASE=platform node src/test/ui-harness/sidebar-scrollbars-browser.mjs
+SIDEBAR_CASE=platform SIDEBAR_BROWSER=webkit node src/test/ui-harness/sidebar-scrollbars-browser.mjs
+```
+
+可选场景为 `platform / crm / portal / settlement / reimbursement / contract / project /
+analysis / iam / applications / dictionaries / project-queue`。省略 `SIDEBAR_CASE` 时只运行
+上述导航专项，覆盖 1280×560 和 760×560、明暗主题、菜单展开/折叠、点击、键盘聚焦与滚轮。
+共享壳层与项目队列使用真实组件，其余导航采用真实模板或同结构合成列表及模块 CSS；
+所有外部请求拦截，不需要 dev server、后端或数据库。JSON 记录侧栏各滚动容器的
+滚动条样式与滚动范围；另保存基础平台侧栏截图。这是隔离 UI 验证，不替代真实登录业务验收。
 
 ### 4. 结算角色 opt-in 夹具
 
