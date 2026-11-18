@@ -223,6 +223,7 @@ import {
   listSupplementContracts,
   closeSupplement,
   getApprovedContractServiceItems,
+  listApprovalTasks,
 } from '@/modules/project_management/api/projectManagement'
 import '@/modules/project_management/styles/project-management.css'
 
@@ -381,11 +382,14 @@ const nativeCreateOpen = ref(false)
 const nativeScopeProjectID = ref('')
 const {
   notificationOpen, notificationItems, notificationCount, notificationLoading, notificationError, notificationActionID,
-  closeNotifications, refreshNotificationCount, openNotification, toggleNotifications, disposeNotifications,
+  approvalItems, approvalLoading, approvalError, approvalActionID,
+  closeNotifications, refreshNotificationCount, openNotification, openApprovalItem,
+  toggleNotifications, disposeNotifications,
 } = useProjectNotifications({
-  getNotification, getUnreadCount, listNotificationInbox, markNotificationRead,
+  getNotification, getUnreadCount, listNotificationInbox, markNotificationRead, listApprovalTasks,
   formatUserError, showToast,
   openTarget: openProjectNotificationTarget,
+  openApprovalTask: (task) => openApprovalRequest(task?.id),
   getContext: () => sectionDataContext.value,
 })
 const toastMessage = ref('')
@@ -2284,6 +2288,8 @@ async function loadWorkspace({ reportError = true, background = false } = {}) {
 async function refreshAfterWrite() {
   try {
     await loadWorkspace({ reportError: false, background: true })
+    // 审批办结后铃铛里的待办与提醒必须同步消失，不能等下一次整页刷新。
+    void refreshNotificationCount()
     refreshWarning.value = ''
   } catch {
     refreshWarning.value = '操作已保存，但最新工作区数据读取失败。当前页面可能不是最新状态，请重新加载后再继续；不要凭旧页面重复提交。'
@@ -4039,9 +4045,16 @@ onBeforeUnmount(() => {
             :error="notificationError"
             :items="notificationItems"
             :action-id="notificationActionID"
+            :approvals="approvalItems"
+            :approval-loading="approvalLoading"
+            :approval-error="approvalError"
+            :approval-action-id="approvalActionID"
             :show-view-all="navigation.sections.includes('notifications')"
+            :show-approval-all="navigation.sections.includes('approvals')"
             @open-item="openNotification"
             @view-all="closeNotifications(); navigate('notifications')"
+            @open-approval="openApprovalItem"
+            @view-all-approvals="closeNotifications(); navigate('approvals')"
           />
         </Transition>
       </header>

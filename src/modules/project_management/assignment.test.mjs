@@ -23,8 +23,8 @@ function allocationPage(items, { assignTeam = async () => {}, assignExecutionTea
   const refresh = viewSource.slice(viewSource.indexOf('async function refreshAfterWrite()'),
     viewSource.indexOf('\nfunction retryAfterWrite()'))
   let refreshCount = 0
-  const run = new Function(...Object.keys(state), 'selectedServiceItems', 'selectedServiceItem', 'formatUserError', 'assignServiceItemTeams', 'assignTeam', 'assignExecutionTeam', 'listServiceItemsSnapshot', 'selectedIDs', 'loadWorkspace', 'window',
-    `let toastTimer; ${toast}; ${refresh}; ${operation}\n; return runOperation;`)(...Object.values(state), selectedServiceItems, selectedServiceItem, formatUserError, assignServiceItemTeams, assignTeam, assignExecutionTeam, listServiceItemsSnapshot, text => text.split(','), async () => { refreshCount++; await refreshed() }, { clearTimeout: () => {}, setTimeout: () => 1 })
+  const run = new Function(...Object.keys(state), 'selectedServiceItems', 'selectedServiceItem', 'formatUserError', 'assignServiceItemTeams', 'assignTeam', 'assignExecutionTeam', 'listServiceItemsSnapshot', 'selectedIDs', 'loadWorkspace', 'refreshNotificationCount', 'window',
+    `let toastTimer; ${toast}; ${refresh}; ${operation}\n; return runOperation;`)(...Object.values(state), selectedServiceItems, selectedServiceItem, formatUserError, assignServiceItemTeams, assignTeam, assignExecutionTeam, listServiceItemsSnapshot, text => text.split(','), async () => { refreshCount++; await refreshed() }, async () => {}, { clearTimeout: () => {}, setTimeout: () => 1 })
   return { ...state, run, refreshCount: () => refreshCount }
 }
 

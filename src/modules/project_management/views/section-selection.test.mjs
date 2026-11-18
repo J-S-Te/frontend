@@ -39,6 +39,7 @@ test('栏目读取期间不清除选中服务项，稳定快照确认移出节�
 // 参数：options 指定栏目、通知坐标、授权候选及可选的真实内存路由。
 // 返回值：响应式页面状态、表单与提示记录，以及作用域清理入口。
 function mountNotificationSelection({ section = 'methods', target = 'SI-2', items, router } = {}) {
+  globalThis.window = { location: { origin: 'http://localhost:8081' } }
   const scope = effectScope()
   const rows = items || [{ id: 'SI-1' }, { id: 'SI-2' }]
   const calls = { forms: [], notices: [], evidenceReads: 0 }
@@ -69,7 +70,8 @@ function mountNotificationSelection({ section = 'methods', target = 'SI-2', item
   const controls = scope.run(() => new Function('watch', ...Object.keys(state), 'fillOperationForm',
     'refreshSelectedFieldEvidence', 'showToast', 'nextTick', 'openNotificationTarget', 'router',
     'useProjectNotifications', 'getNotification', 'getUnreadCount', 'listNotificationInbox',
-    'markNotificationRead', 'formatUserError', 'projectApprovalTarget', 'window',
+    'markNotificationRead', 'listApprovalTasks', 'openApprovalRequest',
+    'formatUserError', 'projectApprovalTarget',
     `${select}\n${declaration}\n${decompositionWatch}\n${approvalNavigation}\n${targetWatch}
     return { selectServiceItem, openTarget: ${binding}.openTarget }`)(
     watch, ...Object.values(state),
@@ -77,8 +79,10 @@ function mountNotificationSelection({ section = 'methods', target = 'SI-2', item
     () => { calls.evidenceReads += 1 },
     (message, tone) => calls.notices.push({ message, tone }),
     nextTick, openNotificationTarget, router, (dependencies) => dependencies,
-    () => {}, () => {}, () => {}, () => {}, error => error.message,
-    projectApprovalTarget, { location: { origin: 'http://localhost:8081' } },
+    () => {}, () => {}, () => {}, () => {},
+    () => ({ items: [], total: 0 }), () => true,
+    error => error.message,
+    projectApprovalTarget,
   ))
   return { ...state, ...controls, calls, stop: () => scope.stop() }
 }

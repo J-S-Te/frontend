@@ -270,12 +270,15 @@ test('顶栏右上角只剩通知铃铛与账号头像，账号名与退出入�
   assert.match(styles, /\.pm-notifications \{[\s\S]*?right: calc\(var\(--pm-pad-page\) \+ 43px\);/)
 })
 
-test('通知铃铛显示未读通知并在五秒后带动画收起', () => {
+test('通知铃铛同时显示待审批与未读通知，不再自动收起', () => {
   assert.match(notificationSource, /function toggleNotifications\(\) \{/)
-  assert.match(notificationSource, /notificationAutoCloseTimer = window\.setTimeout\(closeNotifications, 5000\)/)
-  assert.match(notificationSource, /window\.clearTimeout\(notificationAutoCloseTimer\)/)
+  assert.doesNotMatch(notificationSource, /setTimeout\(closeNotifications, 5000\)/)
   assert.match(source, /@click="toggleNotifications"/)
   assert.match(source, /<Transition name="pm-notification-pop">/)
+  assert.match(source, /:approvals="approvalItems"/)
+  assert.match(source, /@open-approval="openApprovalItem"/)
+  assert.match(popoverSource, /<b>待办与通知<\/b>/)
+  assert.match(popoverSource, /<b>待审批<\/b>/)
   assert.match(popoverSource, /<b>未读通知<\/b>/)
   assert.match(popoverSource, /id="project-notifications" class="pm-notifications" role="status" aria-live="polite"/)
   assert.match(styles, /\.pm-notification-pop-enter-active,[\s\S]*?transition: opacity \.2s ease, transform \.2s ease;/)
@@ -285,10 +288,11 @@ test('通知铃铛显示未读通知并在五秒后带动画收起', () => {
 test('通知铃铛只读取未点击事件，点击后持久化已读并立即移除', () => {
   assert.match(notificationApiSource, /if \(unreadOnly\) query\.set\('unread_only', 'true'\)/)
   assert.match(notificationSource, /listNotificationInbox\(\{ page: 1, pageSize: 20, unreadOnly: true \}\)/)
-  assert.match(notificationSource, /notificationItems\.value = \(inbox\?\.items \|\| \[\]\)\.filter\(\(item\) => !item\.read_at\)/)
+  assert.match(notificationSource, /notificationItems\.value = \(inboxResult\.value\?\.items \|\| \[\]\)\.filter\(\(item\) => !item\.read_at\)/)
   assert.match(notificationSource, /await markNotificationRead\(deliveryID\)/)
   assert.match(notificationSource, /notificationItems\.value = notificationItems\.value\.filter\(\(entry\) => entry\.delivery_id !== deliveryID\)/)
-  assert.match(notificationSource, /notificationCount\.value = Math\.max\(0, notificationCount\.value - 1\)/)
+  assert.match(notificationSource, /unreadCount\.value = Math\.max\(0, unreadCount\.value - 1\)/)
+  assert.match(notificationSource, /approvalService|listApprovalTasks\(\{ page: 1, page_size: 5, view: 'assigned' \}\)/)
   assert.match(popoverSource, /message="暂无未读通知"/)
   assert.doesNotMatch(source, /pendingDeviations\.length \+ decompositionItems\.value\.length \+ inboxItems\.value\.length/)
   assert.match(styles, /\.pm-notifications \{[\s\S]*?max-height: min\(520px,[\s\S]*?overflow-y: auto;/)
