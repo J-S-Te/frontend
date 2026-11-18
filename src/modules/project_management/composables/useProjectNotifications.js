@@ -1,14 +1,11 @@
 import { onBeforeUnmount, ref } from 'vue'
+import { projectApprovalTarget } from '../approvalTasks.js'
 
-/**
- * 项目页「业务待办」通知弹层的状态与行为（治理批次 3 第二步）。
- * 收编：未读列表与计数、弹层开关与 5 秒自动收起、已读推进与分区跳转。
- * 仍属父组件的职责（不在此处）：工作区装载节奏、全局 ESC 的其他弹层分支。
- *
- * 注入项与组件内同名标识一一对应：getUnreadCount/listNotificationInbox/markNotificationRead/
- * formatUserError/navigate/showToast；不直接导入 API 模块，保持可独立测试。
- */
-export function useProjectNotifications({ getUnreadCount, listNotificationInbox, markNotificationRead, formatUserError, navigate, showToast }) {
+// 用途：加载项目通知并把受控审批提醒直达对应申请。
+// 参数：接口、错误格式化、导航、提示和身份上下文读取方法由父视图提供。
+// 返回值：通知状态与读取、关闭、打开和清理方法。
+export function useProjectNotifications({ getUnreadCount, listNotificationInbox, markNotificationRead,
+  formatUserError, navigate, navigateTarget, showToast, getContext = () => '' }) {
 const notificationOpen = ref(false)
 const notificationItems = ref([])
 const notificationCount = ref(0)
@@ -16,6 +13,7 @@ const notificationLoading = ref(false)
 const notificationError = ref('')
 const notificationActionID = ref('')
 let notificationAutoCloseTimer = 0
+let disposed = false
 
 function closeNotifications() {
   window.clearTimeout(notificationAutoCloseTimer)
@@ -60,21 +58,35 @@ function notificationSection(item) {
   return ''
 }
 
+// 用途：标记通知已读并打开业务；已读失败仍允许进入受控审批申请。
+// 参数：item 为当前账号收件箱中的通知。
+// 返回值：无；已读和导航错误分别反馈，不执行任何审批写入。
 async function openNotification(item) {
   const deliveryID = String(item?.delivery_id || '')
-  if (!deliveryID || notificationActionID.value) return
+  if (disposed || !deliveryID || notificationActionID.value) return
+  const context = getContext()
+  const target = projectApprovalTarget(item, window.location.origin)
   notificationActionID.value = deliveryID
   try {
     await markNotificationRead(deliveryID)
+    if (disposed || context !== getContext()) return
     notificationItems.value = notificationItems.value.filter((entry) => entry.delivery_id !== deliveryID)
     notificationCount.value = Math.max(0, notificationCount.value - 1)
-    const section = notificationSection(item)
-    closeNotifications()
-    if (section) navigate(section)
   } catch (error) {
-    showToast(formatUserError(error, { fallback: '通知已读状态保存失败，请重试' }), 'error')
+    if (disposed || context !== getContext()) return
+    const reason = formatUserError(error, { fallback: '请稍后重试。' })
+    showToast(`通知已读状态未保存：${reason}`, target ? 'warning' : 'error')
+    if (!target) return
   } finally {
     notificationActionID.value = ''
+  }
+  const section = notificationSection(item)
+  closeNotifications()
+  try {
+    if (target) await navigateTarget(target)
+    else if (section) await navigate(section)
+  } catch (error) {
+    showToast(formatUserError(error, { fallback: '审批页面打开失败，请从审批待办重试' }), 'error')
   }
 }
 
@@ -89,8 +101,11 @@ function toggleNotifications() {
   notificationAutoCloseTimer = window.setTimeout(closeNotifications, 5000)
 }
 
-  // disposeNotifications 供视图卸载清理自动收起定时器（原 onBeforeUnmount 中的一行职责随状态迁入）。
+  // 用途：卸载时清理自动收起定时器，并阻止旧通知回执发起导航。
+  // 参数：无。
+  // 返回值：无；后续迟到回执不发布提示或导航。
   function disposeNotifications() {
+    disposed = true
     window.clearTimeout(notificationAutoCloseTimer)
     notificationAutoCloseTimer = 0
   }

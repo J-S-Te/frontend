@@ -1,19 +1,21 @@
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { formatUserError } from '../../shared/utils/userError.js'
 import { formatBusinessDateTime } from '../../shared/utils/businessTime.js'
 import { deleteReadNotifications, getNotification, listInbox, markNotificationRead } from '@/modules/platform/notifications/api/notifications'
 import PaginationBar from '@/modules/shared/components/PaginationBar.vue'
 import ConfirmDialog from '@/modules/shared/components/ConfirmDialog.vue'
 import { useConfirmDialog } from '@/modules/shared/composables/useConfirmDialog.js'
+import { projectApprovalTarget } from '../approvalTasks.js'
 
-const emit = defineEmits(['read'])
+const emit = defineEmits(['read', 'open-approval', 'read-error'])
 const { dialog: confirmDialog, askConfirm, accept: acceptConfirm, cancel: cancelConfirm } = useConfirmDialog()
 const items = ref([]), total = ref(0), page = ref(1), unreadOnly = ref(false)
 const tab = ref('all'), tabs = [{ key: 'all', label: '全部' }, { key: 'local', label: '本系统' }, { key: 'cross', label: '跨系统' }]
 const loading = ref(false), error = ref(''), detail = ref(null), actionID = ref('')
 const pageSize = 20
 let loadSequence = 0
+let disposed = false
 const pages = computed(() => Math.max(1, Math.ceil(total.value / pageSize)))
 const formatDate = (value) => value ? (formatBusinessDateTime(value) || '—') : '—'
 
@@ -28,6 +30,9 @@ const projectTarget = computed(() => {
   } catch { return '' }
 })
 
+// 用途：读取当前用户通知分页，并忽略已过期或卸载后的回执。
+// 参数：无；使用当前页签、分页与未读筛选。
+// 返回值：无；失败显示可重试提示。
 async function load() {
   const sequence = ++loadSequence
   loading.value = true
@@ -35,34 +40,57 @@ async function load() {
   try {
     const scope = tab.value === 'local' ? { sourceApplication: 'project_management' } : tab.value === 'cross' ? { excludeSourceApplication: 'project_management' } : {}
     const result = await listInbox({ page: page.value, pageSize, unreadOnly: unreadOnly.value, ...scope })
-    if (sequence !== loadSequence) return
+    if (disposed || sequence !== loadSequence) return
     if (!Array.isArray(result?.items) || !Number.isFinite(Number(result.total))) throw new Error('通知列表响应异常，请重试。')
     items.value = result.items
     total.value = Number(result.total)
     if (page.value > pages.value) { page.value = pages.value; await load() }
   } catch (value) {
-    if (sequence !== loadSequence) return
+    if (disposed || sequence !== loadSequence) return
     items.value = []
     error.value = formatUserError(value, { fallback: '个人通知加载失败，请重试。' })
-  } finally { if (sequence === loadSequence) loading.value = false }
+  } finally { if (!disposed && sequence === loadSequence) loading.value = false }
 }
 function changeFilter() { page.value = 1; detail.value = null; load() }
 function changeTab(next) { tab.value = next; page.value = 1; detail.value = null; load() }
 function changePage(next) { page.value = next; load() }
+// 用途：查看通知；受控审批提醒直接打开对应申请，已读错误单独反馈。
+// 参数：item 为当前账号收件箱中的通知。
+// 返回值：无；不对申请执行任何审批动作。
 async function open(item) {
   if (actionID.value) return
   actionID.value = item.delivery_id
   error.value = ''
+  const target = projectApprovalTarget(item, window.location.origin)
+  if (target) {
+    try {
+      if (!item.read_at) {
+        await markNotificationRead(item.delivery_id)
+        if (!disposed) emit('read')
+      }
+    } catch (value) {
+      const reason = formatUserError(value, { fallback: '请稍后重试。' })
+      if (!disposed) emit('read-error', `通知已读状态未保存：${reason}，仍可进入审批申请。`)
+    } finally {
+      actionID.value = ''
+      if (!disposed) emit('open-approval', target)
+    }
+    return
+  }
   try {
     const result = await getNotification(item.delivery_id)
+    if (disposed) return
     detail.value = result
     if (!result.read_at) {
       await markNotificationRead(item.delivery_id)
+      if (disposed) return
       detail.value = { ...result, read_at: new Date().toISOString() }
       emit('read')
       await load()
     }
-  } catch (value) { error.value = formatUserError(value, { fallback: '通知读取失败，请重试。' }) }
+  } catch (value) {
+    if (!disposed) error.value = formatUserError(value, { fallback: '通知读取失败，请重试。' })
+  }
   finally { actionID.value = '' }
 }
 const hasReadItems = computed(() => items.value.some((item) => item.read_at))
@@ -88,6 +116,7 @@ async function deleteRead() {
   } finally { loading.value = false }
 }
 onMounted(load)
+onBeforeUnmount(() => { disposed = true; loadSequence += 1 })
 </script>
 
 <template>

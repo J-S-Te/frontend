@@ -54,6 +54,7 @@ import PenetrationWorkPackageCard from '@/modules/project_management/components/
 import OperationDetailDrawer from '@/modules/project_management/components/OperationDetailDrawer.vue'
 import ProgressCell from '@/modules/project_management/components/ProgressCell.vue'
 import ProjectNotificationCenter from '@/modules/project_management/components/ProjectNotificationCenter.vue'
+import ProjectApprovalInbox from '@/modules/project_management/components/ProjectApprovalInbox.vue'
 import QualificationImportDialog from '@/modules/project_management/components/QualificationImportDialog.vue'
 import DetectionCategoryImportDialog from '@/modules/project_management/components/DetectionCategoryImportDialog.vue'
 import NativeProjectCreateDialog from '@/modules/project_management/components/NativeProjectCreateDialog.vue'
@@ -190,10 +191,8 @@ import {
   revokeImplementationPlan,
   revokePreparation,
   requestRollback,
-  decideRollback,
   withdrawRollback,
   requestReportCorrection,
-  decideReportCorrection,
   planImplementation,
   startImplementationPreparation,
   startFieldExecution,
@@ -240,6 +239,7 @@ const allNavGroups = [
     { key: 'dashboard', label: '项目执行总览', icon: 'nav-overview' },
     { key: 'monitoring', label: '在途项目实时监控', icon: 'nav-monitoring' },
     { key: 'notifications', label: '个人通知中心', icon: 'nav-notifications' },
+    { key: 'approvals', label: '审批待办', icon: 'nav-review' },
   ] },
   { label: '项目管理', items: [
     { key: 'projects', label: '项目列表', icon: 'nav-project' },
@@ -270,6 +270,7 @@ const allNavGroups = [
 
 const pageMeta = {
   notifications: ['个人通知中心', '查看发送给当前用户的统一站内信与业务提醒'],
+  approvals: ['审批待办', '集中办理报告返工、报告更正和现场回退申请'],
   dashboard: ['项目执行总览', '全集团项目交付、资源与风险态势'],
   monitoring: ['在途项目 · 实时监控', '在途项目的里程碑、交付进度与资源状态'],
   projects: ['项目列表', '统一管理项目、合同来源、服务项及交付状态'],
@@ -372,7 +373,9 @@ const nativeScopeProjectID = ref('')
 const {
   notificationOpen, notificationItems, notificationCount, notificationLoading, notificationError, notificationActionID,
   closeNotifications, refreshNotificationCount, openNotification, toggleNotifications, disposeNotifications,
-} = useProjectNotifications({ getUnreadCount, listNotificationInbox, markNotificationRead, formatUserError, navigate, showToast })
+} = useProjectNotifications({ getUnreadCount, listNotificationInbox, markNotificationRead,
+  formatUserError, navigate, navigateTarget: openApprovalTarget, showToast,
+  getContext: () => sectionDataContext.value })
 const toastMessage = ref('')
 const toastType = ref('success')
 const isLoggingOut = ref(false)
@@ -1620,9 +1623,7 @@ const canRevokeTeam = computed(() => permissionSet.value.has('project.team.revok
 const canRevokeExecution = computed(() => permissionSet.value.has('project.execution.revoke'))
 const canRevokeImplementation = computed(() => permissionSet.value.has('project.implementation.revoke'))
 const canRequestRollback = computed(() => permissionSet.value.has('project.rollback.request'))
-const canApproveRollback = computed(() => permissionSet.value.has('project.rollback.approve'))
 const canRequestReportCorrection = computed(() => permissionSet.value.has('project.report.correction.request'))
-const canApproveReportCorrection = computed(() => permissionSet.value.has('project.report.correction.approve'))
 const canPlanImplementation = computed(() => permissionSet.value.has('project.implementation.plan'))
 const canExecuteField = computed(() => permissionSet.value.has('project.field.execute'))
 const canCompleteField = computed(() => permissionSet.value.has('project.field.complete'))
@@ -2158,7 +2159,7 @@ function refreshSlaDetails() { void loadSlaOverdueDetails({ force: true }) }
 function retryPersonnelNames() { void personnelNames.retry() }
 
 // 用途：刷新核心原子快照，再读取当前已授权栏目的依赖。
-// 参数：reportError 控制读取失败是否显示为工作区错误。
+// 参数：reportError 控制读取失败提示，background 控制同步时是否保留当前工作区。
 // 返回值：读取完成；写后刷新失败仍交由既有调用方区分已保存结果。
 async function loadWorkspace({ reportError = true, background = false } = {}) {
   const ticket = workspaceScope.begin('WORKSPACE')
@@ -2205,6 +2206,9 @@ async function loadWorkspace({ reportError = true, background = false } = {}) {
     const allowed = new Set(navigationData.sections)
     // 项目详情是从列表下钻的页面（携带 query.project），不要求出现在服务端导航清单里。
     if (route.params.section !== 'project_detail' && !allowed.has(route.params.section)) {
+      if (route.params.section === 'approvals') {
+        showToast('当前账号无权进入审批待办，请确认审批归属。', 'warning')
+      }
       await router.replace({ name: 'project_management', params: { section: navigationData.default_section || navigationData.sections[0] || 'dashboard' } })
     }
     lastUpdatedAt.value = new Date()
@@ -2560,6 +2564,32 @@ function navigate(section) {
   mobileMenuOpen.value = false
   // 拆解规则配置来自独立接口：切到该页签时按需加载，避免影响其它工作区的首屏。
   if (section === 'split-rules') loadSplitConfig()
+}
+
+// 用途：打开已校验的审批通知路径或本地申请详情，并反馈无权与导航失败。
+// 参数：target 为本系统审批待办的受控路径。
+// 返回值：成功打开返回 true；无导航权限或打开失败返回 false。
+async function openApprovalTarget(target) {
+  if (!navigation.value.sections.includes('approvals')) {
+    showToast('当前账号无权进入审批待办，请确认审批归属。', 'warning')
+    return false
+  }
+  try {
+    await router.push(target)
+    mobileMenuOpen.value = false
+    return true
+  } catch (error) {
+    showToast(formatUserError(error, { fallback: '审批页面打开失败，请从审批待办重试。' }), 'error')
+    return false
+  }
+}
+
+// 用途：将原业务页的申请入口统一带到精确审批详情。
+// 参数：requestID 为当前可见申请的标识。
+// 返回值：导航结果；没有申请标识时返回 false。
+function openApprovalRequest(requestID) {
+  if (!requestID) return Promise.resolve(false)
+  return openApprovalTarget(`/project_management/approvals?${new URLSearchParams({ request_id: requestID })}`)
 }
 
 // 项目详情是从列表/看板下钻的独立页面（原型 PG-PRJ-02），不在侧边栏导航里，
@@ -3583,38 +3613,16 @@ async function submitRollbackRequest(kind) {
   saving.value = true
   try {
     await requestRollback(item.id, { kind, reason, expected_version: Number(item.version) || 0 })
-    showToast('回退申请已提交，等待技术总监或系统管理员审批')
+    showToast(kind === 'REPORT_TO_FIELD'
+      ? '报告返工申请已提交，等待技术总监审批，可在审批待办中查看。'
+      : '现场回退申请已提交，等待技术总监审批，可在审批待办中查看。')
     await refreshAfterWrite()
   } catch (error) { showToast(formatUserError(error, { fallback: '回退申请失败' }), 'error') } finally { saving.value = false }
 }
 
-// 用途：以当前版本批准或驳回他人仍待处理的回退申请。
-// 参数：request 为回退申请，decision 为 APPROVED 或 REJECTED。
-// 返回值：无；取消或申请失效不写入，失败以提示反馈。
-async function decidePendingRollback(request, decision) {
-  const requestID = request.id
-  const itemID = request.service_item_id
-  const permitted = () => canApproveRollback.value && ['APPROVED', 'REJECTED'].includes(decision)
-    && request.actor_user_id !== session.value?.user_id
-    && pendingRollbackRequests.value.some((row) => row.id === requestID && row.service_item_id === itemID && row.actor_user_id !== session.value?.user_id)
-  if (saving.value || promptDialog.value || !permitted()) return
-  const selected = serviceItems.value.find((row) => row.id === itemID)
-  if (!selected) { showToast('服务项已不可见，无法审批', 'warning'); return }
-  const context = captureReasonContext([selected])
-  const item = context.items[0]
-  const label = decision === 'APPROVED' ? '批准回退申请' : '驳回回退申请'
-  const comment = await askOperationReason({
-    title: label, confirmText: label, label: '审批意见', danger: decision === 'APPROVED',
-  }, context, permitted)
-  if (comment === null) return
-  saving.value = true
-  try {
-    await decideRollback(item.id, requestID, { decision, comment, expected_version: Number(item.version) || 0 })
-    showToast(decision === 'APPROVED' ? '回退申请已批准，服务项已按补偿规则回退' : '回退申请已驳回')
-    await refreshAfterWrite()
-  } catch (error) { showToast(formatUserError(error, { fallback: '审批失败，请刷新后重试' }), 'error') } finally { saving.value = false }
-}
-
+// 用途：为已签发或归档的报告提交技术总监更正审批申请。
+// 参数：无；使用当前服务项、版本和更正原因。
+// 返回值：无；失败显示真实错误，版本冲突时刷新工作区。
 async function submitReportCorrection() {
   if (saving.value) return
   const item = selectedServiceItem.value
@@ -3629,28 +3637,6 @@ async function submitReportCorrection() {
     await refreshAfterWrite()
   } catch (error) {
     showToast(formatUserError(error, { fallback: '报告更正申请失败' }), 'error')
-    if (error?.status === 409) await loadWorkspace()
-  } finally { saving.value = false }
-}
-
-// 用途：审批报告更正申请，通过后生成待整改的新报告版本。
-// 参数：request 为待处理更正申请，decision 为批准或驳回决定。
-// 返回值：无；审批失败以提示反馈，版本冲突时重新加载工作区。
-async function decidePendingReportCorrection(request, decision) {
-  if (saving.value) return
-  const item = itemByID.value.get(request.service_item_id)
-  const comment = String(operationForm.value.reportCorrectionComment || '').trim()
-  if (!item) { showToast('服务项已不可见，无法审批', 'warning'); return }
-  if (request.actor_user_id === session.value?.user_id) { showToast('申请人与审批人不能是同一人', 'warning'); return }
-  if (!comment) { showToast('请填写报告更正审批意见', 'warning'); return }
-  saving.value = true
-  try {
-    await decideReportCorrection(item.id, request.id, { decision, comment, expected_version: Number(item.version) || 0 })
-    operationForm.value.reportCorrectionComment = ''
-    showToast(decision === 'APPROVED' ? '报告更正已批准，已生成新版本待整改' : '报告更正申请已驳回')
-    await refreshAfterWrite()
-  } catch (error) {
-    showToast(formatUserError(error, { fallback: '报告更正审批失败' }), 'error')
     if (error?.status === 409) await loadWorkspace()
   } finally { saving.value = false }
 }
@@ -3893,7 +3879,7 @@ onBeforeUnmount(() => {
       <div class="pm-page">
         <PageHead eyebrow="项目运营" data-first-run-anchor="subsystem-title" :title="activeSection === 'project_detail' && detailProject ? `${detailProject.id} · ${detailProject.customer}` : currentMeta[0]" :description="activeSection === 'notifications' ? currentMeta[1] : activeSection === 'project_detail' && detailProject ? `${currentMeta[1]} · 进度 ${detailProject.progress ?? 0}% · 计划完成 ${detailProject.due || '待排期'} · 更新于 ${lastUpdatedLabel}` : `${currentMeta[1]} · 数据更新于 ${lastUpdatedLabel}`">
           <template #actions>
-            <button v-if="activeSection !== 'notifications'" class="pm-button" :disabled="loading || refreshing" @click="refreshWorkspace"><ConsoleIcon name="reset" />{{ loading ? '加载中' : (refreshing ? '同步中' : '刷新') }}</button><span v-if="refreshing" class="pm-sync-status" role="status">正在同步最新状态…</span>
+            <button v-if="!['notifications', 'approvals'].includes(activeSection)" class="pm-button" :disabled="loading || refreshing" @click="refreshWorkspace"><ConsoleIcon name="reset" />{{ loading ? '加载中' : (refreshing ? '同步中' : '刷新') }}</button><span v-if="refreshing" class="pm-sync-status" role="status">正在同步最新状态…</span>
             <button v-if="activeSection === 'projects'" class="pm-button" @click="exportProjects"><ConsoleIcon name="export" />导出</button>
             <button v-if="activeSection === 'projects' && canCreateProject && nativeProjectEnabled" class="pm-button" @click="nativeCreateOpen = true">＋ 原生委托项目</button>
             <button v-if="canManageActiveConfig && isVisibleConfigSection" class="pm-button primary" @click="openConfigCreate">{{ isStandardChangeSection ? '＋ 登记标准变更' : '＋ 新建规则' }}</button><button v-if="activeSection === 'projects' && canCreateProject" class="pm-button primary" @click="openCreateProject">＋ 新建项目</button>
@@ -3946,7 +3932,13 @@ onBeforeUnmount(() => {
         <ListState v-else-if="loadError || !workspaceReady" error-title="后端数据加载失败" :error="loadError || '工作区数据尚未确认，请重新读取。'" retry-text="重新加载" @retry="loadWorkspace" />
         <ListState v-else-if="sectionExtrasError" error-title="当前栏目数据读取失败" :error="sectionExtrasError" retry-text="重试当前栏目" @retry="loadSectionExtras" />
         <ReimbursementSpendPanel v-else-if="session && !session.permissions?.includes('project.read')" :session="session" />
-        <ProjectNotificationCenter v-else-if="activeSection === 'notifications'" @read="refreshNotificationCount" />
+        <ProjectNotificationCenter v-else-if="activeSection === 'notifications'"
+          :key="sectionDataContext" @read="refreshNotificationCount"
+          @open-approval="openApprovalTarget" @read-error="showToast($event, 'warning')" />
+        <ProjectApprovalInbox v-else-if="activeSection === 'approvals'" :key="sectionDataContext"
+          :request-id="String(route.query.request_id || '')" :context="sectionDataContext"
+          :user-id="String(session?.user_id || '')" @open-request="openApprovalRequest"
+          @back="navigate('approvals')" @changed="refreshAfterWrite" />
         <template v-else-if="activeSection === 'dashboard'">
           <section class="pm-kpis">
             <KpiCard label="全部项目" :value="dashboard.project_count" suffix="个" badge="实时" tone="primary" actionable @activate="navigate('projects')">
@@ -4600,7 +4592,23 @@ onBeforeUnmount(() => {
               <button v-if="canRequestRollback && selectedServiceItem.status === '实施中'" type="button" class="pm-button" :disabled="saving" @click="submitRollbackRequest('FIELD_TO_PREPARATION')">申请回退至实施准备</button>
               <button v-if="canRequestRollback && selectedServiceItem.status === '现场实施完成' && ['RECTIFYING', 'COMPILING', 'REVIEWED'].includes(selectedServiceItem.report_status)" type="button" class="pm-button" :disabled="saving" @click="submitRollbackRequest('REPORT_TO_FIELD')">申请报告返工</button>
             </div>
-            <section v-if="activeSection === 'inbox' && pendingRollbackRequests.length" class="pm-panel pm-approval-panel"><header><div><p class="pm-panel-kicker">回退审批</p><h2>待处理回退申请</h2></div><span>{{ pendingRollbackRequests.length }} 项</span></header><div v-for="request in pendingRollbackRequests" :key="request.id" class="pm-form-row"><span>{{ request.service_item_id }} · {{ request.payload?.kind === 'FIELD_TO_PREPARATION' ? '现场回退' : '报告返工' }} · {{ request.payload?.reason }}</span><template v-if="canApproveRollback && request.actor_user_id !== session?.user_id"><button type="button" class="pm-button primary" :disabled="saving" @click="decidePendingRollback(request, 'APPROVED')">批准回退</button><button type="button" class="pm-button danger" :disabled="saving" @click="decidePendingRollback(request, 'REJECTED')">驳回回退</button></template><button v-if="canRequestRollback && request.actor_user_id === session?.user_id" type="button" class="pm-button" :disabled="saving" @click="withdrawPendingRollback(request)">撤回申请</button></div></section>
+            <section v-if="activeSection === 'inbox' && pendingRollbackRequests.length"
+              class="pm-panel pm-approval-panel">
+              <header><div><p class="pm-panel-kicker">回退审批</p><h2>待处理回退申请</h2></div>
+                <span>{{ pendingRollbackRequests.length }} 项</span></header>
+              <div v-for="request in pendingRollbackRequests" :key="request.id" class="pm-form-row">
+                <span>{{ request.service_item_id }} · {{ request.payload?.kind === 'FIELD_TO_PREPARATION'
+                  ? '现场回退' : '报告返工' }} · {{ request.payload?.reason }}</span>
+                <span class="pm-form-hint">审批归属：技术总监</span>
+                <button v-if="navigation.sections.includes('approvals')" type="button"
+                  class="pm-button" :disabled="saving" @click="openApprovalRequest(request.id)">
+                  查看审批申请
+                </button>
+                <button v-if="canRequestRollback && request.actor_user_id === session?.user_id"
+                  type="button" class="pm-button" :disabled="saving"
+                  @click="withdrawPendingRollback(request)">撤回申请</button>
+              </div>
+            </section>
             <div v-if="selectedServiceItem" class="pm-form pm-operation-form">
               <template v-if="['allocation', 'inbox', 'assignments'].includes(activeSection)">
                 <p v-if="personnelError" class="pm-form-hint pm-span-full" role="alert">{{ personnelError }}</p>
@@ -4693,11 +4701,11 @@ onBeforeUnmount(() => {
                   <header><div><p class="pm-panel-kicker">报告更正</p><h2>待处理更正申请</h2></div><span>{{ selectedReportCorrectionRequests.length }} 项</span></header>
                   <div v-for="request in selectedReportCorrectionRequests" :key="request.id" class="pm-form pm-report-form">
                     <p class="pm-form-hint">R{{ Number(request.payload?.old_revision) || 0 }} · {{ request.payload?.reason }} · 申请人：{{ personLabel(request.actor_user_id, '未知') }}</p>
-                    <template v-if="canApproveReportCorrection && request.actor_user_id !== session?.user_id">
-                      <label><span>审批意见 <em>*</em></span><textarea v-model.trim="operationForm.reportCorrectionComment" rows="2" placeholder="填写批准或驳回意见" maxlength="1000"></textarea></label>
-                      <div class="pm-form-row"><button type="button" class="pm-button primary" :disabled="saving" @click="decidePendingReportCorrection(request, 'APPROVED')">批准更正</button><button type="button" class="pm-button danger" :disabled="saving" @click="decidePendingReportCorrection(request, 'REJECTED')">驳回申请</button></div>
-                    </template>
-                    <p v-else class="pm-form-hint">更正申请正在等待其他有审批权限的人员处理。</p>
+                    <p class="pm-form-hint">审批归属：技术总监。请进入审批待办查看申请和处理结果。</p>
+                    <button v-if="navigation.sections.includes('approvals')" type="button"
+                      class="pm-button" :disabled="saving" @click="openApprovalRequest(request.id)">
+                      查看更正审批申请
+                    </button>
                   </div>
                 </section>
                 <div v-if="canSubmitReportCorrection" class="pm-form pm-report-form">

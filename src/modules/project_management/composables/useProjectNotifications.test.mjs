@@ -1,10 +1,15 @@
 import assert from 'node:assert/strict'
-import test from 'node:test'
+import test, { afterEach } from 'node:test'
 import { useProjectNotifications } from './useProjectNotifications.js'
+import { createRenderer } from 'vue'
+
+const mountedApps = []
+afterEach(() => { for (const app of mountedApps.splice(0)) app.unmount() })
 
 // 计时器宿主桩：composable 内通过 window 调度自动收起，测试环境显式提供。
 const timers = { scheduled: [], cleared: [] }
 globalThis.window = {
+  location: { origin: 'http://localhost:8081' },
   setTimeout: (handler, delay) => {
     const id = timers.scheduled.length + 1
     timers.scheduled.push({ id, handler, delay })
@@ -13,8 +18,12 @@ globalThis.window = {
   clearTimeout: (id) => timers.cleared.push(id),
 }
 
-function harness({ unreadCount = { unread_count: 3 }, inboxItems = [], apiError = null, markError = null } = {}) {
-  const calls = { counts: [], inbox: [], marks: [], toasts: [], navigations: [] }
+// 用途：运行真实通知协调逻辑，仅替换远程接口和导航边界。
+// 参数：各项配置控制通知返回、失败或延迟边界。
+// 返回值：通知状态与可观测的导航、提示和远程调用记录。
+function harness({ unreadCount = { unread_count: 3 }, inboxItems = [], apiError = null,
+  markError = null, markRead = null, getContext = () => 'user-a' } = {}) {
+  const calls = { counts: [], inbox: [], marks: [], toasts: [], navigations: [], targets: [] }
   const deps = {
     getUnreadCount: async () => {
       calls.counts.push(true)
@@ -29,13 +38,25 @@ function harness({ unreadCount = { unread_count: 3 }, inboxItems = [], apiError 
     markNotificationRead: async (deliveryID) => {
       calls.marks.push(deliveryID)
       if (markError) throw markError
+      if (markRead) return markRead(deliveryID)
       return {}
     },
     formatUserError: (error, options) => options?.fallback || error.message,
     navigate: (section) => calls.navigations.push(section),
+    navigateTarget: (target) => calls.targets.push(target),
     showToast: (message, tone) => calls.toasts.push({ message, tone }),
+    getContext,
   }
-  const composable = useProjectNotifications(deps)
+  let composable
+  const renderer = createRenderer({ createComment: () => ({}), insert: () => {}, remove: () => {},
+    parentNode: () => null, nextSibling: () => null, createElement: () => ({}),
+    createText: () => ({}), setText: () => {}, setElementText: () => {}, patchProp: () => {} })
+  const app = renderer.createApp({ setup: () => {
+    composable = useProjectNotifications(deps)
+    return () => null
+  } })
+  app.mount({})
+  mountedApps.push(app)
   return { deps, calls, ...composable }
 }
 
@@ -49,6 +70,38 @@ test('refreshNotificationCount 成功回填未读数，失败时静默归零不�
   await failed.refreshNotificationCount()
   assert.equal(failed.notificationCount.value, 0)
   assert.equal(failed.notificationError.value, '')
+})
+
+test('通知已读等待期间切换账号或卸载，不把旧通知导航带到新上下文', async () => {
+  const item = { delivery_id: 'approval-1', source_application: 'project_management',
+    category: 'ROLLBACK_REQUESTED', reference_type: 'project_approval', reference_id: 'req-1',
+    target_url: '/project_management/approvals?request_id=req-1' }
+  for (const change of ['identity', 'dispose']) {
+    let identity = 'user-a', finish
+    const h = harness({ getContext: () => identity,
+      markRead: () => new Promise(resolve => { finish = resolve }) })
+    const pending = h.openNotification(item)
+    if (change === 'identity') identity = 'user-b'
+    else h.disposeNotifications()
+    finish(); await pending
+    assert.deepEqual(h.calls.targets, [], change)
+    assert.deepEqual(h.calls.navigations, [], change)
+  }
+})
+
+test('审批通知点击直达具体申请，已读失败保留提醒且仍能进入审批', async () => {
+  const item = { delivery_id: 'approval-1', source_application: 'project_management',
+    category: 'REPORT_CORRECTION_REQUESTED', reference_type: 'PROJECT_APPROVAL',
+    reference_id: 'request-1', target_url: '/project_management/approvals?request_id=request-1' }
+  for (const markError of [null, new Error('read unavailable')]) {
+    const h = harness({ markError })
+    h.notificationItems.value = [item]; h.notificationCount.value = 1
+    await h.openNotification(item)
+    assert.deepEqual(h.calls.targets, ['/project_management/approvals?request_id=request-1'])
+    assert.equal(h.calls.navigations.length, 0)
+    assert.equal(h.notificationCount.value, markError ? 1 : 0)
+    if (markError) assert.match(h.calls.toasts[0].message, /已读/)
+  }
 })
 
 test('loadUnreadNotifications 拉取未读列表并二次过滤已读；失败时清空列表并显式报错', async () => {

@@ -2,16 +2,20 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { readFile } from 'node:fs/promises'
 import { formatUserError } from '../shared/utils/userError.js'
+import { projectApprovalTarget } from './approvalTasks.js'
 
 const view = await readFile(new URL('./views/ProjectManagementView.vue', import.meta.url), 'utf8')
 const inbox = await readFile(new URL('./components/ProjectNotificationCenter.vue', import.meta.url), 'utf8')
 const popover = await readFile(new URL('./components/ProjectNotificationPopover.vue', import.meta.url), 'utf8')
+// 用途：执行真实通知组件脚本，仅替换远程接口和组件生命周期。
+// 参数：api 为各场景的隔离通知接口。
+// 返回值：真实组件状态、动作和发出的事件。
 function mountInbox(api) {
   const script = inbox.match(/<script setup>([\s\S]*?)<\/script>/)[1].replace(/^import .*$/gm, '')
   const ref = (value) => ({ value })
   const computed = (read) => ({ get value() { return read() } })
   const emitted = []
-  return new Function('formatUserError', 'ref', 'computed', 'onMounted', 'defineEmits', 'useConfirmDialog', 'getNotification', 'listInbox', 'markNotificationRead', 'deleteReadNotifications', 'window', `${script}\nreturn { items, total, page, unreadOnly, tab, tabs, loading, error, detail, projectTarget, load, open, changeFilter, changePage, changeTab }`)(formatUserError, ref, computed, () => {}, () => (event) => emitted.push(event), () => ({ dialog: { value: null }, askConfirm: async () => true, accept() {}, cancel() {} }), api.getNotification, api.listInbox, api.markNotificationRead, api.deleteReadNotifications || (() => Promise.resolve({ deleted_count: 0 })), { location: { origin: 'http://localhost:8081' } })
+  return new Function('formatUserError', 'projectApprovalTarget', 'ref', 'computed', 'onMounted', 'onBeforeUnmount', 'defineEmits', 'useConfirmDialog', 'getNotification', 'listInbox', 'markNotificationRead', 'deleteReadNotifications', 'emitted', 'window', `${script}\nreturn { items, total, page, unreadOnly, tab, tabs, loading, error, detail, projectTarget, load, open, changeFilter, changePage, changeTab, emitted }`)(formatUserError, projectApprovalTarget, ref, computed, () => {}, () => {}, () => (event, value) => emitted.push({ event, value }), () => ({ dialog: { value: null }, askConfirm: async () => true, accept() {}, cancel() {} }), api.getNotification, api.listInbox, api.markNotificationRead, api.deleteReadNotifications || (() => Promise.resolve({ deleted_count: 0 })), emitted, { location: { origin: 'http://localhost:8081' } })
 }
 test('项目系统挂载个人通知页面并提供侧栏和铃铛入口', () => {
   assert.match(view, /key: 'notifications', label: '个人通知中心'/)
@@ -84,4 +88,22 @@ test('个人通知复用当前用户站内信接口，提供真实分页、未�
   assert.doesNotMatch(inbox, /user_id:|tenant_id:|v-html/)
   assert.match(inbox, /url\.origin === window\.location\.origin/)
   assert.match(inbox, /url\.pathname\.startsWith\('\/project_management\/'\)/)
+})
+
+
+test('审批通知在个人中心直接进入对应申请，已读失败仍跳转并独立提醒', async () => {
+  const item = { delivery_id: 'approval-1', source_application: 'project_management',
+    reference_type: 'PROJECT_APPROVAL', reference_id: 'req-1', category: 'ROLLBACK_REQUESTED',
+    target_url: '/project_management/approvals?request_id=req-1', read_at: null }
+  for (const failRead of [false, true]) {
+    const state = mountInbox({ listInbox: async () => ({ items: [], total: 0 }),
+      getNotification: async () => item,
+      markNotificationRead: async () => { if (failRead) throw new Error('read unavailable') },
+    })
+    await state.open(item)
+    assert.ok(state.emitted.some(entry => entry.event === 'open-approval'
+      && entry.value === '/project_management/approvals?request_id=req-1'))
+    assert.equal(state.emitted.some(entry => entry.event === 'read-error'), failRead)
+    assert.equal(state.detail.value, null)
+  }
 })

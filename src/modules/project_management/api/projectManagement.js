@@ -871,6 +871,15 @@ export function requestRollback(itemID, payload) {
   return request(`/service-items/${encodeURIComponent(itemID)}/rollback-requests`, { method: 'POST', body: JSON.stringify(payload) })
 }
 
+// 用途：读取当前用户受权的审批待办或精确申请详情。
+// 参数：params 为 page、page_size、view 和可选 request_id 查询条件。
+// 返回值：服务端分页结果；鉴权、校验和网络失败由统一请求错误抛出。
+export function listApprovalTasks(params = {}) {
+  const search = new URLSearchParams(Object.entries(params)
+    .filter(([, value]) => value !== undefined && value !== null && value !== ''))
+  return request(`/approval-tasks${search.size ? `?${search}` : ''}`)
+}
+
 export function decideRollback(itemID, requestID, payload) {
   return request(`/service-items/${encodeURIComponent(itemID)}/rollback-requests/${encodeURIComponent(requestID)}/decision`, { method: 'POST', body: JSON.stringify(payload) })
 }
