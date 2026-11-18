@@ -12,7 +12,6 @@ const operations = [
   ['withdrawPendingRollback', ['REQUEST']],
   ['revokeDeliveryPhase', ['plan']],
   ['submitRollbackRequest', ['FIELD_TO_PREPARATION']],
-  ['decidePendingRollback', ['REQUEST', 'APPROVED']],
 ]
 
 // 用途：执行真实组件函数并注入延迟输入与隔离 API，验证写入边界。
