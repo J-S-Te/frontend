@@ -3,7 +3,7 @@ import ConsoleIcon from '@/modules/shared/components/ConsoleIcon.vue'
 
 // 「我的待办」区面板（治理批次 5 结算·第三步，模板自 SettlementView.vue 逐字提取；提取前片段 SSR golden 归档于
 // .ai/qa/closure-20261025/goldens-settlement-panels/SettlementTasksPanel/）。分组任务由父级 taskGroups 计算属性注入；
-// 点击任务项以 navigate(section) 回传，刷新以 reload 回传。
+// 点击任务项以 navigate(item) 回传真实业务坐标，刷新以 reload 回传。
 defineProps({
   taskGroups: { type: Array, required: true },
 })
@@ -42,7 +42,7 @@ defineEmits(['navigate','reload'])
             :key="item.key"
             type="button"
             class="settlement-task-item"
-            @click="$emit('navigate', group.section)"
+            @click="$emit('navigate', item)"
           >
             <span class="settlement-task-id">{{ item.label }}</span>
             <span class="settlement-task-meta">{{ item.meta }}</span>

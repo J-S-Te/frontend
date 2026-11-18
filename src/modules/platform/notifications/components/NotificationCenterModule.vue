@@ -1,5 +1,7 @@
 <script setup>
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
+import { openNotificationTarget, notificationTarget } from '../../../shared/utils/notificationNavigation.js'
 import { hasPermission } from '@/modules/platform/auth/utils/principal'
 import LoadingState from '@/modules/platform/shared/components/LoadingState.vue'
 import EmptyState from '@/modules/platform/shared/components/EmptyState.vue'
@@ -27,14 +29,39 @@ const canReadSettings = computed(() => hasPermission('platform:notification-sett
 const canUpdateSettings = computed(() => hasPermission('platform:notification-setting:update'))
 const visibleTabs = computed(() => [{ key: 'inbox', label: '我的通知', visible: true }, { key: 'templates', label: '模板管理', visible: canReadTemplates.value || canCreateTemplates.value }, { key: 'deliveries', label: '投递记录', visible: canOperate.value }, { key: 'settings', label: '通知设置', visible: canReadSettings.value || canUpdateSettings.value }].filter((item) => item.visible))
 const normalize = (err, fallback) => formatUserError(err, { fallback })
-function safeTarget(value) { try { const url = new URL(value, window.location.origin); return url.origin === window.location.origin ? `${url.pathname}${url.search}${url.hash}` : '' } catch { return '' } }
+const router = useRouter()
+const route = useRoute()
+const opening = ref(false)
 async function loadInbox() { const [page, count] = await Promise.all([listInbox({ pageSize: 50 }), getUnreadCount()]); items.value = page?.items || []; unreadCount.value = Number(count?.unread_count || 0) }
 async function loadTemplates() { const result = await listNotificationTemplates(); templates.value = result?.items || [] }
 async function loadDeliveries() { const result = await listNotificationDeliveries({ status: deliveryStatus.value }); deliveries.value = result?.items || [] }
 async function loadSettings() { Object.assign(settings, (await getNotificationSettings()) || {}) }
 async function refresh() { loading.value = true; error.value = ''; try { if (tab.value === 'inbox') await loadInbox(); if (tab.value === 'templates') await loadTemplates(); if (tab.value === 'deliveries') await loadDeliveries(); if (tab.value === 'settings') await loadSettings() } catch (err) { error.value = normalize(err, '读取通知数据失败。') } finally { loading.value = false } }
 async function switchTab(next) { tab.value = next; await refresh() }
-async function open(item) { try { detail.value = await getNotification(item.delivery_id); if (!item.read_at) { await markNotificationRead(item.delivery_id); await loadInbox() } } catch (err) { error.value = normalize(err, '读取通知详情失败。') } }
+// 用途：点击通知直达关联处理页面，未配置目标时保留正文。
+// 参数：item 为当前用户的通知投递摘要。
+// 返回值：无；读取、已读和导航错误分别保持可见。
+async function open(item) {
+  if (!item?.delivery_id || opening.value) return
+  opening.value = true
+  error.value = ''
+  try {
+    const result = await getNotification(item.delivery_id)
+    detail.value = result
+    if (!result.read_at) {
+      try {
+        await markNotificationRead(item.delivery_id)
+        detail.value = { ...result, read_at: new Date().toISOString() }
+        await loadInbox()
+      } catch (err) {
+        error.value = normalize(err, '已读状态保存失败，可继续处理。')
+        emit('toast', error.value)
+      }
+    }
+    await openNotificationTarget(result, router)
+  } catch (err) { error.value = normalize(err, '读取通知或进入关联页面失败。') }
+  finally { opening.value = false }
+}
 async function runAction(write, success, reload, failureHint) {
   if (working.value || loading.value) return
   working.value = true; error.value = ''
@@ -102,6 +129,9 @@ async function retryFailed() {
 }
 async function saveSettings() { await runAction(async () => { Object.assign(settings, await updateNotificationSettings({ inboxEnabled: settings.inbox_enabled, reminderFrequency: settings.reminder_frequency, version: settings.version })) }, '通知设置已保存。') }
 onMounted(refresh)
+watch(() => route.query.notification_id, (id) => {
+  if (typeof id === 'string' && id) open({ delivery_id: id })
+}, { immediate: true })
 </script>
 
 <template>
@@ -111,7 +141,7 @@ onMounted(refresh)
     <template v-else-if="tab === 'templates'"><form v-if="canCreateTemplates" class="notification-form" @submit.prevent="submitTemplate"><input v-model="templateForm.code" placeholder="模板编码" required  maxlength="128"/><input v-model="templateForm.name" placeholder="模板名称" required  maxlength="128"/><input v-model="templateForm.title_template" placeholder="标题模板" required  maxlength="500"/><textarea v-model="templateForm.body_template" placeholder="正文模板" required  maxlength="16000"/><button class="console-button primary small">创建模板</button></form><div class="notification-table" data-table-scroll><table class="console-data-table"><thead><tr><th scope="col">编码</th><th scope="col">名称</th><th scope="col">状态</th><th scope="col">当前版本</th><th scope="col">操作</th></tr></thead><tbody><tr v-if="!templates.length"><td colspan="5">暂无模板。</td></tr><tr v-for="item in templates" :key="item.id"><td><code>{{ item.code }}</code></td><td>{{ item.name }}</td><td>{{ item.status }}</td><td>{{ item.current_version }}</td><td><button v-if="canUpdateTemplates" class="console-button ghost small" @click="newVersion(item)">发布新版本</button><button v-if="canUpdateTemplates" class="console-button ghost small" @click="toggleTemplate(item)">{{ item.status === 'ACTIVE' ? '停用' : '启用' }}</button></td></tr></tbody></table></div></template>
     <template v-else-if="tab === 'deliveries'"><div class="notification-actions"><select v-model="deliveryStatus" @change="refresh"><option value="">全部状态</option><option>PENDING</option><option>PROCESSING</option><option>DELIVERED</option><option>FAILED</option></select><button class="console-button primary small" @click="retryFailed">重试失败投递</button></div><div class="notification-table" data-table-scroll><table class="console-data-table"><thead><tr><th scope="col">投递 ID</th><th scope="col">收件人</th><th scope="col">状态</th><th scope="col">尝试</th><th scope="col">下次重试</th></tr></thead><tbody><tr v-if="!deliveries.length"><td colspan="5">暂无投递记录。</td></tr><tr v-for="item in deliveries" :key="item.id"><td><code>{{ item.id }}</code></td><td><code>{{ item.recipient_user_id }}</code></td><td>{{ item.status }}</td><td>{{ item.attempt_count }}</td><td>{{ item.next_attempt_at || '—' }}</td></tr></tbody></table></div></template>
     <template v-else><form class="notification-settings" @submit.prevent="saveSettings"><label><span>站内信</span><input v-model="settings.inbox_enabled" type="checkbox" :disabled="!canUpdateSettings" /></label><label><span>提醒频率</span><select v-model="settings.reminder_frequency" :disabled="!canUpdateSettings"><option value="IMMEDIATE">即时（创建即可见）</option><option value="DAILY">每日汇总（每日 09:00 北京时间可见）</option><option value="WEEKLY">每周汇总（每周一 09:00 北京时间可见）</option><option value="NEVER">不提醒（不进入站内信）</option></select></label><label class="disabled"><span>邮件通知</span><input type="checkbox" disabled /><small>尚未部署邮件提供方和投递 Worker，已强制关闭。</small></label><button v-if="canUpdateSettings" class="console-button primary">保存设置</button></form></template>
-    <aside v-if="detail" class="notification-detail"><header><h3>{{ detail.title }}</h3><button @click="detail = null">×</button></header><p>{{ detail.content }}</p><a v-if="safeTarget(detail.target_url)" :href="safeTarget(detail.target_url)">查看关联内容</a></aside>
+    <aside v-if="detail" class="notification-detail"><header><h3>{{ detail.title }}</h3><button @click="detail = null">×</button></header><p>{{ detail.content }}</p><button v-if="notificationTarget(detail)" :disabled="opening" @click="open(detail)">进入处理页面</button></aside>
     <ConfirmDialog :open="Boolean(confirmDialog)" v-bind="confirmDialog || {}" @confirm="acceptConfirm" @cancel="cancelConfirm" />
     <PromptDialog :open="Boolean(promptDialog)" v-bind="promptDialog || {}" @confirm="acceptPrompt" @cancel="cancelPrompt" />
   </section>

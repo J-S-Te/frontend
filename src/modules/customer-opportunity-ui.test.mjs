@@ -25,7 +25,7 @@ const client = await import('./customer_opportunity/api/client.js')
 const opportunity = await import('./customer_opportunity/api/opportunity.js')
 const notification = await import('./customer_opportunity/api/notification.js')
 const ownerDirectory = await import('./customer_opportunity/api/ownerDirectory.js')
-const { parseNotificationTarget } = await import('./customer_opportunity/navigation.js')
+const { parseNotificationTarget, crmNotificationTarget } = await import('./customer_opportunity/navigation.js')
 const { presaleAPIParams, presaleStateFromQuery, presaleStateToQuery } = await import('./customer_opportunity/presaleQuery.js')
 const { createPresaleMutationRetryState, normalizePresaleMutationPayload } = await import('./customer_opportunity/presaleMutationRetry.js')
 const { createCreateMutationRetryState, normalizeCreateMutationPayload } = await import('./customer_opportunity/createMutationRetry.js')
@@ -1796,11 +1796,19 @@ test('通知目标只接受当前源的现有 CRM 商机或售前入口', () => 
 
 test('个人通知去除冗余边界说明，保留权限检查和真实详情跳转', () => {
   assert.doesNotMatch(view, /通知收件人固定为当前登录用户/)
-  assert.match(view, /parseNotificationTarget\(item\.target_path/)
+  assert.match(view, /crmNotificationTarget\(item, window\.location\.origin\)/)
   assert.match(view, /route\.query\.opportunity_id/)
   assert.match(view, /await openOpportunity\(id\)/)
   assert.match(view, /target\.params\.section === 'presale'/)
-  assert.match(view, /await openPresale\(Number\(target\.query\.request_id\)\)/)
+  assert.match(view, /await openPresaleFromRoute\(\)/)
+  assert.match(view, /route\.query\.request_id/)
+  assert.match(view, /await openPresale\(id\)/)
+  assert.deepEqual(crmNotificationTarget({ type: 'PRESALE_APPROVAL_PENDING',
+    target_path: '/customer-opportunity/presale?request_id=17' }, 'https://crm.example'),
+  { name: 'customer_opportunity', params: { section: 'presale' }, query: { request_id: '17' } })
+  assert.deepEqual(crmNotificationTarget({ type: 'CREDIT_APPLICATION_PENDING',
+    target_path: '/customer-opportunity/customers?customer_id=31&tab=credit' }, 'https://crm.example'),
+  { name: 'customer_opportunity', params: { section: 'credit-approvals' }, query: { customer_id: '31' } })
   assert.match(view, /requestedTab === 'credit'/)
   assert.match(view, /await openCustomerTab\('credit'\)/)
   assert.match(view, /canReadNotifications/)

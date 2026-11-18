@@ -5,6 +5,7 @@ import { useSidebarNavigation } from '@/modules/shared/composables/useSidebarNav
 import { readSidebarCollapsed } from '@/modules/shared/utils/shellPreferences.js'
 import OperationToast from '@/modules/shared/components/OperationToast.vue'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { notificationApprovalFilters, resolveNotificationApproval } from '../utils/notificationApproval.js'
 import { formatUserError } from '../../shared/utils/userError.js'
 import { useConfirmDialog } from '../../shared/composables/useConfirmDialog.js'
 import { createRequestScope } from '../../platform/shared/composables/requestScope.js'
@@ -19,7 +20,7 @@ import PaginationBar from '@/modules/shared/components/PaginationBar.vue'
 import OperationInboxPanel from '../../shared/components/OperationInboxPanel.vue'
 import { usePersistentResult } from '../../shared/composables/usePersistentResult.js'
 import { useOperationInbox } from '../../shared/composables/useOperationInbox.js'
-import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router'
+import { onBeforeRouteLeave, onBeforeRouteUpdate, useRoute, useRouter } from 'vue-router'
 import { AuthError, logoutCurrentSession } from '@/modules/platform/auth/api/auth'
 import ConsoleIcon from '@/modules/platform/shared/components/ConsoleIcon.vue'
 import { useDictionaryOptions } from '@/modules/platform/dictionaries/composables/useDictionaryOptions.js'
@@ -727,7 +728,7 @@ const {
   approvalDetailScope, selectedApproval, approvalDetail, approvalDetailLoading,
   approvalContractPreviewHTML, approvalContractPreviewPDF, approvalContractPreviewLoading, approvalContractPreviewError,
   approvalComment, approvalTargetUser, approvalTargetNode, approvalCommandBusy,
-  openApproval, closeApproval, executeApprovalCommand,
+  openApproval, closeApproval: closeApprovalDetail, executeApprovalCommand,
 } = useApprovalDetail({
   getApproval, previewApprovalContract, commandApproval, can, session, showToast, formatUserError,
   refreshApprovalRealtime: refreshApprovalMutation,
@@ -738,6 +739,8 @@ const canActOnApproval = computed(() => can('approval.process')
   && selectedApproval.value?.status === 'active'
   && !approvalDetail.value?.state_unavailable)
 const approvalRealtimeScope = createRequestScope()
+const contractNotificationReady = ref(false)
+let contractNotificationSequence = 0
 const signingDetailScope = createRequestScope()
 let signingDetailTicket = null
 const signingRealtimeScope = createRequestScope()
@@ -1535,6 +1538,76 @@ function normalizeApproval(item) {
   }
 }
 
+// 用途：在会话就绪后读取通知关联审批或合同，历史提醒不猜测审批身份。
+// 参数：reload 表示同页切换提醒时重读当前区域，使用路由的业务标识。
+// 返回值：无；无权限、多个流程或失效提醒以真实结果提示。
+async function openContractNotificationRoute({ reload = false } = {}) {
+  const ticket = ++contractNotificationSequence
+  if (!contractNotificationReady.value) return
+  const isCurrent = () => ticket === contractNotificationSequence
+  approvalRealtimeScope.invalidate()
+  if (!['approvals', 'contracts'].includes(activeSection.value)) return
+  if (!route.query.approval_id && !route.query.contract_id) {
+    if (reload) await loadBusinessData()
+    return
+  }
+  if (approvalCommandBusy.value) {
+    showToast('当前审批操作仍在处理，请完成后再打开其他提醒。')
+    return
+  }
+  closeApprovalDetail()
+  try {
+    const filters = notificationApprovalFilters(route.query)
+    if (reload) {
+      await loadBusinessData()
+      if (!isCurrent()) return
+    }
+    if (activeSection.value === 'contracts' && filters.contract_id) {
+      contractDetailSequence++
+      selectedContract.value = null
+      const contract = await getContract(filters.contract_id)
+      if (isCurrent()) await openContract(normalizeContract(contract))
+      return
+    }
+    const result = await resolveNotificationApproval(route.query, {
+      canProcess: can('approval.process'), listApprovalTasks, listApprovals, isCurrent,
+    })
+    if (!result || !isCurrent()) return
+    approvals.value = result.tasks.map(normalizeApproval)
+    setInitiatedApprovals(result.summaries)
+    if (result.approval) await openApproval(normalizeApproval(result.approval))
+    else {
+      if (result.summaries.length) approvalTab.value = 'initiated'
+      showToast(result.tasks.length || result.summaries.length
+        ? '该合同关联多个审批流程，请在合同审批记录中选择对应流程。'
+        : '当前可见范围内没有该合同的审批记录，待办可能已处理或访问权限已变化。')
+    }
+  } catch (failure) {
+    if (isCurrent()) showToast(formatUserError(failure, { fallback: '通知关联记录读取失败，请重试。' }))
+  }
+}
+
+// 用途：关闭通知审批详情后移除定位坐标，使再次点击同一提醒可以重新打开。
+// 参数：无；仅移除当前审批工作区的业务坐标，保留其余筛选和锚点。
+// 返回值：异步完成；导航失败时提示重新选择待办。
+async function clearApprovalNotificationRoute() {
+  if (activeSection.value !== 'approvals'
+    || (!route.query.approval_id && !route.query.contract_id)) return
+  const query = { ...route.query }
+  delete query.approval_id
+  delete query.contract_id
+  try { await router.replace({ name: route.name, params: route.params, query, hash: route.hash }) }
+  catch (failure) { showToast(formatUserError(failure, { fallback: '审批定位未能清理，请重试。' })) }
+}
+
+// 用途：关闭用户主动退出的审批详情，并消费本次通知定位。
+// 参数：无。
+// 返回值：无；清理路由失败会独立提示。
+function closeApproval() {
+  closeApprovalDetail()
+  void clearApprovalNotificationRoute()
+}
+
 function setInitiatedApprovals(items) {
   const normalized = items.map(normalizeApproval)
   const materializedIDs = new Set(normalized.map((item) => item.id))
@@ -1592,8 +1665,9 @@ async function refreshApprovalRealtime({ queueIfBusy = false } = {}) {
   const ticket = approvalRealtimeScope.begin('APPROVAL_REALTIME')
   const isCurrent = () => approvalRealtimeScope.isCurrent(ticket)
   try {
-    const initiatedRequest = listApprovals({ limit: 200 })
-    const taskRequest = can('approval.process') ? listApprovalTasks({ limit: 200 }) : Promise.resolve([])
+    const params = { limit: 200, ...notificationApprovalFilters(route.query) }
+    const initiatedRequest = listApprovals(params)
+    const taskRequest = can('approval.process') ? listApprovalTasks(params) : Promise.resolve([])
     const detailRequest = selectedApproval.value && !selectedApproval.value.initializing && !approvalCommandBusy.value
       ? getApproval(selectedApproval.value.id)
       : Promise.resolve(null)
@@ -1742,7 +1816,9 @@ async function loadBusinessData() {
     requests.push({ label, sections, promise })
   }
   if (can('approval.view') || can('approval.process') || can('contract.create')) {
-    addRequest('我发起的审批', ['dashboard', 'approvals'], listApprovals({ limit: 200 }).then(setInitiatedApprovals))
+    addRequest('我发起的审批', ['dashboard', 'approvals'], listApprovals({ limit: 200,
+      ...(activeSection.value === 'approvals' ? notificationApprovalFilters(route.query) : {}),
+    }).then(setInitiatedApprovals))
   }
   if (can('contract.read')) {
     addRequest('合同统计', ['dashboard', 'reports'], getContractDashboard().then((summary) => { if (sequence === businessDataSequence) adminDashboard.value = summary }))
@@ -1783,7 +1859,9 @@ async function loadBusinessData() {
     addRequest('签署台账', ['signing'], refreshSigningRecords())
   }
   if (can('approval.process')) {
-    addRequest('审批待办', ['dashboard', 'approvals'], listApprovalTasks({ limit: 200 }).then((items) => { approvals.value = items.map(normalizeApproval); approvalsKnown.value = true }))
+    addRequest('审批待办', ['dashboard', 'approvals'], listApprovalTasks({ limit: 200,
+      ...(activeSection.value === 'approvals' ? notificationApprovalFilters(route.query) : {}),
+    }).then((items) => { approvals.value = items.map(normalizeApproval); approvalsKnown.value = true }))
   }
   if (can('approval.view') || can('approval_rule.manage')) {
     addRequest('审批规则', ['rules'], listApprovalRules().then((items) => { rules.value = items }))
@@ -2907,6 +2985,19 @@ watch(activeSection, () => {
 
 // 路由参数变化（例如从其他页面带 ?import_batch 跳到本模块）同样要校正分区。
 watch(() => route.query.import_batch, () => { ensureImportBatchSection() })
+watch(() => [activeSection.value, route.query.approval_id, route.query.contract_id],
+  ([section], [previous]) => openContractNotificationRoute({ reload: section === previous }))
+watch(approvalCommandBusy, (busy) => {
+  if (!busy && !selectedApproval.value) void clearApprovalNotificationRoute()
+})
+onBeforeRouteUpdate((to, from) => {
+  const changed = to.params.section !== from.params.section
+    || to.query.approval_id !== from.query.approval_id
+    || to.query.contract_id !== from.query.contract_id
+  if (!changed || !approvalCommandBusy.value) return true
+  showToast('当前审批操作仍在处理，请完成后再切换页面。')
+  return false
+})
 
 // 用途：读取原件及业务来源能力，失败保留明确提示且不猜测本地来源。
 // 参数：无；使用当前合同会话。
@@ -2926,6 +3017,8 @@ onMounted(async () => {
     ensureImportBatchSection()
     void loadContractSourceCapabilities()
     await loadBusinessData()
+    contractNotificationReady.value = true
+    await openContractNotificationRoute()
     document.addEventListener('visibilitychange', handleApprovalVisibilityChange)
     document.addEventListener('keydown', closeMenuOnEscape)
     scheduleApprovalRealtime({ immediate: true })
@@ -2937,6 +3030,7 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
+  contractNotificationSequence++
   businessDataSequence++
   resetCRMDirectoryConnection()
   // 卸载后停止正在进行的导出台账分页读取，避免离开页面后继续请求并提示。
@@ -3178,7 +3272,7 @@ onBeforeUnmount(() => {
         <template v-else-if="activeSection === 'approvals'">
           <div class="contract-tabs" role="tablist" aria-label="审批列表">
             <button :class="{ active: approvalTab === 'tasks' }" type="button" role="tab" :aria-selected="approvalTab === 'tasks'" @click="approvalTab = 'tasks'">待我审批 <i>{{ approvals.length }}</i></button>
-            <button :class="{ active: approvalTab === 'initiated' }" type="button" role="tab" :aria-selected="approvalTab === 'initiated'" @click="approvalTab = 'initiated'">我发起的 {{ initiatedApprovals.length }}</button>
+            <button :class="{ active: approvalTab === 'initiated' }" type="button" role="tab" :aria-selected="approvalTab === 'initiated'" @click="approvalTab = 'initiated'">{{ route.query.contract_id ? '合同审批记录' : '我发起的' }} {{ initiatedApprovals.length }}</button>
             <button :class="{ active: approvalTab === 'status' }" type="button" role="tab" :aria-selected="approvalTab === 'status'" @click="approvalTab = 'status'">状态变更审批 <i>{{ statusChangeApprovals.length }}</i></button>
             <button type="button" @click="loadBusinessData">刷新</button>
           </div>

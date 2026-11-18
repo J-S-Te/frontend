@@ -16,6 +16,30 @@ export function safeNotificationPath(value) {
     && !/[\\\u0000-\u0020]/.test(value) ? value : ''
 }
 
+// 用途：按通知单据坐标读取本人当前待办，不依赖列表当前页。
+// 参数：query 为通知的单据和任务标识；request 为经过认证的报销读取接口。
+// 返回值：唯一任务标识或空串；非法坐标、读取异常和多任务需用户选择时抛错。
+export async function notificationApprovalTaskID(query, request) {
+  for (const key of ['task_id', 'claim_id']) {
+    const value = query[key]
+    if (value !== undefined && (typeof value !== 'string' || value.length > 128
+      || /[\u0000-\u0020]/.test(value))) throw new Error('提醒中的审批坐标无效，请从待办列表重新选择。')
+  }
+  if (query.task_id) return query.task_id
+  if (!query.claim_id) return ''
+  const params = new URLSearchParams({ claim_id: query.claim_id, status: 'PENDING',
+    page: '1', page_size: '100' })
+  const result = await request(`/approval-tasks?${params}`)
+  if (!Array.isArray(result?.items) || !Number.isFinite(result.total)) {
+    throw new Error('审批待办响应不完整，请重新读取。')
+  }
+  const matches = result.items.filter(row => row.claim_id === query.claim_id && row.status === 'PENDING')
+  if (matches.length > 1 || result.total > result.items.length) {
+    throw new Error('该单据关联多项审批待办，请从当前任务列表选择对应节点。')
+  }
+  return matches[0]?.id || ''
+}
+
 // 用途：把服务端整数分渲染为元，供轮次差异对照使用。
 // 参数：value 为服务端金额字段（整数分）或其它可读文本。
 // 返回值：元金额文本；非整数分保持原文，空值显示未设置。

@@ -2,7 +2,8 @@
 import { computed, defineAsyncComponent, h, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { AuthError, logoutCurrentSession } from '@/modules/platform/auth/api/auth'
-import { getUnreadCount, listInbox, markNotificationRead } from '@/modules/platform/notifications/api/notifications'
+import { getNotification, getUnreadCount, listInbox, markNotificationRead } from '@/modules/platform/notifications/api/notifications'
+import { openNotificationTarget } from '@/modules/shared/utils/notificationNavigation.js'
 import ConsoleIcon from '@/modules/platform/shared/components/ConsoleIcon.vue'
 import LoadingState from '@/modules/shared/components/LoadingState.vue'
 import { loginUsername } from '@/modules/shared/loginUsername.mjs'
@@ -207,6 +208,7 @@ const auditExporting = ref(false)
 const auditDownloading = ref(false)
 const auditExportJob = ref(null)
 const notificationMenuOpen = ref(false)
+const notificationOpening = ref(false)
 const notificationMenuLoading = ref(false)
 // 顶栏未读通知弹层：失败原因单独留存，弹层用三态闸门展示，不再吞成「暂无未读通知」。
 const topbarNotificationsError = ref('')
@@ -991,12 +993,31 @@ async function toggleNotificationMenu() {
   if (notificationMenuOpen.value) await loadTopbarNotifications()
 }
 
+// 用途：从铃铛直达通知对应业务，无目标时在通知中心打开正文。
+// 参数：item 为当前主体未读通知的摘要。
+// 返回值：无；读取或导航失败时保留弹层并显示错误。
 async function openTopbarNotification(item) {
-  if (!item?.delivery_id) return
-  if (!item.read_at) await markNotificationRead(item.delivery_id).catch(() => null)
-  await loadTopbarNotifications()
-  const target = String(item.target_url || '')
-  if (target.startsWith('/') && !target.startsWith('//')) await router.push(target).catch(() => {})
+  if (!item?.delivery_id || notificationOpening.value) return
+  notificationOpening.value = true
+  topbarNotificationsError.value = ''
+  try {
+    const result = await getNotification(item.delivery_id)
+    if (!result.read_at) {
+      try {
+        await markNotificationRead(item.delivery_id)
+        await loadTopbarNotifications()
+      } catch (error) {
+        showToast(formatUserError(error, { fallback: '已读状态保存失败，可继续处理。' }))
+      }
+    }
+    if (!await openNotificationTarget(result, router)) {
+      await openNotificationTarget({ target_url:
+        `/settings/notify?notification_id=${encodeURIComponent(item.delivery_id)}` }, router)
+    }
+    notificationMenuOpen.value = false
+  } catch (error) {
+    topbarNotificationsError.value = formatUserError(error, { fallback: '无法进入通知关联页面。' })
+  } finally { notificationOpening.value = false }
 }
 
 async function logout() {
@@ -1435,7 +1456,7 @@ onBeforeUnmount(() => {
         <IamSettingsModule
       :initial-panel="iamInitialPanel" v-else-if="hasActiveFilteredSettingsTab && activeSettingsTab === 'iam'" :refresh-key="iamRefreshKey" @toast="showToast" @employee-onboarding="openEmployeeOnboarding" @personnel-change="openPersonnelChangeForUser" />
 
-        <PersonnelChangeCenter v-else-if="hasActiveFilteredSettingsTab && activeSettingsTab === 'personnel'" :prefill-user-id="pendingPersonnelChangeUserId" @toast="showToast" @employee-onboarding="openEmployeeOnboarding" @prefill-consumed="pendingPersonnelChangeUserId = ''" />
+        <PersonnelChangeCenter v-else-if="hasActiveFilteredSettingsTab && activeSettingsTab === 'personnel'" :prefill-user-id="pendingPersonnelChangeUserId" :initial-request-id="String(route.query.request_id || '')" @toast="showToast" @employee-onboarding="openEmployeeOnboarding" @prefill-consumed="pendingPersonnelChangeUserId = ''" />
 
         <NotificationCenterModule v-else-if="hasActiveFilteredSettingsTab && activeSettingsTab === 'notify'" @toast="showToast" />
 

@@ -1,6 +1,6 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router'
+import { onBeforeRouteLeave, onBeforeRouteUpdate, useRoute, useRouter } from 'vue-router'
 import AppShell from '../../shared/components/AppShell.vue'
 import ConsoleIcon from '../../shared/components/ConsoleIcon.vue'
 import LoadingState from '../../shared/components/LoadingState.vue'
@@ -50,7 +50,7 @@ import { ensureReimbursementSession, logoutReimbursement, reimbursementAPI as ap
   startReimbursementLogin } from '../api/reimbursement.js'
 import { policyFields, policyFormFrom, policyPayload } from '../policy.js'
 import { returnProjectLocation, validationFields } from '../workspaceState.js'
-import { claimTypes, workspaceSection, workspaceQuery, uploadFiles } from '../workspace.js'
+import { claimTypes, workspaceSection, workspaceQuery, uploadFiles, notificationApprovalTaskID } from '../workspace.js'
 import { allocationInput } from '../allocation.js'
 import { frontendModules } from '../../registry/compiledModules.js'
 import '../reimbursement.css'
@@ -185,6 +185,7 @@ const approvalHistory = ref([])
 const historyLoading = ref(false)
 const historyError = ref('')
 let approvalSequence = 0
+let approvalRouteSequence = 0
 let parsePollSequence = 0
 let exportPollSequence = 0
 const approvalStatus = ref('PENDING')
@@ -727,6 +728,7 @@ function showError(cause) {
 // 参数：无。
 // 返回值：无；避免残留面板带着旧单据渲染成"尚无记录"的假空态。
 function clearForeignDetail() {
+  ++approvalSequence
   approvalTask.value = null; approvalHistory.value = []; historyError.value = ''
   selectedInvoice.value = null; invoiceRows.value = []; selectedSource.value = null
   exceptionRows.value = null; selectedException.value = null; exceptionPage.value = 1
@@ -856,6 +858,9 @@ async function load({ preserveContext = false } = {}) {
     const query = new URLSearchParams(workspaceQuery(workspace.value,listFilters.value,
       page.value,pageSize.value,route.query.project_id || ''))
     if (current === 'approvals' && approvalStatus.value) query.set('status', approvalStatus.value)
+    if (current === 'approvals' && typeof route.query.claim_id === 'string') {
+      query.set('claim_id', route.query.claim_id)
+    }
     if (current === 'payments' && paymentStatus.value) query.set('status', paymentStatus.value)
     if (route.query.project_id) query.set('project_id', String(route.query.project_id))
     const result = await api.request(`${path}?${query}`)
@@ -863,6 +868,7 @@ async function load({ preserveContext = false } = {}) {
     if (!Array.isArray(result.items) || !Number.isFinite(result.total)) throw new Error('服务端分页响应不完整')
     rows.value = result.items
     total.value = result.total
+    if (current === 'approvals') await openApprovalNotificationRoute()
     if (current === 'claims' && route.query.claim_id && selected.value?.id !== String(route.query.claim_id)) await openClaim(String(route.query.claim_id))
     if (current === 'policies' && policyRecord.value) {
       const latest = result.items.find((row) => row.id === policyID.value)
@@ -1523,6 +1529,7 @@ async function backToList(kind = 'claim') {
   }
   const query = { ...route.query }
   delete query.claim_id
+  delete query.task_id
   router.replace({ name: 'reimbursement', params: { section: workspace.value }, query })
   await nextTick()
   heading.value?.scrollIntoView?.({ block: 'start', behavior: 'smooth' })
@@ -1668,14 +1675,17 @@ function cancelApprovalAction() {
 }
 
 // 用途：读取服务端按任务范围裁剪的固定审批快照。
-// 参数：id 为当前待办ID。
+// 参数：id 为当前待办ID，expectedClaimID 为通知可选的单据绑定。
 // 返回值：无；不额外请求整单或发票原件。
-async function openApproval(id) {
+async function openApproval(id, expectedClaimID = '') {
   const ticket = ++approvalSequence
   approvalHistory.value = []; historyError.value = ''
   try {
     const task = await api.request(`/approval-tasks/${encodeURIComponent(id)}`)
     if (ticket !== approvalSequence) return
+    if (!task?.id || task.id !== id || (expectedClaimID && task.claim_id !== expectedClaimID)) {
+      throw new Error('审批任务与提醒中的单据不一致，请从待办列表重新核对。')
+    }
     if (approvalTask.value?.id !== task.id) transferSubject.value = ''
     approvalTask.value = task
     pendingApprovalAction.value = ''
@@ -1684,6 +1694,40 @@ async function openApproval(id) {
     await loadApprovalHistory()
     await revealDetail()
   } catch (cause) { if (ticket === approvalSequence) showError(cause) }
+}
+
+// 用途：从通知或首页待办直达当前审批快照，同页换提醒时失效旧请求。
+// 参数：无；使用路由中的任务和单据标识。
+// 返回值：无；已处理、无权限或多待办时给出明确提示。
+async function openApprovalNotificationRoute() {
+  const ticket = ++approvalRouteSequence
+  if (section.value !== 'approvals' || !session.value || !can('expense.approval.act')) return
+  const { task_id: taskID, claim_id: claimID } = route.query
+  if (!taskID && !claimID) return
+  if (saving.value || runner.pending()) {
+    showError(new Error('请先核对当前审批操作结果，再打开其他提醒。'))
+    return
+  }
+  if (taskID && approvalTask.value?.id === taskID
+    && (!claimID || approvalTask.value.claim_id === claimID)) return
+  ++approvalSequence
+  approvalTask.value = null
+  try {
+    const id = await notificationApprovalTaskID(route.query, api.request)
+    if (ticket !== approvalRouteSequence || section.value !== 'approvals') return
+    if (id) await openApproval(id, claimID || '')
+    else notice.value = '当前没有该单据的本人待审批任务，可能已处理或受理人已变化。'
+  } catch (cause) { if (ticket === approvalRouteSequence) showError(cause) }
+}
+
+// 用途：从工作台具体待办进入对应审批任务，保留服务端真实坐标。
+// 参数：task 为当前用户工作台返回的审批摘要。
+// 返回值：导航完成的 Promise；取消草稿确认时不离开当前页。
+async function goToApprovalTask(task) {
+  const id = task?.id || task?.task_id
+  if (!id || !await discardDraft()) return
+  await router.push({ name: 'reimbursement', params: { section: 'approvals' },
+    query: { task_id: String(id), ...(task.claim_id ? { claim_id: String(task.claim_id) } : {}) } })
 }
 
 // 用途：读取授权任务每跳历史，保留当时原新受理人与资格证据。
@@ -2737,7 +2781,16 @@ watch(() => route.params.section, async () => {
   await nextTick()
   heading.value?.focus()
 })
-watch(() => route.query.claim_id, (id) => {
+watch(() => [route.query.claim_id, route.query.task_id], ([id], [previousID]) => {
+  if (section.value === 'approvals') {
+    if (id !== previousID) {
+      ++approvalRouteSequence
+      clearForeignDetail()
+      page.value = 1
+      void load()
+    } else void openApprovalNotificationRoute()
+    return
+  }
   if (id && section.value === 'claims' && selected.value?.id !== String(id)) void openClaim(String(id))
 })
 watch(()=>route.query.project_id,()=>{page.value=1;void load()})
@@ -2762,6 +2815,14 @@ onBeforeRouteLeave(async () => {
   }
   return await discardDraft()
 })
+onBeforeRouteUpdate((to, from) => {
+  const changed = to.params.section !== from.params.section
+    || to.query.task_id !== from.query.task_id || to.query.claim_id !== from.query.claim_id
+  if (!changed || (!saving.value && !runner.pending())) return true
+  if (to.params.section === 'claims' && to.query.claim_id === selected.value?.id) return true
+  showError(new Error('当前操作仍在处理，请先核对结果再切换提醒。'))
+  return false
+})
 onMounted(() => {
   // 刷新页面后先恢复最近任务坐标，用户可以继续查询而不用重新上传或重跑。
   recentTask.value = { parse: recallTask('parse'), export: recallTask('export'), document: recallTask('document') }
@@ -2769,6 +2830,7 @@ onMounted(() => {
   addItem(); void load(); window.addEventListener('beforeunload', protectPending)
 })
 onBeforeUnmount(() => {
+  ++approvalSequence; ++approvalRouteSequence
   ++previewSequence;++documentSequence;++detailSequence;++projectSequence;++paymentOptionsSequence;++paymentHistorySequence;++parsePollSequence;++exportPollSequence
   clearTimeout(previewTimer)
 
@@ -2991,7 +3053,7 @@ onBeforeUnmount(() => {
                       <td><strong>{{ task.claim_no || task.claim_id }}</strong></td>
                       <td><span class="expense-badge info">{{ approvalNodeLabel(task.node_code) }}</span></td>
                       <td>{{ formatBusinessDateTime(task.created_at) }}</td>
-                      <td><button type="button" class="expense-button" @click="navigate('approvals')">查看审批</button></td>
+                      <td><button type="button" class="expense-button" @click="goToApprovalTask(task)">查看审批</button></td>
                     </tr>
                   </tbody>
                 </table>
