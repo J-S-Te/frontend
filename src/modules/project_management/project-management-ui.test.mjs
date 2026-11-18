@@ -1605,7 +1605,7 @@ test('现场证据通过统一文件网关上传并以回执提交', () => {
 test('现场实施支持 GPS、电子签名与可重放离线队列', async () => {
   const offlineQueueSource = await readFile(new URL('./offlineFieldQueue.js', import.meta.url), 'utf8')
   const signaturePadSource = await readFile(new URL('./components/SignaturePad.vue', import.meta.url), 'utf8')
-  assert.match(source, /navigator\.geolocation\.getCurrentPosition/)
+  assert.match(source, /acquireFieldPosition\(\{ signal, onProgress \}\)/)
   assert.match(source, /newFieldOperationID\('checkin'\)/)
   assert.match(source, /newFieldOperationID\('record'\)/)
   assert.match(source, /newFieldOperationID\('signature'\)/)

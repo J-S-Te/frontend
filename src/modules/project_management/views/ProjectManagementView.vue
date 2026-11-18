@@ -72,7 +72,9 @@ import SupplementClosureDialog from '@/modules/project_management/components/Sup
 import {
   allocationState, implementationPlanReady, isAllocationPending, projectAllowsWorkflowNode,
 } from '@/modules/project_management/workflowNode'
-import { countFieldOperations, listFieldOperations, processFieldQueue, removeFieldOperation, saveFieldOperation } from '@/modules/project_management/offlineFieldQueue'
+import { listFieldOperations, processFieldQueue, removeFieldOperation, removeRejectedFieldOperation, saveFieldOperation } from '@/modules/project_management/offlineFieldQueue'
+import { acquireFieldPosition } from '@/modules/project_management/fieldGeolocation.js'
+import { resolveFieldCheckInState } from '@/modules/project_management/fieldCheckInState.js'
 import {
   PROJECT_ROLE_CODES,
   capabilityCodeKey,
@@ -640,6 +642,10 @@ const signaturePadKey = ref(0)
 const operationForm = ref({ teamLeadID: '', projectManagerID: '', engineerIDs: '', plannedStart: '', plannedEnd: '', sitePlan: '', penetrationTestPlan: '', authDocNo: '', authStart: '', authEnd: '', authScope: '', testScope: '', testWindow: '', emergencyContact: '', rollbackPlan: '', reviewComment: '', personnel: [], equipment: [], travelMode: '', travelReferenceEventID: '', noTravelReason: '', travelOrigin: '', travelDestination: '', travelDepartureDate: '', travelReturnDate: '', travelTransport: '', travelAccommodationNeed: '', travelTravelerIDs: [], rawData: '', environment: '', fieldEvidenceFile: null, fieldSignatureFile: null, checkInDeviationReason: '', fieldIncompleteReason: '', reportFile: null, reportCorrectionReason: '', reportCorrectionComment: '', deviationDescription: '', deviationEvidenceFile: null, severity: 'MEDIUM', decision: 'RELEASE', comment: '' })
 const pendingFieldSyncCount = ref(0)
 const fieldSyncing = ref(false)
+const pendingFieldOperations = ref([])
+const fieldQueueError = ref('')
+const fieldCheckInState = ref(null)
+let fieldLocationController = null
 const deviationSeverityOptions = Object.freeze([
   { value: 'LOW', label: '低' },
   { value: 'MEDIUM', label: '中' },
@@ -1295,13 +1301,17 @@ const selectedServiceItem = computed(() => selectedServiceItems.value[0] || null
 const selectedServiceProject = computed(() => selectedServiceItem.value ? projectByID.value.get(selectedServiceItem.value.project_id) || null : null)
 const selectedServiceOwner = computed(() => selectedServiceItem.value ? personLabel(selectedServiceItem.value.project_manager_id || selectedServiceItem.value.team_lead_id, '待指派') : '—')
 const selectedServiceDue = computed(() => formatBusinessDate(selectedServiceItem.value?.planned_end) || '待排期')
+const selectedPendingCheckIn = computed(() => pendingFieldOperations.value.find(operation =>
+  operation.kind === 'check-in' && operation.itemID === selectedServiceItem.value?.id && operation.ownerKey === fieldQueueOwner()))
+const selectedCheckInState = computed(() => resolveFieldCheckInState({ itemID: selectedServiceItem.value?.id, ownerKey: fieldQueueOwner(),
+  state: fieldCheckInState.value, pending: selectedPendingCheckIn.value, snapshot: fieldEvidenceSnapshot.value, error: fieldEvidenceError.value }))
 // 现场缺项判定（BIZ-PROJECT-06）：口径来自服务端 GET /service-items/:id/field-evidence，
 // 不再从 deliveryEvents（租户最近 500 条窗口）里挑事件推导。判定不可用即"未知"，
 // 未知不等于齐全——完成动作必须被拦下。
 const selectedFieldEvidence = computed(() => resolveFieldEvidenceVerdict({
   itemID: selectedServiceItem.value?.id || '',
   snapshot: fieldEvidenceSnapshot.value,
-  error: fieldEvidenceError.value,
+  error: fieldQueueError.value || fieldEvidenceError.value,
   pendingSyncCount: pendingFieldSyncCount.value,
   loading: fieldEvidenceLoading.value,
 }))
@@ -2246,10 +2256,11 @@ function refreshWorkspace() {
   return loadWorkspace({ background: workspaceReady.value })
 }
 
-// refreshSelectedFieldEvidence 拉取当前服务项的现场证据判定（BIZ-PROJECT-06）。
-// 现场操作同步成功后必须重新拉取：本地队列与事件流都是判定输入，旧结论不能沿用。
-// 拉取失败时清空快照并记录原因——界面据此显示"未知"，完成动作按 fail-closed 拒绝。
+// 用途：拉取当前服务项的服务端现场证据，拒绝跨账号或过期请求回填。
+// 参数：reportError 控制是否向用户展示读取失败提示。
+// 返回值：无；失败清空证据并记录原因，完成门禁仍按未知处理。
 async function refreshSelectedFieldEvidence({ reportError = false } = {}) {
+  const ownerKey = fieldQueueOwner()
   const itemID = selectedServiceItem.value?.id || ''
   const ticket = fieldEvidenceScope.begin(`FIELD_EVIDENCE:${itemID}`)
   if (!itemID) {
@@ -2269,7 +2280,8 @@ async function refreshSelectedFieldEvidence({ reportError = false } = {}) {
       fieldEvidenceError.value = '服务端未返回有效的缺项判定'
       return
     }
-    fieldEvidenceSnapshot.value = snapshot
+    if (ownerKey !== fieldQueueOwner()) return
+    fieldEvidenceSnapshot.value = { ...snapshot, ownerKey }
     fieldEvidenceError.value = ''
   } catch (error) {
     if (!fieldEvidenceScope.isCurrent(ticket)) return
@@ -2961,32 +2973,64 @@ function fieldQueueOwner() {
   return tenantID && userID ? `${tenantID}:${userID}` : ''
 }
 
+// 用途：读取当前账号的离线作业和数量，供签到状态与完成门禁使用。
+// 参数：无，归属取自当前登录会话。
+// 返回值：无；读取失败保留已知队列，避免把未同步误报为已清空。
 async function refreshFieldQueueCount() {
-  try { pendingFieldSyncCount.value = await countFieldOperations(fieldQueueOwner()) } catch { pendingFieldSyncCount.value = 0 }
+  const ownerKey = fieldQueueOwner()
+  try {
+    const operations = await listFieldOperations(ownerKey)
+    if (ownerKey !== fieldQueueOwner()) return
+    pendingFieldOperations.value = operations
+    pendingFieldSyncCount.value = operations.length
+    fieldQueueError.value = ''
+  } catch (error) {
+    if (ownerKey === fieldQueueOwner()) fieldQueueError.value = formatUserError(error, { fallback: '无法读取本机现场作业队列，请检查浏览器存储权限后重试' })
+  }
 }
 
+// 用途：先保存现场证据，再核验本次作业是否真正被服务端确认。
+// 参数：operation 为带稳定编号、原始采集时间和业务载荷的现场作业。
+// 返回值：synced 表示本项已确认，pending 表示仍待同步；明确的签到输入拒绝抛出原因。
 async function persistAndSyncFieldOperation(operation) {
   const ownerKey = fieldQueueOwner()
   if (!ownerKey) throw new Error('当前登录身份不可用，无法安全保存离线作业')
+  if (operation.ownerKey && operation.ownerKey !== ownerKey) throw new Error('离线作业归属与当前账号不一致')
   await saveFieldOperation({ ...operation, ownerKey, createdAt: operation.createdAt || new Date().toISOString() })
   await refreshFieldQueueCount()
+  if (ownerKey !== fieldQueueOwner()) throw new Error('登录账号已变化，原账号的现场作业已保存，需切回原账号同步')
   if (!navigator.onLine) {
     showToast('当前离线，现场作业已安全保存；联网后将自动补传。', 'warning')
-    return false
+    return { status: 'pending', message: '当前离线，签到已保存在本机；联网同步确认后才算签到成功。' }
   }
+  let syncResult
   try {
-    await flushFieldOperations(true)
+    syncResult = await flushFieldOperations(true)
   } catch (error) {
     // 本地队列已落盘（client_operation_id 幂等）：同步阶段异常不得说成“操作未完成”，
     // 也不得让用户以为记录丢失而重复录入；联网或手动“立即重试”都会继续补传。
     showToast(`现场作业已安全保存到本地队列，但自动同步未完成：${formatUserError(error, { fallback: '请稍后点击立即重试' })}`, 'warning')
   }
-  return true
+  const outcome = syncResult?.outcomes?.find(current => current.operation.id === operation.id)
+  if (outcome?.status === 'synced') return { status: 'synced' }
+  const remaining = (await listFieldOperations(ownerKey)).find(current => current.id === operation.id)
+  const rejected = outcome?.status === 'failed' ? outcome.operation : remaining
+  if (rejected?.kind === 'check-in' && rejected.lastErrorStatus === 422 && !rejected.resultUncertain && !remaining?.resultUncertain) {
+    // 本次输入明确未受理：保留表单让用户补正，避免无效签到永久卡住离线队列。
+    const removed = await removeRejectedFieldOperation(rejected.id)
+    await refreshFieldQueueCount()
+    if (removed) throw Object.assign(new Error(rejected.lastError || '签到信息未通过校验，请修正后重新签到'), { status: 422 })
+  }
+  if (!remaining) throw new Error('尚未取得本次签到的确认回执，请刷新核对服务端记录后继续')
+  return { status: 'pending', message: remaining.lastError || '签到已保存在本机，尚未确认成功；请重试同步。' }
 }
 
 // holder.current 始终指向已经带上最新上传回执的那份操作对象：
 // 失败时调用方必须用它回写，不能用循环里取到的旧快照，否则会覆盖回执，
 // 导致重试重新上传、同一 client_operation_id 对应不同载荷而被服务端拒绝。
+// 用途：提交单项现场证据，上传回执成功后立即保留，签到还需核对业务回执。
+// 参数：operation 为队列作业，holder.current 保存最新文件回执以供失败重试。
+// 返回值：服务端业务回执；归属、上传或提交失败时抛出错误且不伪造确认。
 async function submitStoredFieldOperation(operation, holder = { current: operation }) {
   if (!operation.ownerKey || operation.ownerKey !== fieldQueueOwner()) throw new Error('离线作业归属与当前账号不一致')
   let current = operation
@@ -2997,19 +3041,31 @@ async function submitStoredFieldOperation(operation, holder = { current: operati
     holder.current = current
     await saveFieldOperation(current)
   }
+  if (current.ownerKey !== fieldQueueOwner()) throw new Error('登录账号已变化，请切回原账号同步现场作业')
   const payload = { ...current.payload, client_operation_id: current.id, captured_at: current.capturedAt }
-  if (current.kind === 'check-in') return checkInField(current.itemID, payload)
+  if (current.kind === 'check-in') {
+    const result = await checkInField(current.itemID, payload)
+    if (result?.status !== 'CHECKED_IN') throw new Error('服务端未返回签到确认，请刷新核对后重试同步')
+    if (current.ownerKey === fieldQueueOwner()) fieldCheckInState.value = { itemID: current.itemID, ownerKey: current.ownerKey,
+      phase: 'confirmed', message: '签到成功，服务端已确认。',
+      position: { coords: { latitude: payload.latitude, longitude: payload.longitude, accuracy: payload.accuracy_meters }, timestamp: Date.parse(current.capturedAt) } }
+    return result
+  }
   if (current.kind === 'record') return submitFieldRecord(current.itemID, { ...payload, evidence_files: current.artifact ? [current.artifact] : [] })
   if (current.kind === 'signature') return captureFieldSignature(current.itemID, { ...payload, signature_file: current.artifact })
   throw new Error('未知的现场离线作业类型')
 }
 
+// 用途：按当前账号逐条补传现场证据，区分失败项和已确认项。
+// 参数：announce 为 true 时展示同步结果。
+// 返回值：本轮每项作业的真实同步结果；忙碌或离线时无结果，队列读写异常抛出。
 async function flushFieldOperations(announce = false) {
   const ownerKey = fieldQueueOwner()
   if (fieldSyncing.value || !navigator.onLine || !ownerKey) return
   fieldSyncing.value = true
   let synced = 0
   let failed = 0
+  const outcomes = []
   try {
     const result = await processFieldQueue({
       operations: await listFieldOperations(ownerKey),
@@ -3017,6 +3073,7 @@ async function flushFieldOperations(announce = false) {
       remove: removeFieldOperation,
       save: saveFieldOperation,
       formatError: (error) => formatUserError(error, { fallback: '同步失败' }),
+      onResult: outcome => outcomes.push(outcome),
     })
     synced = result.synced
     failed = result.failed
@@ -3031,15 +3088,67 @@ async function flushFieldOperations(announce = false) {
     if (announce) showToast(`已同步 ${synced} 条现场作业`)
     await refreshAfterWrite()
   }
+  return { outcomes }
 }
 
-function currentPosition() {
-  return new Promise((resolve, reject) => {
-    if (!navigator.geolocation) { reject(new Error('当前设备不支持定位')); return }
-    navigator.geolocation.getCurrentPosition(resolve, () => reject(new Error('无法获取定位，请检查浏览器定位权限')), {
-      enableHighAccuracy: true, timeout: 15000, maximumAge: 30000,
-    })
-  })
+// 用途：为手机与电脑浏览器采集本次新位置，避免缓存和粗定位直接签到。
+// 参数：signal 用于取消当前定位，onProgress 接收最佳位置以显示精度。
+// 返回值：有效设备位置的 Promise；失败时保留可操作的中文原因。
+function currentPosition(signal, onProgress) {
+  return acquireFieldPosition({ signal, onProgress })
+}
+
+// 用途：绑定当前服务项完成定位和签到，重试时复用尚未确认的原作业。
+// 参数：item 为本次服务项，form 为该服务项偏离说明表单。
+// 返回值：无；仅确认后清空说明，失败时保留输入并抛出原因。
+async function runFieldCheckIn(item, form) {
+  const ownerKey = fieldQueueOwner(), section = activeSection.value, version = item.version
+  const isCurrent = () => ownerKey === fieldQueueOwner() && activeSection.value === section
+    && selectedServiceItem.value?.id === item.id && selectedServiceItem.value?.version === version
+    && selectedServiceItem.value?.status === '实施中' && canExecuteField.value
+  if (!ownerKey || !isCurrent()) throw new Error('当前服务项或权限已变化，请重新选择后签到')
+  const controller = new AbortController()
+  fieldLocationController = controller
+  let position
+  try {
+    let operation = (await listFieldOperations(ownerKey)).find(current => current.itemID === item.id && current.kind === 'check-in')
+    if (operation?.lastErrorStatus === 422 && !operation.resultUncertain) {
+      const removed = await removeRejectedFieldOperation(operation.id)
+      await refreshFieldQueueCount()
+      if (removed) operation = null
+      else {
+        operation = (await listFieldOperations(ownerKey)).find(current => current.id === operation.id)
+        if (!operation) throw new Error('签到队列状态已变化，请刷新核对服务端记录后继续')
+      }
+    }
+    if (!isCurrent()) throw new Error('操作对象已变化，请重新选择后签到')
+    if (!operation) {
+      fieldCheckInState.value = { itemID: item.id, ownerKey, phase: 'locating', message: '正在获取精确位置，最多等待 20 秒，请保持页面打开。' }
+      position = await currentPosition(controller.signal, current => {
+        if (isCurrent()) fieldCheckInState.value = { itemID: item.id, ownerKey, phase: 'locating', position: current,
+          message: `当前定位误差约 ${Math.ceil(current.coords.accuracy)} 米，正在继续提高精度…` }
+      })
+      if (!isCurrent() || controller.signal.aborted) throw new Error('定位期间操作对象已变化，请重新选择后签到')
+      operation = { id: newFieldOperationID('checkin'), kind: 'check-in', itemID: item.id, capturedAt: new Date(position.timestamp).toISOString(),
+        payload: { latitude: position.coords.latitude, longitude: position.coords.longitude, accuracy_meters: position.coords.accuracy,
+          deviation_reason: form.checkInDeviationReason, expected_version: 0 } }
+    } else position = { coords: { latitude: operation.payload.latitude, longitude: operation.payload.longitude, accuracy: operation.payload.accuracy_meters }, timestamp: Date.parse(operation.capturedAt) }
+    fieldCheckInState.value = { itemID: item.id, ownerKey, phase: 'submitting', position, message: '正在提交签到，等待服务端确认…' }
+    const result = await persistAndSyncFieldOperation(operation)
+    // 同步成功会刷新服务项版本；返回后只核对操作身份，不能把正常版本更新误判为失败。
+    if (ownerKey !== fieldQueueOwner() || activeSection.value !== section || selectedServiceItem.value?.id !== item.id) {
+      if (fieldCheckInState.value?.itemID === item.id && fieldCheckInState.value.ownerKey === ownerKey) fieldCheckInState.value = null
+      return
+    }
+    fieldCheckInState.value = { itemID: item.id, ownerKey, position,
+      phase: result.status === 'synced' ? 'confirmed' : 'pending', message: result.status === 'synced' ? '签到成功，服务端已确认。' : result.message }
+    if (result.status === 'synced') form.checkInDeviationReason = ''
+  } catch (error) {
+    if (isCurrent()) fieldCheckInState.value = { itemID: item.id, ownerKey, phase: 'error', position,
+      message: formatUserError(error, { fallback: '签到未完成，请检查定位后重试' }) }
+    else if (fieldCheckInState.value?.itemID === item.id && fieldCheckInState.value.ownerKey === ownerKey) fieldCheckInState.value = null
+    throw error
+  } finally { if (fieldLocationController === controller) fieldLocationController = null }
 }
 
 // 用途：固定原因输入前的服务项、选择范围与当前会话，防止等待期间串写。
@@ -3209,13 +3318,7 @@ async function runOperation(kind) {
       await startFieldExecution(item.id, { expected_version: Number(item.version) || 0 })
       showToast('已进入实施中，可以提交现场记录')
     } else if (kind === 'field-check-in') {
-      const position = await currentPosition()
-      const operation = {
-        id: newFieldOperationID('checkin'), kind: 'check-in', itemID: item.id, capturedAt: new Date(position.timestamp || Date.now()).toISOString(),
-        payload: { latitude: position.coords.latitude, longitude: position.coords.longitude, accuracy_meters: position.coords.accuracy, deviation_reason: form.checkInDeviationReason, expected_version: 0 },
-      }
-      await persistAndSyncFieldOperation(operation)
-      form.checkInDeviationReason = ''
+      await runFieldCheckIn(item, form)
     } else if (kind === 'field') {
       if (!String(form.rawData || '').trim() || !String(form.environment || '').trim()) { showToast('请填写现场原始数据与环境条件', 'warning'); return }
 	  if (!(form.fieldEvidenceFile instanceof File)) { showToast('请上传至少一份现场证据', 'warning'); return }
@@ -3659,6 +3762,11 @@ function retryEquipmentPanel() { equipmentPanel.value = createEquipmentPanel() }
 onMounted(loadWorkspace)
 watch(() => fieldQueueOwner(), (ownerKey) => {
   pendingFieldSyncCount.value = 0
+  pendingFieldOperations.value = []
+  fieldQueueError.value = ''
+  fieldCheckInState.value = null
+  fieldEvidenceSnapshot.value = null
+  fieldLocationController?.abort()
   if (ownerKey && session.value?.permissions?.includes('project.read')) {
     refreshFieldQueueCount(); flushFieldOperations(false)
   }
@@ -3708,10 +3816,14 @@ watch([activeSection, activeNodeItems, loading, sectionExtrasLoading, workspaceR
 watch(selectedServiceItem, (item) => {
   if (activeSection.value === 'preparation') void loadEquipmentReservations(item)
 })
+watch([() => selectedServiceItem.value?.id, activeSection, canExecuteField], () => {
+  fieldLocationController?.abort()
+})
 watch(canExecutionAssign, (allowed) => {
   if (allowed && ['allocation', 'inbox', 'assignments'].includes(activeSection.value)) loadPersonnel()
 })
 onBeforeUnmount(() => {
+  fieldLocationController?.abort()
   window.clearTimeout(toastTimer)
   // 合同搜索防抖计时器随组件销毁一起取消，避免卸载后再发请求。
   if (approvedContractSearchTimer) window.clearTimeout(approvedContractSearchTimer)
@@ -4261,7 +4373,18 @@ onBeforeUnmount(() => {
             <PenetrationWorkPackageCard v-if="selectedServiceItem && isEmbeddedPenetrationItem(selectedServiceItem)" :item="selectedServiceItem" :session="session" :engineer-options="penetrationEngineerOptions" @updated="updatePenetrationPackage" @notify="notifyFromPenetration" />
             <button v-if="selectedServiceItem && selectedServiceItem.status === '实施准备中' && canExecuteField" class="pm-button primary" :disabled="saving" @click="runOperation('field-start')">进入实施中</button>
             <div v-if="selectedServiceItem && selectedServiceItem.status === '实施中' && canExecuteField" class="pm-field-workflow">
-              <section class="pm-field-step pm-field-checkin"><header><span>01</span><div><b>GPS 现场签到</b><small>记录设备定位、精度与采集时间；离线时安全排队。</small></div></header><label><span>偏离说明（定位与现场不一致时填写）</span><input v-model.trim="operationForm.checkInDeviationReason" placeholder="例如 客户临时安排在同园区备用机房"  maxlength="1000"/></label><button class="pm-button" :disabled="saving" @click="runOperation('field-check-in')">获取定位并签到</button></section>
+              <section class="pm-field-step pm-field-checkin">
+                <header><span>01</span><div><b>GPS 现场签到</b><small>手机、电脑均可定位；误差不超过 100 米时提交，服务端确认后才算成功。</small></div></header>
+                <label><span>偏离说明（定位与现场不一致时填写）</span><input v-model.trim="operationForm.checkInDeviationReason" placeholder="例如 客户临时安排在同园区备用机房" maxlength="1000" :disabled="saving || fieldSyncing" /></label>
+                <button class="pm-button" :disabled="saving || fieldSyncing" @click="runOperation('field-check-in')">{{ selectedCheckInState?.phase === 'locating' ? '正在获取精确位置…' : selectedCheckInState?.phase === 'submitting' ? '正在提交签到…' : selectedPendingCheckIn ? '重试签到同步' : '获取定位并签到' }}</button>
+                <div class="pm-field-location" :class="selectedCheckInState?.phase" role="status" aria-live="polite">
+                  <b v-if="selectedCheckInState">{{ selectedCheckInState.message }}</b>
+                  <b v-if="fieldQueueError" role="alert">{{ fieldQueueError }}</b>
+                  <small v-if="selectedCheckInState?.position">经度 {{ selectedCheckInState.position.coords.longitude.toFixed(6) }} · 纬度 {{ selectedCheckInState.position.coords.latitude.toFixed(6) }} · 定位误差约 {{ Math.ceil(selectedCheckInState.position.coords.accuracy) }} 米 · 采集于 {{ formatDateTime(selectedCheckInState.position.timestamp) }}</small>
+                  <small v-else-if="selectedCheckInState?.capturedAt">上次签到采集于 {{ formatDateTime(selectedCheckInState.capturedAt) }}</small>
+                  <small v-else>请允许系统和浏览器使用精确位置；电脑定位较粗或室内信号不足时，可使用手机移至开阔处重试。</small>
+                </div>
+              </section>
               <section class="pm-field-step"><header><span>02</span><div><b>填写现场记录</b><small>原始数据、环境条件与文件回执绑定同一采集时间。</small></div></header><div class="pm-form pm-operation-form"><label><span>现场原始数据 <em>*</em></span><textarea v-model.trim="operationForm.rawData" rows="3" placeholder="记录现场实测数据与依据" maxlength="2000"></textarea></label><label><span>环境条件 <em>*</em></span><textarea v-model.trim="operationForm.environment" rows="3" placeholder="记录现场环境条件" maxlength="500"></textarea></label><label><span>现场证据 <em>*</em></span><input type="file" accept="application/pdf,image/png,image/jpeg" @change="operationForm.fieldEvidenceFile = $event.target.files?.[0] || null" /><small>文件通过统一文件网关上传、校验并以 SHA-256 回执存证。</small></label><button class="pm-button" :disabled="saving" @click="runOperation('field')">保存现场记录</button></div></section>
               <section class="pm-field-step"><header><span>03</span><div><b>电子签名</b><small>签名图像经文件网关存证，并绑定当前账号与时间戳。</small></div></header><SignaturePad :key="signaturePadKey" @signed="operationForm.fieldSignatureFile = $event" @cleared="operationForm.fieldSignatureFile = null" /><button class="pm-button" :disabled="saving || !operationForm.fieldSignatureFile" @click="runOperation('field-signature')">提交电子签名</button></section>
             </div>
