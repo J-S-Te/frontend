@@ -2,6 +2,26 @@
    规则：卡片本体、数值、图标默认用中性；只有待办/风险（warning/danger）保留语义色。
    依据：UI 规范原型「令牌与组件」——单页最多 4 张，只有风险与待办上色，同屏颜色 ≤ 2。 */
 
+/* 唯一卡型：白底 + 1px 描边 + 圆角 10 + 无卡片阴影；数值 30/600 tabular。 */
+:root :is(.contract-app .contract-stat-grid :is(article, button),
+  .crm-page .crm-stat-card,
+  .expense-canvas .expense-metric,
+  .settlement-page .settlement-cards article,
+  .pm-page .pm-kpi) {
+  border-radius: var(--radius-card);
+  box-shadow: none;
+}
+:root :is(.contract-app .contract-stat-grid strong,
+  .crm-page .crm-stat-value,
+  .expense-canvas .expense-metric__value,
+  .settlement-page .settlement-cards b,
+  .pm-page .pm-kpi .pm-kpi-value) {
+  font-size: var(--fs-display);
+  font-weight: 600;
+  line-height: var(--lh-display);
+  font-variant-numeric: tabular-nums;
+}
+
 /* 合同工作台：去掉左侧色条，总额/份数/生效改中性，审批中保留 warning，逾期保留 danger。 */
 :root .contract-app .contract-stat-grid :is(article, button)::before { display: none; }
 :root .contract-app .contract-stat-grid :is(article, button) {

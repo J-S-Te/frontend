@@ -55,7 +55,7 @@ test('控制台与 IAM 只引用全局设计变量，不再复制基础色板', 
   ])
 
   assert.match(mainCSS, /--primary:\s*#2563eb/)
-  assert.match(mainCSS, /--radius-panel:\s*12px/)
+  assert.match(mainCSS, /--radius-panel:\s*14px/)
   assert.match(mainCSS, /--shadow-modal:/)
   assert.match(consoleCSS, /--p:\s*var\(--primary\)/)
   assert.match(iamCSS, /--ink-1:\s*var\(--text\)/)

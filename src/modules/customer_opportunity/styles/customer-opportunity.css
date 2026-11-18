@@ -1088,7 +1088,7 @@
   margin-bottom: 12px;
   padding: 13px 18px;
   border: 1px solid var(--border-soft, #dbe7f5);
-  border-radius: var(--radius-xl, 12px);
+  border-radius: var(--radius-xl, 14px);
   background: var(--surface-card, #fff);
 }
 .crm-presale-create-steps__label { flex: 0 0 auto; margin: 0; color: var(--primary-ink, #2563eb); font-size: 12px; font-weight: 800; letter-spacing: .08em; }
@@ -3423,12 +3423,12 @@
 .crm-rule-config__menu {
   position: absolute; top: calc(100% + 6px); right: 0; z-index: var(--crm-z-popover);
   display: grid; min-width: 168px; gap: 2px; padding: 6px;
-  border: 1px solid var(--border, #e2e8f0); border-radius: var(--radius-md, 8px);
+  border: 1px solid var(--border, #e2e8f0); border-radius: var(--radius-md, 6px);
   background: var(--surface-card, #fff); box-shadow: 0 14px 34px rgba(15, 23, 42, .16);
 }
 .crm-rule-config__menu button.crm-rule-config__item {
   display: block; width: 100%; min-height: 0; height: auto; padding: 9px 10px;
-  color: var(--text); font-size: 13px; text-align: left; border: 0; border-radius: var(--radius-sm, 8px);
+  color: var(--text); font-size: 13px; text-align: left; border: 0; border-radius: var(--radius-sm, 6px);
   background: transparent; box-shadow: none;
 }
 .crm-rule-config__menu button.crm-rule-config__item:hover { background: var(--surface-content, #f1f5f9); }
