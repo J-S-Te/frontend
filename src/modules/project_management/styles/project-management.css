@@ -2670,3 +2670,54 @@
   .pm-operation-summary { flex-direction: column; }
   .pm-operation-summary-meta { grid-template-columns: repeat(2, minmax(0, 1fr)); min-width: 0; width: 100%; }
 }
+
+/* ==========================================================================
+   分类标签（2026-11-18）：设备/人员与资质/能力编码按类别着色。
+   与状态胶囊分离：状态用实心+圆点，分类用描边/图标，且只消费 --tag-* token。
+   ========================================================================== */
+.pm-kind-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 22px;
+  padding: 0 9px;
+  border: 1px solid var(--kind-border, var(--pm-line));
+  border-radius: var(--pm-r-full);
+  background: var(--kind-bg, var(--pm-sunken));
+  color: var(--kind-text, var(--pm-body));
+  font-size: var(--pm-fs-hint);
+  font-weight: 600;
+  white-space: nowrap;
+}
+.pm-kind-pill svg { width: 12px; height: 12px; flex: none; }
+.pm-kind-pill.is-person {
+  --kind-text: var(--tag-person-text);
+  --kind-bg: var(--tag-person-bg);
+  --kind-border: var(--tag-person-border);
+}
+.pm-kind-pill.is-equipment {
+  --kind-text: var(--tag-equipment-text);
+  --kind-bg: var(--tag-equipment-bg);
+  --kind-border: var(--tag-equipment-border);
+}
+.pm-code-pill.pm-code-pill--credential {
+  color: var(--tag-credential-text);
+  background: var(--tag-credential-bg);
+  border-color: var(--tag-credential-border);
+}
+.pm-code-pill.pm-code-pill--testing {
+  color: var(--tag-testing-text);
+  background: var(--tag-testing-bg);
+  border-color: var(--tag-testing-border);
+}
+.pm-code-pill.pm-code-pill--system {
+  color: var(--tag-system-text);
+  background: var(--tag-system-bg);
+  border-color: var(--tag-system-border);
+}
+.pm-code-pill.pm-code-pill--other {
+  color: var(--tag-other-text);
+  background: var(--tag-other-bg);
+  border-color: var(--tag-other-border);
+  border-style: dashed;
+}
