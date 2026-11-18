@@ -20,6 +20,7 @@
 | `first-run-browser.mjs` | 路由合成 `page.goto` + 内联真实组件/CSS | 否 | 仅 Chrome |
 | `reimbursement-page-browser.mjs` | 内联真实报销页面/组件/CSS；可单选票据复核或维护 | 否（opt-in） | 仅 Chrome，无后端/数据库 |
 | `contract-approval-browser.mjs` | 内联真实审批刷新函数、命令组合函数和弹窗按钮模板 | 否（opt-in） | 仅 Chrome，无后端/数据库 |
+| `contract-crm-prefill-browser.mjs` | 内联真实合同字段组件、编辑器、CRM API及视图选择动作 | 否（opt-in） | 仅 Chrome，无后端/数据库 |
 | `settlement-role-browser.mjs` | 自起 Vite + 隔离夹具后端/MySQL | 否（opt-in） | 隔离夹具会话 + 隔离 MySQL + 后端 |
 
 进 CI 的只有 `responsive-boundaries-browser.mjs`：它不依赖 dev server、不依赖后端，
@@ -196,6 +197,17 @@ CONTRACT_APPROVAL_OUTPUT_DIR=/tmp/contract-approval-ui \
 返回为合成数据，外部请求全部拦截。它只验证审批区域交互，不代表完整页面或真实审批验收。
 
 ## CI 接线
+
+合同自动带入只运行一个最小隔离场景：
+
+```bash
+CONTRACT_CRM_OUTPUT_DIR=/tmp/contract-crm-prefill-ui \
+  node src/test/ui-harness/contract-crm-prefill-browser.mjs
+```
+
+覆盖选客户、选商机、模板空白值同步、手工修改后换来源，以及编辑模板时旧编号隐藏。
+保存截图与 `result.json`；实际会话、目录和联系人 HTTP 均为合成响应，禁止业务写请求，
+不代表完整页面或真实后端验收。可通过 `CHROMIUM_PATH` 指定已安装的 Chrome。
 
 `.github/workflows/ci-cd.yml` 的 `layout` job（与 `test` 并列，push/PR 默认执行，
 不进入 `image`/`deploy` 依赖链）：`ubuntu-latest` + `timeout-minutes: 15` +
