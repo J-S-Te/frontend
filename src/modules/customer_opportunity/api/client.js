@@ -1,3 +1,5 @@
+import { AUTHORIZATION_REFRESH_HEADERS, createAuthorizationSnapshotReader }
+  from '../../shared/authz/authorizationSnapshot.js'
 import { normalizeAuthorizationSession, principalIdentityID, shouldStartSubsystemLogin } from '../../shared/authz/sessionCompatibility.js'
 import { attachStructuredContext } from '../../platform/shared/api/requestContext.js'
 import { safeDownloadFilename } from '../../shared/utils/contentDisposition.js'
@@ -415,17 +417,14 @@ export function toQuery(params = {}) {
   return encoded ? `?${encoded}` : ''
 }
 
-/**
- * getCRMSession 读取并规范化 CRM 子系统会话；HttpOnly Cookie 始终由浏览器管理。
- * @returns {Promise<Record<string, unknown>>} 规范化后的 CRM 会话。
- * @throws {CRMAPIError} 会话失效或服务端返回非成功状态时抛出。
- * @throws {TypeError} 网络连接失败时抛出。
- */
+// 用途：读取最新CRM会话并核对平台主体，避免沿用已切换账号的子系统身份。
+// 参数：无。
+// 返回值：规范化会话Promise；身份切换启动登录，其他CRM错误原样抛出。
 export async function ensureCRMSession() {
   // CRM 自身 `/auth/me` 与平台 `/api/v1/auth/me` 互不依赖，并行发起可少一个往返；
   // 失败语义不变：平台侧失败仍被吞掉，CRM 侧失败仍原样抛出。
   const [crmSession, platformResult] = await Promise.all([
-    request('/auth/me').then((value) => normalizeAuthorizationSession(value)),
+    getCRMSession({ force: true }),
     getPlatformPrincipalForSessionCheck().then(
       (principal) => ({ ok: true, principal }),
       (error) => ({ ok: false, error }),
@@ -450,7 +449,19 @@ export async function ensureCRMSession() {
   return crmSession
 }
 
-export const getCRMSession = async () => normalizeAuthorizationSession(await request('/auth/me'))
+
+const crmSessionReader = createAuthorizationSnapshotReader({
+  load: options => request('/auth/me', { ...options,
+    cache: 'no-store', headers: AUTHORIZATION_REFRESH_HEADERS, suppressLoginRedirect: true }),
+  cacheTTL: 0, normalize: normalizeAuthorizationSession,
+  onError: (error, options) => {
+    if (!options.suppressLoginRedirect && shouldStartSubsystemLogin(error)) redirectToLogin()
+  },
+})
+// 用途：读取CRM当前授权并阻止旧请求回写页面权限。
+// 参数：options 为强制重读或既有读取选项。
+// 返回值：规范化授权Promise；保留原错误分类。
+export function getCRMSession(options = {}) { return crmSessionReader.read(options) }
 
 /**
  * startCRMLogin 发起 CRM 子系统登录（会话空闲到期时由前端生命周期调用）。

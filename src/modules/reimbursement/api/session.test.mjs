@@ -1,3 +1,5 @@
+import { AUTHORIZATION_REFRESH_HEADERS, createAuthorizationSnapshotReader }
+  from '../../shared/authz/authorizationSnapshot.js'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
@@ -9,15 +11,18 @@ import { principalIdentityID } from '../../shared/authz/sessionCompatibility.js'
 function sessionFixture(session, principal, failure) {
   const requests = [], redirects = []
   const source = readFileSync(new URL('./reimbursement.js', import.meta.url), 'utf8')
-    .replace(/^import .*\n/gm, '').replace(/import\.meta\.env/g, '{}')
+    .replace(/^import\s[\s\S]*?from ['"][^'"]+['"]\n/gm, '').replace(/import\.meta\.env/g, '{}')
     .replace(/export (const|function|async function)/g, '$1')
   const clientFactory = ({ base }) => ({ request: async (path, options) => {
     requests.push([base, path, options])
     if (path === '/auth/session' && failure) throw failure
     return path === '/auth/session' ? session : { logged_out: true }
   } })
-  const api = new Function('getCurrentPrincipal', 'principalIdentityID', 'createClient', 'window',
+  const api = new Function(
+    'createAuthorizationSnapshotReader', 'AUTHORIZATION_REFRESH_HEADERS',
+    'getCurrentPrincipal', 'principalIdentityID', 'createClient', 'window',
     `${source}\nreturn {ensureReimbursementSession,startReimbursementLogin}`)(
+    createAuthorizationSnapshotReader, AUTHORIZATION_REFRESH_HEADERS,
     async () => { if (!principal) throw { status: 401 }; return principal },
     principalIdentityID, clientFactory,
     { location: { pathname: '/reimbursement/claims', search: '?project_id=p',

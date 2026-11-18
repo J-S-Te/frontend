@@ -7,6 +7,7 @@ import * as Vue from 'vue'
 import { compile } from '@vue/compiler-dom'
 import { renderToString } from '@vue/server-renderer'
 import { parse as parseJavaScript } from '@babel/parser'
+import { authorizationScopeKey } from '../shared/authz/authorizationSnapshot.js'
 
 const source = readFileSync(new URL('./views/CustomerPortalView.vue', import.meta.url), 'utf8')
 
@@ -102,6 +103,8 @@ for (const kind of ['feedback', 'reports']) {
 function notificationHarness(section, overrides = {}) {
   const names = ['feedbackNotifications', 'reportNotifications', 'feedbacks', 'projects']
   const context = { ref, section: ref(section), session: ref({}), capabilitiesLoaded: true,
+    portalLoadGeneration: 0, authorizationScopeKey, capabilities: ref({}),
+    getPortalSession: async () => ({}), getPortalCapabilities: async () => ({}),
     isPortalSuperAdmin: ref(false), hasPermission: () => true,
     feedbackNotificationGeneration: 0, reportLoadGeneration: 0,
     feedbackNotificationUnreadCount: ref(7), reportNotificationUnreadCount: ref(5),

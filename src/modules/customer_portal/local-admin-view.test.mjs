@@ -2,6 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import vm from 'node:vm'
 import { readFile } from 'node:fs/promises'
+import { authorizationScopeKey } from '../shared/authz/authorizationSnapshot.js'
 
 const source = await readFile(new URL('./views/CustomerPortalView.vue', import.meta.url), 'utf8')
 
@@ -10,10 +11,12 @@ const source = await readFile(new URL('./views/CustomerPortalView.vue', import.m
 // 返回值：实际调用记录及页面状态。
 async function loadWorkspace(failure = false, customer = false) {
   const calls = []
+  const identity = { roles: customer ? ['portal_customer'] : ['portal_super_admin'] }
   const state = { loading: { value: false }, refreshing: { value: false }, error: { value: '' }, notice: { value: '' },
-    session: { value: null }, capabilities: { value: { customer_directory_mode: 'local' } },
+    portalLoadGeneration: 0, authorizationScopeKey,
+    session: { value: identity }, capabilities: { value: { customer_directory_mode: 'local' } },
     isPortalSuperAdmin: { value: !customer }, capabilitiesLoaded: false,
-    getPortalSession: async () => { calls.push('session'); return { roles: customer ? ['portal_customer'] : ['portal_super_admin'] } },
+    getPortalSession: async () => { calls.push('session'); return identity },
     getPortalCapabilities: async () => {
       calls.push('capabilities')
       if (failure) throw new Error('metadata unavailable')

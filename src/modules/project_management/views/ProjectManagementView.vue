@@ -1,5 +1,6 @@
 <script setup>
 import { useLoginUsername } from '@/modules/shared/composables/useLoginUsername.js'
+import { authorizationScopeKey } from '@/modules/shared/authz/authorizationSnapshot.js'
 import { useDialogFocusTrap } from '@/modules/shared/composables/useDialogFocusTrap.js'
 import ShellPreferences from '@/modules/shared/components/ShellPreferences.vue'
 import { useSidebarNavigation } from '@/modules/shared/composables/useSidebarNavigation.js'
@@ -436,6 +437,7 @@ const lastUpdatedAt = ref(null)
 const sectionDataContext = computed(() => JSON.stringify([
   session.value?.tenant_id, principalIdentityID(session.value), session.value?.authorization_revision,
   session.value?.permissions, session.value?.roles, navigation.value.sections,
+  session.value?.data_scopes,
   navigation.value.authorization_revision, navigation.value.catalog_version,
 ]))
 let toastTimer = 0
@@ -2070,8 +2072,10 @@ const operationDetailFields = computed(() => {
 // “已保存，但最新数据读取失败”的准确文案提示，不把整个工作区替换成错误页。
 const workspaceScope = createRequestScope()
 const workspaceReady = ref(false)
+const workspaceAuthorizationPending = ref(false)
 const { loading: sectionExtrasLoading, error: sectionExtrasError, load: loadSectionExtras } = useProjectSectionData({
-  section: activeSection, context: sectionDataContext, ready: workspaceReady,
+  section: activeSection, context: sectionDataContext,
+  ready: computed(() => workspaceReady.value && !workspaceAuthorizationPending.value),
   allowed: (section) => navigation.value.sections.includes(section)
     || (section === 'project_detail' && navigation.value.sections.includes('projects')),
   loaders: { events: () => listDeliveryEvents(), dashboard: () => getDashboard(), catalog: () => listRuleConfigurationCatalog() },
@@ -2165,11 +2169,29 @@ function refreshSlaDetails() { void loadSlaOverdueDetails({ force: true }) }
 // 返回值：无。
 function retryPersonnelNames() { void personnelNames.retry() }
 
-// 用途：刷新核心原子快照，再读取当前已授权栏目的依赖。
-// 参数：reportError 控制读取失败提示，background 控制同步时是否保留当前工作区。
-// 返回值：读取完成；写后刷新失败仍交由既有调用方区分已保存结果。
+// 用途：清理旧授权边界下的项目快照与选择，保留未提交的业务表单。
+// 参数：无；使用当前页面数据及读取作用域。
+// 返回值：无；旧范围列表和现场证据不再可见或导出。
+function clearProjectAuthorizationData() {
+  workspaceReady.value = false
+  projects.value = []
+  serviceItems.value = []
+  rules.value = []
+  capabilities.value = []
+  reportStageListScope.invalidate()
+  reportStageProjects.value = []
+  selectedServiceItemIDs.value = []
+  fieldEvidenceScope.invalidate()
+  fieldEvidenceSnapshot.value = null
+  navigation.value = { sections: [], default_section: 'projects', roles: [] }
+}
+
+// 用途：先核验当前授权，再加载与当前账号范围一致的项目工作区。
+// 参数：reportError 控制是否展示读取失败，background 表示保留加载时的工作区布局。
+// 返回值：工作区加载Promise；授权失败停用旧菜单权限，保留未提交表单。
 async function loadWorkspace({ reportError = true, background = false } = {}) {
   const ticket = workspaceScope.begin('WORKSPACE')
+  workspaceAuthorizationPending.value = true
   // background=true 用于写后/手动增量同步：保留旧快照和 Dom，只替换成功返回的数据。
   // 只有首次加载才进入骨架屏；错误态也只在首次加载时清空。
   if (background) { refreshing.value = true; loadError.value = '' }
@@ -2181,8 +2203,18 @@ async function loadWorkspace({ reportError = true, background = false } = {}) {
     // 防止新旧数据混用。接口层仍分别执行会话与资源权限校验。
     // 列表接口省略 page_size 时只返回 20 行，工作区必须显式走 all=1 快照；
     // 超过服务端 500 行上限时 truncated 为 true，用户据此提示缩小筛选范围。
-    const sessionData = await getProjectSession({ force: true })
+    let sessionData
+    try { sessionData = await getProjectSession({ force: true }) }
+    catch (error) {
+      if (!workspaceScope.isCurrent(ticket)) return
+      session.value = null
+      clearProjectAuthorizationData()
+      throw error
+    }
     if (!workspaceScope.isCurrent(ticket)) return
+    if (authorizationScopeKey(session.value) !== authorizationScopeKey(sessionData)) {
+      clearProjectAuthorizationData()
+    }
     session.value = sessionData
     if (!sessionData.permissions?.includes('project.read')) {
       projects.value = []; serviceItems.value = []; rules.value = []; capabilities.value = []
@@ -2220,6 +2252,7 @@ async function loadWorkspace({ reportError = true, background = false } = {}) {
     }
     lastUpdatedAt.value = new Date()
     workspaceReady.value = true
+    workspaceAuthorizationPending.value = false
     const extrasLoaded = await loadSectionExtras()
     if (!workspaceScope.isCurrent(ticket)) return
     if (!extrasLoaded && !reportError) throw new Error('当前栏目依赖数据读取失败。')
@@ -2233,6 +2266,7 @@ async function loadWorkspace({ reportError = true, background = false } = {}) {
   } finally {
     // 只有仍持有当前票据的请求才能结束本次加载态，避免旧请求关闭新请求。
     if (workspaceScope.isCurrent(ticket)) {
+      workspaceAuthorizationPending.value = false
       if (background) refreshing.value = false
       else loading.value = false
     }

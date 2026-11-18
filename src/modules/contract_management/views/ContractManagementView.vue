@@ -7,6 +7,7 @@ import OperationToast from '@/modules/shared/components/OperationToast.vue'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { notificationApprovalFilters, resolveNotificationApproval } from '../utils/notificationApproval.js'
 import { formatUserError } from '../../shared/utils/userError.js'
+import { authorizationScopeKey } from '../../shared/authz/authorizationSnapshot.js'
 import { useConfirmDialog } from '../../shared/composables/useConfirmDialog.js'
 import { createRequestScope } from '../../platform/shared/composables/requestScope.js'
 import { useBeforeUnloadGuard } from '../../shared/composables/useBeforeUnloadGuard.js'
@@ -544,6 +545,7 @@ const { autofillCustomer, autofillOpportunity, clearCRMCustomerPrefill,
 const canSaveNewContract = computed(() => {
   if (contractCreating.value) return false
   if (draftEditConflict.value) return false
+  if (!can(editingContract.value ? 'contract.edit' : 'contract.create')) return false
   return isExternalContractMode.value ? Boolean(editingContract.value || externalContractFile.value) : Boolean(selectedContractTemplate.value)
 })
 
@@ -1801,7 +1803,43 @@ function ruleConditionSummary(rule) {
   return ruleExpressionSummary(rule.expression, conditionLabel)
 }
 
-// 用途：按权限独立加载合同各区域，保留成功数据与具体安全失败原因。
+// 用途：清理已失效授权下的合同数据，保留用户未提交的表单内容。
+// 参数：无；使用当前页面的数据及请求作用域。
+// 返回值：无；旧列表和详情响应失去回写资格。
+function clearContractAuthorizationData() {
+  contracts.value = []
+  approvals.value = []
+  initiatedApprovals.value = []
+  rules.value = []
+  contractTemplates.value = []
+  adminDashboard.value = null
+  ledgerTotal.value = 0
+  contractDetailSequence++
+  selectedContract.value = null
+  approvalDetailScope.invalidate()
+  selectedApproval.value = null
+  approvalDetail.value = null
+  signingLedgerScope.invalidate()
+  signingDetailScope.invalidate()
+  approvalRealtimeScope.invalidate()
+  signingRealtimeScope.invalidate()
+  signingRecords.value = []
+  signingSummary.value = null
+  signingTotal.value = 0
+  signingHasMore.value = false
+  for (const pending of [signingLedgerLoading, signingLoadingMore,
+    signingDetailLoading, approvalDetailLoading, opportunityIntakeLoading,
+    opportunityIntakeLoadingMore, opportunityIntakeDetailLoading]) pending.value = false
+  selectedSigningRecord.value = null
+  opportunityIntakeLoadSequence++
+  opportunityIntakeDetailSequence++
+  opportunityIntakes.value = []
+  opportunityIntakeNextCursor.value = ''
+  opportunityIntakeHasMore.value = false
+  selectedOpportunityIntake.value = null
+}
+
+// 用途：先读取最新授权，再按权限独立加载合同各区域。
 // 参数：无；使用当前会话、筛选及分页状态。
 // 返回值：异步完成；各区域读取错误独立展示，不冒充业务写入失败。
 async function loadBusinessData() {
@@ -1811,6 +1849,22 @@ async function loadBusinessData() {
   businessDataLoading.value = true
   approvalsKnown.value = false
   businessDataErrors.value = {}
+  try {
+    const current = await getContractSession({ force: true })
+    if (sequence !== businessDataSequence) return
+    if (authorizationScopeKey(session.value) !== authorizationScopeKey(current)) {
+      clearContractAuthorizationData()
+    }
+    session.value = current
+    sessionError.value = ''
+  } catch (error) {
+    if (sequence !== businessDataSequence) return
+    session.value = null
+    clearContractAuthorizationData()
+    sessionError.value = formatUserError(error, { fallback: '读取最新合同权限失败，请刷新重试。' })
+    businessDataLoading.value = false
+    return
+  }
   const requests = []
   const addRequest = (label, sections, promise) => {
     requests.push({ label, sections, promise })
@@ -1818,7 +1872,9 @@ async function loadBusinessData() {
   if (can('approval.view') || can('approval.process') || can('contract.create')) {
     addRequest('我发起的审批', ['dashboard', 'approvals'], listApprovals({ limit: 200,
       ...(activeSection.value === 'approvals' ? notificationApprovalFilters(route.query) : {}),
-    }).then(setInitiatedApprovals))
+    }).then(items => {
+      if (sequence === businessDataSequence) setInitiatedApprovals(items)
+    }))
   }
   if (can('contract.read')) {
     addRequest('合同统计', ['dashboard', 'reports'], getContractDashboard().then((summary) => { if (sequence === businessDataSequence) adminDashboard.value = summary }))
@@ -1861,13 +1917,21 @@ async function loadBusinessData() {
   if (can('approval.process')) {
     addRequest('审批待办', ['dashboard', 'approvals'], listApprovalTasks({ limit: 200,
       ...(activeSection.value === 'approvals' ? notificationApprovalFilters(route.query) : {}),
-    }).then((items) => { approvals.value = items.map(normalizeApproval); approvalsKnown.value = true }))
+    }).then((items) => {
+      if (sequence !== businessDataSequence) return
+      approvals.value = items.map(normalizeApproval)
+      approvalsKnown.value = true
+    }))
   }
   if (can('approval.view') || can('approval_rule.manage')) {
-    addRequest('审批规则', ['rules'], listApprovalRules().then((items) => { rules.value = items }))
+    addRequest('审批规则', ['rules'], listApprovalRules().then((items) => {
+      if (sequence === businessDataSequence) rules.value = items
+    }))
   }
   if (can('contract.create') || isAdmin.value) {
-    addRequest('合同模板', ['templates', 'contracts'], listContractTemplates().then((items) => { contractTemplates.value = items }))
+    addRequest('合同模板', ['templates', 'contracts'], listContractTemplates().then((items) => {
+      if (sequence === businessDataSequence) contractTemplates.value = items
+    }))
   }
   if (can('opportunity_intake.read')) {
     addRequest('签单关联核对', ['intakes'], loadOpportunityIntakes())
@@ -2601,7 +2665,14 @@ async function refreshSelectedCRMAccess(form = newContract.value) {
   }
 }
 
+// 用途：仅在当前授权允许时保存或提交合同草稿，保留明确的写入结果边界。
+// 参数：event 为提交事件，submitter 标记保存或提交审批动作。
+// 返回值：处理Promise；无权限不发送写请求，失败保留未提交内容。
 async function submitNewContract(event) {
+  if (!can(editingContract.value ? 'contract.edit' : 'contract.create')) {
+    showToast('当前账号没有保存此合同的权限，请刷新确认授权。')
+    return
+  }
   if (contractCreating.value || draftEditConflict.value) return
   contractCreating.value = true
   draftEditError.value = ''

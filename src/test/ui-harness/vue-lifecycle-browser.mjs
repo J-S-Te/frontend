@@ -16,13 +16,17 @@ const server = await createServer({ configFile: false, root, plugins: [vue()],
   resolve: { alias: { '@': root + 'src' } },
   server: { host: '127.0.0.1', port: 0, hmr: false }, logLevel: 'error' })
 let browser
-const results = [], unexpected = [], calls = []
+const results = [], unexpected = [], calls = [], freshAuthorizationReads = []
 try {
   await server.listen()
   const origin = `http://127.0.0.1:${server.httpServer.address().port}`
   browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH
     || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: true })
   const context = await browser.newContext()
+  if (scenario === 'project-section-load-failure-retry-refresh-permission') {
+    await context.addCookies([{ name: 'project_management_session',
+      value: 'isolated-same-session', url: origin, httpOnly: true }])
+  }
   let failOwners = false
   let failCatalog = false
   let revokeConfig = false
@@ -53,6 +57,16 @@ try {
       data = { automation_triggers: [{ value: 'FIELD_COMPLETED', label: '合成交付事件' }], sla_statuses: [] }
     }
     else if (/\/(rules|capabilities|delivery-events|detection-categories|equipment|personnel|roles)$/.test(url.pathname)) data = { items: [] }
+    if (scenario === 'project-section-load-failure-retry-refresh-permission'
+      && url.pathname === '/project_management/api/v1/auth/me') {
+      const headers = request.headers()
+      if (headers['x-authorization-refresh'] === '1') {
+        assert.ok(headers.cookie?.includes('project_management_session=isolated-same-session'))
+        freshAuthorizationReads.push(calls.length)
+      }
+      if (revokeConfig) data = { ...data, roles: ['viewer'], permissions: ['project.read'],
+        authorization_revision: 2 }
+    }
     await route.fulfill({ json: { code: 'OK', data } })
   })
   const page = await context.newPage()
@@ -162,10 +176,22 @@ try {
   await page.locator('.pm-dialog').getByRole('button', { name: '关闭', exact: true }).click()
   revokeConfig = true
   const beforeRefresh = calls.length
+  const beforeFreshReads = freshAuthorizationReads.length
   await page.getByRole('button', { name: '刷新', exact: true }).first().click()
   await page.waitForFunction(() => window.projectRouter.currentRoute.value.params.section === 'projects')
   await page.waitForFunction(() => !document.querySelector('.ui-state__spinner'))
   assert.equal(calls.slice(beforeRefresh).some(path => path.includes('/rule-configuration-catalog')), false)
+  assert.ok(freshAuthorizationReads.length > beforeFreshReads,
+    '页内刷新未用原 Cookie 显式读取最新授权')
+  const beforeReload = freshAuthorizationReads.length
+  await page.reload()
+  await page.waitForFunction(() => window.fixtureReady)
+  await page.evaluate(() => window.mountProject())
+  await page.waitForFunction(() => document.querySelector('.pm-main') && !document.querySelector('.ui-state__spinner'))
+  assert.ok(freshAuthorizationReads.length > beforeReload, 'F5 未显式重读授权')
+  assert.equal(await page.getByRole('button', { name: '＋ 新建规则', exact: true }).count(), 0)
+  const cookie = (await context.cookies()).find(item => item.name === 'project_management_session')
+  assert.equal(cookie?.value, 'isolated-same-session', '权限刷新不应替换或清理登录Cookie')
   console.log('CHECKPOINT', results.length + 1)
   results.push({ case: 'project-section-load-failure-retry-refresh-permission', status: 'PASS' })
 
@@ -177,7 +203,7 @@ try {
   // 首次模块加载失败是本用例主动注入的唯一预期错误。
   assert.deepEqual(errors.filter(message => message !== 'synthetic module failure'), [])
   await mkdir(output, { recursive: true })
-  await writeFile(output + scenario + '-browser-results.json', JSON.stringify({ mode: 'isolated-local-components', versions: { node: process.version, chromium: browser.version() }, results, unexpected }, null, 2) + '\n')
+  await writeFile(output + scenario + '-browser-results.json', JSON.stringify({ mode: 'isolated-local-components', versions: { node: process.version, chromium: browser.version() }, results, unexpected, fresh_authorization_reads: freshAuthorizationReads.length }, null, 2) + '\n')
   console.log(JSON.stringify(results))
   await context.close()
 } finally { await browser?.close(); await server.close() }

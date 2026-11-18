@@ -1,3 +1,5 @@
+import { AUTHORIZATION_REFRESH_HEADERS, createAuthorizationSnapshotReader }
+  from '../../shared/authz/authorizationSnapshot.js'
 import { normalizeAuthorizationSession, shouldStartSubsystemLogin } from '../../shared/authz/sessionCompatibility.js'
 import { attachStructuredContext } from '../../platform/shared/api/requestContext.js'
 import { safeDownloadFilename } from '../../shared/utils/contentDisposition.js'
@@ -7,8 +9,14 @@ import { formatPortalError } from './errorMessages.js'
 
 const PUBLIC_PATH_PREFIX = (import.meta.env?.VITE_CUSTOMER_PORTAL_PUBLIC_PATH_PREFIX || '/customer-portal').replace(/\/$/, '')
 const API_BASE_URL = (import.meta.env?.VITE_CUSTOMER_PORTAL_API_BASE_URL || `${PUBLIC_PATH_PREFIX}/api/v1`).replace(/\/$/, '')
-let session = null
-let sessionRequest = null
+const portalSessionReader = createAuthorizationSnapshotReader({
+  load: options => request('/auth/me', { ...options, cache: 'no-store',
+    headers: AUTHORIZATION_REFRESH_HEADERS, suppressLoginRedirect: true }),
+  normalize: normalizeAuthorizationSession,
+  onError: (error, options) => {
+    if (!options.suppressLoginRedirect && shouldStartSubsystemLogin(error)) beginLogin()
+  },
+})
 let redirectStarted = false
 
 /**
@@ -76,27 +84,21 @@ async function readResponse(response, requestContext) {
     throw error
   }
 }
-/**
- * beginLogin 清空门户会话并发起登录；并发失败请求只允许首次跳转生效。
- * @returns {void}
- */
+// 用途：清空门户授权快照并只发起一次登录跳转。
+// 参数：无。
+// 返回值：无；跳转时保留当前业务地址。
 function beginLogin() {
   // 门户页面常并发加载项目、通知和能力状态；401 只允许触发一次跳转，并保留
   // 当前相对路径作为回跳目标，避免每个失败请求互相覆盖导航。
   if (redirectStarted) return
   redirectStarted = true
-  session = null
+  portalSessionReader.clear()
   const returnPath = `${window.location.pathname}${window.location.search}${window.location.hash}`
   window.location.replace(`${PUBLIC_PATH_PREFIX}/auth/login?return_to=${encodeURIComponent(returnPath)}`)
 }
-/**
- * request 调用客户门户 API，统一附加 CSRF 请求头、解析响应并补充结构化错误上下文。
- * @param {string} path 相对于门户 API 根路径的请求地址。
- * @param {RequestInit} [options={}] Fetch 请求配置。
- * @returns {Promise<unknown>} 优先返回响应 data 字段，否则返回完整响应体。
- * @throws {PortalAPIError} 服务端返回非成功状态时抛出；会话失效时同时启动登录跳转。
- * @throws {PortalAPIError} 网络失败时抛出结构化错误；主动取消仍保留 AbortError。
- */
+// 用途：调用门户接口，保留普通401跳转并允许会话协调器延后处理登录。
+// 参数：path 为相对API路径，options 为请求及内部登录副作用控制选项。
+// 返回值：服务端数据；失败保持结构化错误与既有取消语义。
 export async function request(path, options = {}) {
   const method = (options.method || 'GET').toUpperCase()
   const requiresCSRF = ['POST', 'PUT', 'PATCH', 'DELETE'].includes(method)
@@ -127,7 +129,7 @@ export async function request(path, options = {}) {
       requestId: body?.request_id || '',
       traceId: body?.trace_id || body?.traceId || '',
     })
-    if (shouldStartSubsystemLogin(error)) beginLogin()
+    if (!options.suppressLoginRedirect && shouldStartSubsystemLogin(error)) beginLogin()
     throw error
   }
   return response.status === 204 || response.status === 205 ? {} : body.data
@@ -270,19 +272,11 @@ export function reportRequestFingerprint(value = {}) {
  */
 export function createIdempotencyKey() { return key() }
 
-/**
- * getPortalSession 读取并规范化客户门户会话，并合并并发读取请求。
- * @param {{force?: boolean}} [options={}] force 为 true 时忽略会话缓存和在途请求。
- * @returns {Promise<Record<string, unknown>>} 规范化后的门户会话。
- * @throws {PortalAPIError} 会话失效或服务端返回非成功状态时抛出。
- * @throws {TypeError} 网络连接失败时抛出。
- */
+// 用途：getPortalSession 取得最新有效会话并隔离迟到授权响应。
+// 参数：force 为强制重读标记，保留既有读取及登录跳转选项。
+// 返回值：规范化会话Promise；认证、授权和依赖错误保持原分类。
 export function getPortalSession({ force = false } = {}) {
-  // 合并并发会话读取；缓存仅驱动界面，所有业务权限仍由 HttpOnly Cookie 和后端判定。
-  if (!force && session) return Promise.resolve(session)
-  if (!force && sessionRequest) return sessionRequest
-  sessionRequest = request('/auth/me').then((value) => { session = normalizeAuthorizationSession(value); return session }).finally(() => { sessionRequest = null })
-  return sessionRequest
+  return portalSessionReader.read({ force })
 }
 /**
  * capability 将单项运行时能力规范为明确的可用状态、模式和原因代码。
@@ -344,12 +338,11 @@ export function ensurePortalSession() {
   })
 }
 
-/**
- * logoutPortal 请求注销门户会话，并无论网络结果如何都返回门户入口页。
- * @returns {Promise<void>}
- */
+// 用途：按显式退出操作注销平台及门户会话并清空授权快照。
+// 参数：无。
+// 返回值：退出Promise；保留原有失败记录与门户入口导航语义。
 export async function logoutPortal() {
-  session = null
+  portalSessionReader.clear()
   // 先撤销基础平台共享会话，再撤销门户会话；这样即使两个请求都被记录，
   // 门户注销仍是用户可观察到的最终边界，且任一请求失败都不会阻断另一请求。
   try {

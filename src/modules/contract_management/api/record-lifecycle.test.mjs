@@ -1,3 +1,6 @@
+import { normalizeAuthorizationSession } from '../../shared/authz/sessionCompatibility.js'
+import { AUTHORIZATION_REFRESH_HEADERS, createAuthorizationSnapshotReader }
+  from '../../shared/authz/authorizationSnapshot.js'
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { readFile } from 'node:fs/promises'
@@ -7,8 +10,12 @@ import { isContractRecordPreview, isContractRecordMutation, isDeletedContractPag
 const source = (await readFile(new URL('./contract.js', import.meta.url), 'utf8'))
   .replace(/^import\s[\s\S]*?from ['"][^'"]+['"]\n/gm, '')
   .replaceAll('import.meta.env', '({})').replace(/^export /gm, '')
-const api = new Function('formatUserError','attachStructuredContext','isContractRecordPreview',
+const api = new Function(
+    'createAuthorizationSnapshotReader', 'AUTHORIZATION_REFRESH_HEADERS',
+    'normalizeAuthorizationSession', 'formatUserError','attachStructuredContext','isContractRecordPreview',
   'isContractRecordMutation','isDeletedContractPage',`${source};return {previewContractDeletion,deleteContractRecord,restoreContractRecord,listDeletedContractRecords}`)(
+    createAuthorizationSnapshotReader, AUTHORIZATION_REFRESH_HEADERS,
+    normalizeAuthorizationSession,
   formatUserError,()=>{},isContractRecordPreview,isContractRecordMutation,isDeletedContractPage)
 
 // withReply 用途：通过真实客户端消费受控 HTTP 响应，记录每次调用而不连接业务环境。
