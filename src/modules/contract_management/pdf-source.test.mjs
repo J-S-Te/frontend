@@ -1,3 +1,6 @@
+import { normalizeAuthorizationSession } from '../shared/authz/sessionCompatibility.js'
+import { AUTHORIZATION_REFRESH_HEADERS, createAuthorizationSnapshotReader }
+  from '../shared/authz/authorizationSnapshot.js'
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { readFile } from 'node:fs/promises'
@@ -11,7 +14,11 @@ async function pdfClient() {
   const source = (await readFile(new URL('./api/contract.js', import.meta.url), 'utf8'))
     .replace(/^import\s[\s\S]*?from ['"][^'"]+['"]\n/gm, '')
     .replaceAll('import.meta.env', '({})').replace(/^export /gm, '')
-  return new Function('downloadRequestSignal', 'DOWNLOAD_TIMEOUT_MESSAGE', `${source}; return { fetchContractPDFSource };`)(downloadRequestSignal, DOWNLOAD_TIMEOUT_MESSAGE)
+  return new Function(
+    'createAuthorizationSnapshotReader', 'AUTHORIZATION_REFRESH_HEADERS',
+    'normalizeAuthorizationSession', 'downloadRequestSignal', 'DOWNLOAD_TIMEOUT_MESSAGE', `${source}; return { fetchContractPDFSource };`)(
+    createAuthorizationSnapshotReader, AUTHORIZATION_REFRESH_HEADERS,
+    normalizeAuthorizationSession, downloadRequestSignal, DOWNLOAD_TIMEOUT_MESSAGE)
 }
 
 test('PDF选择仅在能力开放后允许且DOCX仍保留10MiB边界', () => {

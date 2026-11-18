@@ -1,3 +1,5 @@
+import { AUTHORIZATION_REFRESH_HEADERS, createAuthorizationSnapshotReader }
+  from '../../shared/authz/authorizationSnapshot.js'
 import { getCurrentPrincipal } from '../../platform/auth/api/auth'
 import { principalIdentityID } from '../../shared/authz/sessionCompatibility.js'
 import { createClient } from './client.js'
@@ -19,10 +21,15 @@ export function startReimbursementLogin(force = false) {
   window.location.replace(`${publicPrefix}/auth/login?${query}`)
 }
 
-// 用途：读取报销服务器会话。
-// 参数：无。
-// 返回值：会话及权威权限；失败原样抛出。
-export function getReimbursementSession() { return authAPI.request('/auth/session') }
+const reimbursementSessionReader = createAuthorizationSnapshotReader({
+  load: options => authAPI.request('/auth/session', { ...options,
+    cache: 'no-store', headers: AUTHORIZATION_REFRESH_HEADERS }),
+  cacheTTL: 0,
+})
+// 用途：读取报销最新授权并隔离旧在途响应。
+// 参数：options 为强制重读或既有读取选项。
+// 返回值：服务器会话Promise，失败保持原分类。
+export function getReimbursementSession(options = {}) { return reimbursementSessionReader.read(options) }
 
 // 用途：为已核对为同一用户和租户的报销会话补充真实账号展示资料。
 // 参数：session 为报销授权会话，principal 为平台当前主体，matched 表示身份绑定已通过。

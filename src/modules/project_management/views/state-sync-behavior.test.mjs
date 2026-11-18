@@ -6,6 +6,7 @@ import { ref } from 'vue'
 import { createRequestScope } from '../../platform/shared/composables/requestScope.js'
 import { formatUserError } from '../../shared/utils/userError.js'
 import { subsystemAccessMessage } from '../../shared/authz/sessionCompatibility.js'
+import { authorizationScopeKey } from '../../shared/authz/authorizationSnapshot.js'
 
 function functions(names, context) {
   const source = readFileSync(new URL('./ProjectManagementView.vue', import.meta.url), 'utf8')
@@ -21,13 +22,17 @@ function deferred() {
   const promise = new Promise((yes, no) => { resolve = yes; reject = no })
   return { promise, resolve, reject }
 }
+// 用途：构造已登录、同授权范围的后台刷新状态，隔离业务快照接口。
+// 参数：snapshot 为可控制完成时机的项目快照读取。
+// 返回值：真实工作区函数消费的响应式页面上下文。
 function context(snapshot) {
   return {
-    ref, createRequestScope, formatUserError, subsystemAccessMessage,
+    ref, createRequestScope, formatUserError, subsystemAccessMessage, authorizationScopeKey,
     window: { clearTimeout: () => {}, setTimeout: () => 0 }, toastTimer: 0,
     toastMessage: ref(''), toastType: ref('success'),
     loading: ref(false), refreshing: ref(false), refreshWarning: ref(''), loadError: ref(''), ruleConfigurationCatalogError: ref(''),
     workspaceTruncated: ref(false), workspaceReady: ref(true), lastUpdatedAt: ref(null),
+    workspaceAuthorizationPending: ref(false),
     projects: ref([{ id: 'PJ-OLD', name: '旧快照' }]), serviceItems: ref([]), rules: ref([]), deliveryEvents: ref([]),
     capabilities: ref([]), dashboard: ref({}), session: ref({ permissions: ['project.read'] }), navigation: ref({ sections: ['projects'] }),
     detectionCategories: ref([]), automationTriggerOptions: ref([]), slaStatusOptions: ref([]), slaOverdueItems: ref([]),

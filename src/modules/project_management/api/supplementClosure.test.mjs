@@ -1,3 +1,5 @@
+import { AUTHORIZATION_REFRESH_HEADERS, createAuthorizationSnapshotReader }
+  from '../../shared/authz/authorizationSnapshot.js'
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { readFile } from 'node:fs/promises'
@@ -8,8 +10,12 @@ import { normalizeAuthorizationSession, principalIdentityID, shouldStartSubsyste
 const source = (await readFile(new URL('./projectManagement.js', import.meta.url), 'utf8'))
   .replace(/^import\s[\s\S]*?from ['"][^'"]+['"]\n/gm, '')
   .replaceAll('import.meta.env', '({})').replace(/^export /gm, '')
-const client = new Function('formatUserError', 'attachStructuredContext', 'normalizeAuthorizationSession', 'principalIdentityID', 'shouldStartSubsystemLogin',
-  `${source}; return { closeSupplement };`)(formatUserError, attachStructuredContext, normalizeAuthorizationSession, principalIdentityID, shouldStartSubsystemLogin)
+const client = new Function(
+    'createAuthorizationSnapshotReader', 'AUTHORIZATION_REFRESH_HEADERS',
+    'formatUserError', 'attachStructuredContext', 'normalizeAuthorizationSession', 'principalIdentityID', 'shouldStartSubsystemLogin',
+  `${source}; return { closeSupplement };`)(
+    createAuthorizationSnapshotReader, AUTHORIZATION_REFRESH_HEADERS,
+    formatUserError, attachStructuredContext, normalizeAuthorizationSession, principalIdentityID, shouldStartSubsystemLogin)
 
 test('补充协议关账以 POST 调用目标项目路由并提交补充协议与原因', async () => {
   const original = globalThis.fetch

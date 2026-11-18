@@ -5,6 +5,8 @@ import vm from 'node:vm'
 import { attachStructuredContext, createApiRequestContext } from '../platform/shared/api/requestContext.js'
 import { shouldStartSubsystemLogin } from '../shared/authz/sessionCompatibility.js'
 import { formatDataAnalysisError } from './utils/errors.js'
+import { createAuthorizationSnapshotReader, AUTHORIZATION_REFRESH_HEADERS }
+  from '../shared/authz/authorizationSnapshot.js'
 
 const source = await readFile(new URL('./api/dataAnalysis.js', import.meta.url), 'utf8')
 // 用途：在真实数析客户端外替换网络边界，验证公开错误回执的消费行为。
@@ -13,11 +15,13 @@ const source = await readFile(new URL('./api/dataAnalysis.js', import.meta.url),
 function harness(fetcher) {
   const redirects = []
   const context = vm.createContext({
+    createAuthorizationSnapshotReader, AUTHORIZATION_REFRESH_HEADERS,
     fetch: fetcher, attachStructuredContext, createApiRequestContext, shouldStartSubsystemLogin,
     formatDataAnalysisError, URLSearchParams,
     window: { location: { replace: (url) => redirects.push(url) } },
   })
-  const script = source.replace(/^import .*$/gm, '').replace(/import\.meta\.env/g, '({})').replace(/^export /gm, '')
+  const script = source.replace(/^import\s[\s\S]*?from ['"][^'"]+['"]\n/gm, '')
+    .replace(/import\.meta\.env/g, '({})').replace(/^export /gm, '')
   vm.runInContext(`${script}\nglobalThis.api = { getAuthMe, getAlertRules, putAlertRules, triggerSource, triggerAllSources, getEmbedToken, createDictionaryMetric, deleteAlertRule, deleteDictionaryMetric, ensureDataAnalysisSession };`, context)
   return { api: context.api, redirects }
 }

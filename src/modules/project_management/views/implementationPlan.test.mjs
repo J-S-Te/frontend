@@ -1,3 +1,5 @@
+import { AUTHORIZATION_REFRESH_HEADERS, createAuthorizationSnapshotReader }
+  from '../../shared/authz/authorizationSnapshot.js'
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import test from 'node:test'
@@ -21,10 +23,14 @@ function section(start, end) {
   return view.slice(offset, limit)
 }
 
+// 用途：装配真实 API 源码及共享授权读取依赖，保留既有测试网络边界。
+// 参数：status 为计划提交接口的 HTTP 状态，默认成功。
+// 返回值：真实计划操作上下文、请求及提示记录和刷新次数。
 function workspace({ status = 200 } = {}) {
   const requests = [], toasts = []
   let refreshes = 0
   const context = {
+    createAuthorizationSnapshotReader, AUTHORIZATION_REFRESH_HEADERS,
     ref, FormData, Response, formatUserError, attachStructuredContext,
     normalizeAuthorizationSession, principalIdentityID, shouldStartSubsystemLogin,
     selectedServiceItem: ref(null), selectedServiceItems: ref([]),

@@ -1,3 +1,6 @@
+import { normalizeAuthorizationSession } from '../../shared/authz/sessionCompatibility.js'
+import { AUTHORIZATION_REFRESH_HEADERS, createAuthorizationSnapshotReader }
+  from '../../shared/authz/authorizationSnapshot.js'
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import test from 'node:test'
@@ -11,9 +14,16 @@ const source = (await readFile(new URL('./contract.js', import.meta.url), 'utf8'
   .replaceAll('import.meta.env', '({})')
   .replace(/^export /gm, '')
 
+// 用途：装配真实 API 源码及共享授权读取依赖，保留既有测试网络边界。
+// 参数：无；浏览器和网络由既有场景夹具提供。
+// 返回值：保留正式请求、响应解析和授权读取逻辑的 API。
 function client() {
-  return new Function('formatUserError', 'attachStructuredContext', 'subsystemAccessMessage',
+  return new Function(
+    'createAuthorizationSnapshotReader', 'AUTHORIZATION_REFRESH_HEADERS',
+    'normalizeAuthorizationSession', 'formatUserError', 'attachStructuredContext', 'subsystemAccessMessage',
     `${source}; return { getImportAutoApproveSetting, setImportAutoApproveSetting };\n//# sourceURL=contract-api-auto-approve-under-test.js`)(
+    createAuthorizationSnapshotReader, AUTHORIZATION_REFRESH_HEADERS,
+    normalizeAuthorizationSession,
     formatUserError,
     attachStructuredContext,
     (error, message) => message,

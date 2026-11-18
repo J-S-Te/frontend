@@ -6,6 +6,7 @@ import { ref } from 'vue'
 import { createRequestScope } from '../../platform/shared/composables/requestScope.js'
 import { formatUserError } from '../../shared/utils/userError.js'
 import { subsystemAccessMessage } from '../../shared/authz/sessionCompatibility.js'
+import { authorizationScopeKey } from '../../shared/authz/authorizationSnapshot.js'
 
 // 沿用 presaleStability.test.mjs 的做法：从真实 SFC 提取项目计划/现场执行/报告链路函数，
 // 在注入的上下文中执行，验证接线后的行为而非复述实现。
@@ -40,16 +41,17 @@ async function until(condition, timeoutMs = 100) {
 function workspaceContext({ listProjectsSnapshot = async () => ({ items: [], total: 0, truncated: false }) } = {}) {
   const toasts = []
   const context = {
-    ref, createRequestScope, formatUserError, subsystemAccessMessage,
+    ref, createRequestScope, formatUserError, subsystemAccessMessage, authorizationScopeKey,
     window: { clearTimeout: () => {}, setTimeout: () => 0 },
     toastTimer: 0,
     toastMessage: ref(''), toastType: ref('success'),
     loading: ref(true), refreshing: ref(false), refreshWarning: ref(''), loadError: ref('错误'), ruleConfigurationCatalogError: ref(''),
     workspaceTruncated: ref(false), workspaceReady: ref(false),
+    workspaceAuthorizationPending: ref(false),
     loadSectionExtras: async () => true,
     lastUpdatedAt: ref(null),
     projects: ref([]), serviceItems: ref([]), rules: ref([]), deliveryEvents: ref([]),
-    capabilities: ref([]), dashboard: ref({}), session: ref(null), navigation: ref({ sections: [] }),
+    capabilities: ref([]), dashboard: ref({}), session: ref({ permissions: ['project.read'] }), navigation: ref({ sections: [] }),
     detectionCategories: ref([]), automationTriggerOptions: ref([]), slaStatusOptions: ref([]),
     slaOverdueItems: ref([]),
     activeSection: ref('projects'),

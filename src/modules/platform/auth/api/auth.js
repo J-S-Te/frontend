@@ -1,3 +1,5 @@
+import { AUTHORIZATION_REFRESH_HEADERS, createAuthorizationSnapshotReader }
+  from '../../../shared/authz/authorizationSnapshot.js'
 // 使用相对路径，确保该纯 API 模块既能被 Vite 解析，也能被 Node 原生测试运行器直接加载。
 import { broadcastSessionEnded } from '../utils/sessionLifecycle.js'
 import { clearAuthorizationSnapshot, onAuthorizationSnapshotCleared } from '../utils/authorizationRefresh.js'
@@ -15,26 +17,18 @@ const CREDENTIAL_ENCRYPTION_MODE = (typeof import.meta.env === 'undefined'
   : (import.meta.env?.VITE_CREDENTIAL_ENCRYPTION_MODE || 'required'))
 let browserSessionGeneration = 0
 
-// `/auth/me` 结果缓存与单飞（in-flight 复用）。
-// 首屏一次导航会同时被路由守卫、App 会话同步、门户组件各读一次主体，无缓存时
-// 会并发发出多份完全相同的请求并串行阻塞导航。这里只做两件低风险的事：
-//   1. 单飞：同一时刻只允许一个 `/auth/me` 在途，其余调用方复用同一个 Promise；
-//   2. 短 TTL：成功结果缓存 PRINCIPAL_CACHE_TTL_MS，失败绝不缓存。
-// 缓存键包含 browserSessionGeneration：登录、改密、退出会推进世代号并清空缓存，
-// 旧世代的结果不会被后续调用读到。
+// 首屏及常规轮询保留5秒短缓存；明确刷新使用同一代际协调器隔离旧响应。
 const PRINCIPAL_CACHE_TTL_MS = 5000
-let principalCache = null
-let principalInFlight = null
-// 缓存世代号只增不减：快照被清空后，仍在途的旧请求即使成功也不回写缓存。
-let principalCacheEpoch = 0
+const principalReader = createAuthorizationSnapshotReader({
+  load: () => fetchCurrentPrincipal(browserSessionGeneration),
+  cacheTTL: PRINCIPAL_CACHE_TTL_MS,
+})
 
 // clearPrincipalCache 清空 `/auth/me` 缓存与在途请求登记。
 // 参数：无。
 // 返回值：无。
 function clearPrincipalCache() {
-  principalCache = null
-  principalInFlight = null
-  principalCacheEpoch += 1
+  principalReader.clear()
 }
 
 // 换号、退出或会话失效都会清空内存授权快照；`/auth/me` 短缓存必须同时作废，
@@ -305,60 +299,23 @@ export async function changeOwnPassword({ currentPassword, newPassword }) {
   return body
 }
 
-/**
- * getCurrentPrincipal 读取当前浏览器会话对应的已认证主体。
- *
- * 服务端从 HttpOnly 会话 Cookie 中验证 JWT 和已持久化的会话状态；前端只消费
- * `/auth/me` 返回的最小身份信息，不在浏览器存储中保存令牌。
- *
- * 为消除首屏重复请求，本函数附加两项内部优化（不改变失败语义）：
- * 1. 单飞：同一世代下同一时刻只有一个 `/auth/me` 在途，并发调用复用同一个 Promise；
- * 2. 短 TTL：成功结果缓存 PRINCIPAL_CACHE_TTL_MS，失败结果一律不缓存。
- * 登录、改密、退出会推进 browserSessionGeneration 并清空缓存，因此换号后不会读到
- * 上一账号的主体。
- *
- * @returns {Promise<Object>} 返回兼容处理后的当前用户及授权会话。
- * @throws {AuthError} 会话失效、请求期间账号发生切换或认证服务不可用时抛出。
- */
-export async function getCurrentPrincipal() {
-  const generation = browserSessionGeneration
-  if (principalCache && principalCache.generation === generation && principalCache.expiresAt > Date.now()) {
-    return principalCache.value
-  }
-  // 复用同一世代的在途请求，避免守卫、App 同步、门户组件各自发一份 `/auth/me`。
-  if (principalInFlight && principalInFlight.generation === generation) {
-    return principalInFlight.promise
-  }
-
-  const promise = fetchCurrentPrincipal(generation)
-  const epoch = principalCacheEpoch
-  principalInFlight = { generation, promise }
-  try {
-    const principal = await promise
-    // 只有成功、世代未变且期间没有清空过快照时才写入缓存；失败路径直接抛出，绝不缓存。
-    if (generation === browserSessionGeneration && epoch === principalCacheEpoch) {
-      principalCache = { value: principal, expiresAt: Date.now() + PRINCIPAL_CACHE_TTL_MS, generation }
-    }
-    return principal
-  } finally {
-    // 只有自己登记的请求才撤销登记，避免清空后被新请求覆盖时误删。
-    if (principalInFlight?.promise === promise) principalInFlight = null
-  }
+// 用途：读取当前平台主体，明确刷新绕过短缓存和旧在途请求。
+// 参数：force 表示立即重读，默认保留首屏单飞及短缓存。
+// 返回值：当前有效主体Promise；保留身份切换和认证错误边界。
+export async function getCurrentPrincipal({ force = false } = {}) {
+  return principalReader.read({ force })
 }
 
-/**
- * fetchCurrentPrincipal 执行单次 `/auth/me` 读取并校验会话世代。
- * @param {number} requestedGeneration 发起请求时的浏览器会话世代号。
- * @returns {Promise<Object>} 规范化后的当前主体。
- * @throws {AuthError} 服务端拒绝、网络异常或请求期间账号已切换时抛出。
- */
+// 用途：强制读取平台当前主体并校验浏览器会话世代。
+// 参数：requestedGeneration 为发起读取时的浏览器会话世代号。
+// 返回值：规范化主体Promise；服务端错误或账号已切换时拒绝。
 async function fetchCurrentPrincipal(requestedGeneration) {
   const body = await requestWithStructuredContext('/auth/me', {
     method: 'GET',
     cache: 'no-store',
     headers: {
       Accept: 'application/json',
-      'Cache-Control': 'no-cache',
+      ...AUTHORIZATION_REFRESH_HEADERS,
     },
   }, {
     operation: 'GET_PRINCIPAL',

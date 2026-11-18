@@ -1,3 +1,6 @@
+import { normalizeAuthorizationSession } from '../../shared/authz/sessionCompatibility.js'
+import { AUTHORIZATION_REFRESH_HEADERS, createAuthorizationSnapshotReader }
+  from '../../shared/authz/authorizationSnapshot.js'
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import test from 'node:test'
@@ -7,8 +10,12 @@ import { externalContractMetadata } from '../utils/contractPayload.js'
 const source = await readFile(new URL('./contract.js', import.meta.url), 'utf8')
 const moduleSource = source.replace(/^import\s[\s\S]*?from ['"][^'"]+['"]\n/gm, '')
   .replaceAll('import.meta.env', '({})').replace(/^export /gm, '')
-const api = new Function('formatUserError', 'externalContractMetadata', 'attachStructuredContext', 'subsystemAccessMessage',
+const api = new Function(
+    'createAuthorizationSnapshotReader', 'AUTHORIZATION_REFRESH_HEADERS',
+    'normalizeAuthorizationSession', 'formatUserError', 'externalContractMetadata', 'attachStructuredContext', 'subsystemAccessMessage',
   `${moduleSource}; return { getContractSourceCapabilities, contractImportRequest, listContracts, listSigningRecords, listContractTemplates, listApprovalTasks, listApprovals, listApprovalRules, listOpportunityIntakes, listContractDetectionCategories, listMyCustomers, listMyOpportunities, createContract, createExternalContract, updateContractDraft, createApprovalRule, updateApprovalRule, submitContract, commandApproval };\n//# sourceURL=contract-api-under-test.js`)(
+    createAuthorizationSnapshotReader, AUTHORIZATION_REFRESH_HEADERS,
+    normalizeAuthorizationSession,
   formatUserError, externalContractMetadata, (error, context) => { error.testRequestContext = context }, (error, message) => message)
 
 async function withResponse(body, contentType, run, status = 200) {

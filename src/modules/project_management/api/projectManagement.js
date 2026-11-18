@@ -1,3 +1,5 @@
+import { AUTHORIZATION_REFRESH_HEADERS, createAuthorizationSnapshotReader }
+  from '../../shared/authz/authorizationSnapshot.js'
 import { getCurrentPrincipal } from '@/modules/platform/auth/api/auth'
 import {
   normalizeAuthorizationSession,
@@ -13,8 +15,14 @@ import { DOWNLOAD_TIMEOUT_MESSAGE, downloadRequestSignal } from '../../shared/ut
 const runtimeEnv = import.meta.env || {}
 const PUBLIC_PATH_PREFIX = (runtimeEnv.VITE_PROJECT_PUBLIC_PATH_PREFIX || '/project_management').replace(/\/$/, '')
 const API_BASE_URL = (runtimeEnv.VITE_PROJECT_API_BASE_URL || `${PUBLIC_PATH_PREFIX}/api/v1`).replace(/\/$/, '')
-let currentSession = null
-let sessionRequest = null
+const projectSessionReader = createAuthorizationSnapshotReader({
+  load: options => request('/auth/me', { ...options, cache: 'no-store',
+    headers: AUTHORIZATION_REFRESH_HEADERS, suppressLoginRedirect: true }),
+  normalize: normalizeAuthorizationSession,
+  onError: (error, options) => {
+    if (!options.suppressLoginRedirect && shouldStartSubsystemLogin(error)) startProjectLogin()
+  },
+})
 let loginRedirectStarted = false
 
 export function startProjectLogin({ force = false } = {}) {
@@ -121,25 +129,16 @@ async function request(path, options = {}) {
   return body?.data ?? null
 }
 
-/**
- * clearProjectSessionCache 清空项目会话与进行中的会话读取任务，避免后续请求读取过期会话。
- * @returns {void}
- */
-export function clearProjectSessionCache() { currentSession = null; sessionRequest = null }
+// 用途：清空项目授权快照及旧在途响应的回填资格。
+// 参数：无。
+// 返回值：无；不退出登录或删除Cookie。
+export function clearProjectSessionCache() { projectSessionReader.clear() }
 
-/**
- * getProjectSession 读取项目会话并进行标准化，支持 force 参数强制绕过缓存。
- * @param {Object} [options] 读取参数。
- * @param {boolean} [options.force=false] true 强制重新发起一次 /auth/me。
- * @returns {Promise<object>} 项目会话对象。
- * @throws {Error} 网络不可达、鉴权失效或服务端返回非成功状态时抛出。
- */
+// 用途：getProjectSession 取得最新有效会话并隔离迟到授权响应。
+// 参数：force 为强制重读标记，保留既有读取及登录跳转选项。
+// 返回值：规范化会话Promise；认证、授权和依赖错误保持原分类。
 export async function getProjectSession({ force = false, suppressLoginRedirect = false } = {}) {
-  // 合并同一时刻的 /auth/me 请求，防止多个组件各自读取并提交不同时间点的会话。
-  if (!force && currentSession) return currentSession
-  if (!force && sessionRequest) return sessionRequest
-  sessionRequest = request('/auth/me', { suppressLoginRedirect }).then((session) => { currentSession = normalizeAuthorizationSession(session); return currentSession }).finally(() => { sessionRequest = null })
-  return sessionRequest
+  return projectSessionReader.read({ force, suppressLoginRedirect })
 }
 
 /**

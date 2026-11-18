@@ -20,7 +20,11 @@ test('external multipart wire metadata omits shared text content and preserves s
   // 执行真实 API 函数，仅替换其浏览器和构建相关导入。
   // 此处验证 FormData 序列化的回归，而非仅匹配源码文本。
   const utilityURL = new URL('./utils/contractPayload.js', import.meta.url).href
+  const authorizationURL = new URL('../shared/authz/authorizationSnapshot.js', import.meta.url).href
+  const compatibilityURL = new URL('../shared/authz/sessionCompatibility.js', import.meta.url).href
   const moduleSource = `import { externalContractMetadata } from ${JSON.stringify(utilityURL)};\n`
+    + `import { createAuthorizationSnapshotReader, AUTHORIZATION_REFRESH_HEADERS } from ${JSON.stringify(authorizationURL)};\n`
+    + `import { normalizeAuthorizationSession } from ${JSON.stringify(compatibilityURL)};\n`
     + source.replace(/^import\s[\s\S]*?from ['"][^'"]+['"]\n/gm, '').replaceAll('import.meta.env', '({})')
   const api = await import(`data:text/javascript,${encodeURIComponent(moduleSource)}`)
   const originalFetch = globalThis.fetch

@@ -2,6 +2,8 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import vm from 'node:vm'
+import { createAuthorizationSnapshotReader, AUTHORIZATION_REFRESH_HEADERS }
+  from '../shared/authz/authorizationSnapshot.js'
 
 const source = await readFile(new URL('./api/dataAnalysis.js', import.meta.url), 'utf8')
 const publication = { source_code: 'standard-finance', digest: 'a'.repeat(64), published: true,
@@ -14,13 +16,15 @@ const preview = { schema_version: 1, batch_id: 'batch-1', digest: publication.di
 // 返回值：标准财务读取、预览与发布方法。
 function harness(data) {
   const context = vm.createContext({
+    createAuthorizationSnapshotReader, AUTHORIZATION_REFRESH_HEADERS,
     fetch: async () => new Response(JSON.stringify({ code: 'OK', data }), {
       headers: { 'content-type': 'application/json' },
     }),
     createApiRequestContext: () => ({}), attachStructuredContext: () => {},
     shouldStartSubsystemLogin: () => false, formatDataAnalysisError: () => '',
   })
-  const script = source.replace(/^import .*$/gm, '').replace(/import\.meta\.env/g, '({})')
+  const script = source.replace(/^import\s[\s\S]*?from ['"][^'"]+['"]\n/gm, '')
+    .replace(/import\.meta\.env/g, '({})')
     .replace(/^export /gm, '')
   return vm.runInContext(`${script}\n;({ getStandardFinanceStatus, previewStandardFinance,
     publishStandardFinance })`, context)

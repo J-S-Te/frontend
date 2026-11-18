@@ -1,3 +1,5 @@
+import { AUTHORIZATION_REFRESH_HEADERS, createAuthorizationSnapshotReader }
+  from '../../shared/authz/authorizationSnapshot.js'
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import test from 'node:test'
@@ -11,9 +13,16 @@ import { DOWNLOAD_TIMEOUT_MESSAGE, downloadRequestSignal } from '../../shared/ut
 const source = (await readFile(new URL('./projectManagement.js', import.meta.url), 'utf8'))
   .replace(/^import\s[\s\S]*?from ['"][^'"]+['"]\n/gm, '')
   .replaceAll('import.meta.env', '({})').replace(/^export /gm, '')
+// 用途：装配真实 API 源码及共享授权读取依赖，保留既有测试网络边界。
+// 参数：无；浏览器和网络由既有场景夹具提供。
+// 返回值：保留正式请求、响应解析和授权读取逻辑的 API。
 function client() {
-  return new Function('formatUserError', 'attachStructuredContext', 'normalizeAuthorizationSession', 'principalIdentityID', 'shouldStartSubsystemLogin', 'todayBusinessDate', 'safeDownloadFilename', 'DOWNLOAD_TIMEOUT_MESSAGE', 'downloadRequestSignal',
-    `${source}; return { request, downloadCapabilityImportTemplate, downloadEquipmentImportTemplate, downloadDetectionCategoryImportTemplate, exportCapabilities };`)(formatUserError, attachStructuredContext, normalizeAuthorizationSession, principalIdentityID, shouldStartSubsystemLogin, todayBusinessDate, safeDownloadFilename, DOWNLOAD_TIMEOUT_MESSAGE, downloadRequestSignal)
+  return new Function(
+    'createAuthorizationSnapshotReader', 'AUTHORIZATION_REFRESH_HEADERS',
+    'formatUserError', 'attachStructuredContext', 'normalizeAuthorizationSession', 'principalIdentityID', 'shouldStartSubsystemLogin', 'todayBusinessDate', 'safeDownloadFilename', 'DOWNLOAD_TIMEOUT_MESSAGE', 'downloadRequestSignal',
+    `${source}; return { request, downloadCapabilityImportTemplate, downloadEquipmentImportTemplate, downloadDetectionCategoryImportTemplate, exportCapabilities };`)(
+    createAuthorizationSnapshotReader, AUTHORIZATION_REFRESH_HEADERS,
+    formatUserError, attachStructuredContext, normalizeAuthorizationSession, principalIdentityID, shouldStartSubsystemLogin, todayBusinessDate, safeDownloadFilename, DOWNLOAD_TIMEOUT_MESSAGE, downloadRequestSignal)
 }
 async function withFetch(fetcher, run) {
   const originalFetch = globalThis.fetch, originalWindow = globalThis.window

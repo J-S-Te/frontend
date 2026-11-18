@@ -1,3 +1,5 @@
+import { AUTHORIZATION_REFRESH_HEADERS, createAuthorizationSnapshotReader }
+  from '../../shared/authz/authorizationSnapshot.js'
 // 合同管理 API 客户端。
 // 合同后端使用独立同源前缀，避免与基础平台的 /api/v1 接口发生路由冲突。
 import { getCurrentPrincipal } from '@/modules/platform/auth/api/auth'
@@ -20,8 +22,14 @@ const API_BASE_URL = (import.meta.env.VITE_CONTRACT_API_BASE_URL || `${CONTRACT_
 // 从未在生产 Nginx 注册，命中 SPA 回退逻辑 后会以 200 HTML 返回，最终被误判为空客户列表。
 const CUSTOMER_API_BASE_URL = (import.meta.env.VITE_CUSTOMER_API_BASE_URL || '/customer-opportunity/api/v1').replace(/\/$/, '')
 
-let currentSession = null
-let sessionRequest = null
+const contractSessionReader = createAuthorizationSnapshotReader({
+  load: options => request('/auth/me', { ...options, cache: 'no-store',
+    headers: AUTHORIZATION_REFRESH_HEADERS, suppressLoginRedirect: true }),
+  normalize: normalizeAuthorizationSession,
+  onError: (error, options) => {
+    if (!options.suppressLoginRedirect && shouldStartSubsystemLogin(error)) startContractLogin()
+  },
+})
 let loginRedirectStarted = false
 
 /**
@@ -289,35 +297,18 @@ function invalidContractResponse(message) {
   return error
 }
 
-/**
- * getContractSession 读取并规范化合同系统服务端会话；前端缓存仅用于界面与路由判断。
- * @param {{force?: boolean}} [options={}] force 为 true 时忽略已有会话和进行中的请求。
- * @returns {Promise<Record<string, unknown>>} 规范化后的合同会话。
- * @throws {ContractAuthError} 会话失效时抛出。
- * @throws {Error} 网络失败、响应解析失败或服务端拒绝请求时抛出。
- */
+// 用途：getContractSession 取得最新有效会话并隔离迟到授权响应。
+// 参数：force 为强制重读标记，保留既有读取及登录跳转选项。
+// 返回值：规范化会话Promise；认证、授权和依赖错误保持原分类。
 export async function getContractSession({ force = false, suppressLoginRedirect = false } = {}) {
-  // 非强制读取复用缓存或在途 Promise，避免路由和菜单同时初始化时重复请求。
-  if (!force && currentSession) return currentSession
-  if (!force && sessionRequest) return sessionRequest
-
-  sessionRequest = request('/auth/me', { suppressLoginRedirect, cache: 'no-store' })
-    .then((session) => {
-      currentSession = normalizeAuthorizationSession(session)
-      return currentSession
-    })
-    .finally(() => { sessionRequest = null })
-
-  return sessionRequest
+  return contractSessionReader.read({ force, suppressLoginRedirect })
 }
 
-/**
- * clearContractSessionCache 清空合同会话及在途请求缓存，不发起网络请求。
- * @returns {void}
- */
+// 用途：clearContractSessionCache 清空授权快照并隔离旧请求。
+// 参数：无。
+// 返回值：无；不影响服务器会话。
 export function clearContractSessionCache() {
-  currentSession = null
-  sessionRequest = null
+  contractSessionReader.clear()
 }
 
 /**

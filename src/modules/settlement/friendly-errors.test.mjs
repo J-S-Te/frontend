@@ -1,3 +1,5 @@
+import { AUTHORIZATION_REFRESH_HEADERS, createAuthorizationSnapshotReader }
+  from '../shared/authz/authorizationSnapshot.js'
 import test from 'node:test'
 import { createRecognitionAPI } from './api/recognition.js'
 import { allowedSections, permissionCheck, canLoad } from './utils/capabilities.js'
@@ -23,10 +25,14 @@ import { createRequestScope } from '../platform/shared/composables/requestScope.
 import { DOWNLOAD_TIMEOUT_MESSAGE, downloadRequestSignal } from '../shared/utils/downloadTimeout.js'
 
 const source = await readFile(new URL('./api/settlement.js', import.meta.url), 'utf8')
+// 用途：装配真实 API 源码及共享授权读取依赖，保留既有测试网络边界。
+// 参数：fetcher 为既有场景提供的受控 HTTP 响应边界。
+// 返回值：真实 API、浏览器副作用记录及替换网络边界的方法。
 function harness(fetcher) {
   const calls = { redirects: [], downloads: [], revoked: [], timers: [] }
   let uuid = 0
   const context = vm.createContext({
+    createAuthorizationSnapshotReader, AUTHORIZATION_REFRESH_HEADERS,
     fetch: fetcher, FormData, Blob, Headers, attachStructuredContext, listQuery, formatSettlementError,
     normalizeAuthorizationSession, principalIdentityID, shouldStartSubsystemLogin,
     DOWNLOAD_TIMEOUT_MESSAGE, downloadRequestSignal,

@@ -5,12 +5,15 @@ import { parse } from '@babel/parser'
 import { parse as parseSFC } from '@vue/compiler-sfc'
 import { ref } from 'vue'
 import { formatUserError } from '../shared/utils/userError.js'
+import { authorizationScopeKey } from '../shared/authz/authorizationSnapshot.js'
 
 test('合同聚合加载保留区域具体安全原因，其他区域成功数据仍可使用', async () => {
   const source = parseSFC(await readFile(new URL('./views/ContractManagementView.vue', import.meta.url), 'utf8')).descriptor.scriptSetup.content
   const node = parse(source, { sourceType: 'module' }).program.body.find(item => item.type === 'FunctionDeclaration' && item.id.name === 'loadBusinessData')
   const scope = {
     businessDataSequence: 0,
+    session: ref({ permissions: ['contract.read'] }), sessionError: ref(''), authorizationScopeKey,
+    getContractSession: async () => ({ permissions: ['contract.read'] }),
     approvalsKnown: ref(false), businessDataLoading: ref(false), businessDataErrors: ref({}), adminDashboard: ref(null), contracts: ref([]),
     ledgerPage: ref(1), ledgerPageSize: ref(20), keyword: ref(''), typeFilter: ref(''),
     can: permission => permission === 'contract.read', isAdmin: ref(false), contractStatusQuery: () => '', ledgerExpiryQuery: () => '',
@@ -31,6 +34,8 @@ test('合同列表旧请求迟到时不能覆盖新筛选结果', async () => {
   const pending = []
   const scope = {
     businessDataSequence: 0,
+    session: ref({ permissions: ['contract.read'] }), sessionError: ref(''), authorizationScopeKey,
+    getContractSession: async () => ({ permissions: ['contract.read'] }),
     approvalsKnown: ref(false), businessDataLoading: ref(false), businessDataErrors: ref({}), adminDashboard: ref(null), contracts: ref([]),
     ledgerPage: ref(1), ledgerPageSize: ref(20), ledgerTotal: ref(0), ledgerPageCount: ref(1), keyword: ref(''), typeFilter: ref(''),
     can: permission => permission === 'contract.read', isAdmin: ref(false), contractStatusQuery: () => '', ledgerExpiryQuery: () => '',
@@ -38,7 +43,11 @@ test('合同列表旧请求迟到时不能覆盖新筛选结果', async () => {
     normalizeContract: item => item, ContractAuthError: class extends Error {}, formatUserError,
   }
   const load = new Function(...Object.keys(scope), `${source.slice(node.start, node.end)};return loadBusinessData`)(...Object.values(scope))
-  const old = load(), current = load()
+  const old = load()
+  // 授权读取是业务查询的前置步骤；先让旧筛选真正发出列表请求，再发新筛选。
+  await new Promise(resolve => setImmediate(resolve))
+  const current = load()
+  await new Promise(resolve => setImmediate(resolve))
   pending[1]({ items: [{ id: 'new' }], total: 1 })
   await current
   pending[0]({ items: [{ id: 'old' }], total: 20 })
