@@ -1,20 +1,33 @@
 import { onBeforeUnmount, ref } from 'vue'
 import { projectApprovalTarget } from '../approvalTasks.js'
 
-// 用途：管理项目通知弹层，进入真实审批或业务页面并同步已读状态。
-// 参数：接口读取本人通知，openTarget 执行守卫跳转，getContext 读取身份与页面上下文。
-// 返回值：弹层状态、未读计数、加载与打开通知等操作。
+// 用途：管理项目铃铛，统一承载待审批与未读通知，并进入真实业务或审批页面。
+// 参数：接口读取本人通知/审批，openTarget 执行通知守卫跳转，openApprovalTask 打开审批详情。
+// 返回值：弹层状态、合并计数、加载与打开待办/通知等操作。
 export function useProjectNotifications({ getUnreadCount, listNotificationInbox,
-  getNotification, markNotificationRead, formatUserError, openTarget, showToast,
-  getContext = () => '' }) {
+  getNotification, markNotificationRead, listApprovalTasks, formatUserError, openTarget,
+  openApprovalTask, showToast, getContext = () => '' }) {
 const notificationOpen = ref(false)
 const notificationItems = ref([])
+const approvalItems = ref([])
+const unreadCount = ref(0)
+const approvalCount = ref(0)
+// 徽标为“未读通知 + 待审批”的合并口径：待办办结前，即使提醒已读也继续留在铃铛里。
 const notificationCount = ref(0)
 const notificationLoading = ref(false)
 const notificationError = ref('')
 const notificationActionID = ref('')
-let notificationAutoCloseTimer = 0
+const approvalLoading = ref(false)
+const approvalError = ref('')
+const approvalActionID = ref('')
 let disposed = false
+
+// 用途：合并两个来源的计数，避免任一列表刷新时把另一来源的角标清零。
+// 参数：无。
+// 返回值：无；直接更新响应式徽标。
+function syncBadge() {
+  notificationCount.value = unreadCount.value + approvalCount.value
+}
 
 // 用途：阻止旧身份或已卸载页面的通知回执继续导航及修改状态。
 // 参数：context 为请求开始时的身份与页面上下文。
@@ -31,7 +44,8 @@ async function openApprovalNotification(detail, context) {
     if (!detail.read_at) {
       await markNotificationRead(detail.delivery_id)
       if (!isCurrent(context)) return false
-      notificationCount.value = Math.max(0, notificationCount.value - 1)
+      unreadCount.value = Math.max(0, unreadCount.value - 1)
+      syncBadge()
     }
     notificationItems.value = notificationItems.value.filter(
       entry => entry.delivery_id !== detail.delivery_id)
@@ -47,38 +61,60 @@ async function openApprovalNotification(detail, context) {
 }
 
 function closeNotifications() {
-  window.clearTimeout(notificationAutoCloseTimer)
-  notificationAutoCloseTimer = 0
   notificationOpen.value = false
 }
 
+// 用途：同时刷新未读通知数与待审批总数，任一来源失败不影响另一来源。
+// 参数：无。
+// 返回值：无；成功来源更新角标，失败来源按零处理但不阻断页面。
 async function refreshNotificationCount() {
-  try {
-    const result = await getUnreadCount()
-    notificationCount.value = Number(result?.unread_count || 0)
-  } catch {
-    // 通知是辅助能力，平台暂不可用时不阻断项目工作区。
-    notificationCount.value = 0
-  }
+  const [unreadResult, approvalResult] = await Promise.allSettled([
+    getUnreadCount(),
+    listApprovalTasks({ page: 1, page_size: 1, view: 'assigned' }),
+  ])
+  if (disposed) return
+  unreadCount.value = unreadResult.status === 'fulfilled'
+    ? Number(unreadResult.value?.unread_count || 0) : 0
+  approvalCount.value = approvalResult.status === 'fulfilled'
+    ? Number(approvalResult.value?.total || 0) : 0
+  syncBadge()
 }
 
+// 用途：打开铃铛时并行加载未读通知列表与待审批摘要。
+// 参数：无。
+// 返回值：无；两类数据独立呈现，单侧失败不隐藏另一侧。
 async function loadUnreadNotifications() {
   notificationLoading.value = true
+  approvalLoading.value = true
   notificationError.value = ''
-  try {
-    const [inbox, unread] = await Promise.all([
-      listNotificationInbox({ page: 1, pageSize: 20, unreadOnly: true }),
-      getUnreadCount(),
-    ])
-    // unread_only 由服务端按当前用户和 read_at 过滤；前端再过滤一次用于兼容滚动升级。
-    notificationItems.value = (inbox?.items || []).filter((item) => !item.read_at)
-    notificationCount.value = Number(unread?.unread_count || notificationItems.value.length)
-  } catch (error) {
+  approvalError.value = ''
+  const context = getContext()
+  const [inboxResult, unreadResult, approvalResult] = await Promise.allSettled([
+    listNotificationInbox({ page: 1, pageSize: 20, unreadOnly: true }),
+    getUnreadCount(),
+    listApprovalTasks({ page: 1, page_size: 5, view: 'assigned' }),
+  ])
+  if (!isCurrent(context)) return
+  if (inboxResult.status === 'fulfilled') {
+    notificationItems.value = (inboxResult.value?.items || []).filter((item) => !item.read_at)
+  } else {
     notificationItems.value = []
-    notificationError.value = formatUserError(error, { fallback: '未读通知加载失败' })
-  } finally {
-    notificationLoading.value = false
+    notificationError.value = formatUserError(inboxResult.reason, { fallback: '未读通知加载失败' })
   }
+  unreadCount.value = unreadResult.status === 'fulfilled'
+    ? Number(unreadResult.value?.unread_count || notificationItems.value.length)
+    : notificationItems.value.length
+  if (approvalResult.status === 'fulfilled') {
+    approvalItems.value = (approvalResult.value?.items || []).slice(0, 5)
+    approvalCount.value = Number(approvalResult.value?.total || 0)
+  } else {
+    approvalItems.value = []
+    approvalCount.value = 0
+    approvalError.value = formatUserError(approvalResult.reason, { fallback: '待审批加载失败' })
+  }
+  syncBadge()
+  notificationLoading.value = false
+  approvalLoading.value = false
 }
 
 // 用途：重读本人通知详情后打开真实目标，失败时保留可重试条目。
@@ -114,7 +150,8 @@ async function openNotification(item) {
     if (!detail.read_at) {
       await markNotificationRead(deliveryID)
       if (!isCurrent(context)) return
-      notificationCount.value = Math.max(0, notificationCount.value - 1)
+      unreadCount.value = Math.max(0, unreadCount.value - 1)
+      syncBadge()
     }
     if (!isCurrent(context)) return
     notificationItems.value = notificationItems.value.filter((entry) => entry.delivery_id !== deliveryID)
@@ -129,24 +166,54 @@ async function openNotification(item) {
   }
 }
 
+// 用途：从铃铛直接进入某条待审批的精确详情，并同步移除对应的未读提醒。
+// 参数：task 为服务端受权返回的待审批摘要。
+// 返回值：无；打开成功后收起弹层，失败保留条目并提示。
+async function openApprovalItem(task) {
+  const requestID = String(task?.id || '')
+  if (disposed || !requestID || approvalActionID.value) return
+  const context = getContext()
+  approvalActionID.value = requestID
+  try {
+    const matching = notificationItems.value.find((entry) =>
+      String(entry.reference_id || '') === requestID)
+    if (matching && !matching.read_at) {
+      try {
+        await markNotificationRead(matching.delivery_id)
+        if (!isCurrent(context)) return
+        unreadCount.value = Math.max(0, unreadCount.value - 1)
+        notificationItems.value = notificationItems.value.filter(
+          (entry) => entry.delivery_id !== matching.delivery_id)
+        syncBadge()
+      } catch (error) {
+        if (!isCurrent(context)) return
+        showToast(`提醒已读状态未保存：${formatUserError(error, { fallback: '请稍后重试。' })}，仍可进入审批。`, 'warning')
+      }
+    }
+    const opened = await openApprovalTask(task)
+    if (isCurrent(context) && opened) closeNotifications()
+  } catch (error) {
+    if (!isCurrent(context)) return
+    showToast(formatUserError(error, { fallback: '审批页面打开失败，请从审批待办重试。' }), 'error')
+  } finally {
+    approvalActionID.value = ''
+  }
+}
+
 function toggleNotifications() {
   if (notificationOpen.value) {
     closeNotifications()
     return
   }
   notificationOpen.value = true
-  loadUnreadNotifications()
-  window.clearTimeout(notificationAutoCloseTimer)
-  notificationAutoCloseTimer = window.setTimeout(closeNotifications, 5000)
+  return loadUnreadNotifications()
 }
 
-  // 用途：卸载时清理自动收起定时器，并阻止旧通知回执发起导航。
+  // 用途：卸载时阻止旧通知回执发起导航。
   // 参数：无。
   // 返回值：无；后续迟到回执不发布提示或导航。
   function disposeNotifications() {
     disposed = true
-    window.clearTimeout(notificationAutoCloseTimer)
-    notificationAutoCloseTimer = 0
   }
 
   onBeforeUnmount(() => {
@@ -155,6 +222,8 @@ function toggleNotifications() {
 
   return {
     notificationOpen, notificationItems, notificationCount, notificationLoading, notificationError, notificationActionID,
-    closeNotifications, refreshNotificationCount, loadUnreadNotifications, openNotification, toggleNotifications, disposeNotifications,
+    approvalItems, approvalCount, approvalLoading, approvalError, approvalActionID,
+    closeNotifications, refreshNotificationCount, loadUnreadNotifications, openNotification,
+    openApprovalItem, toggleNotifications, disposeNotifications,
   }
 }

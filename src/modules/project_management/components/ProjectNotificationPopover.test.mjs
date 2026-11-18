@@ -52,11 +52,13 @@ async function loadSfc(file) {
 // golden 为提取前 ProjectManagementView.vue 通知弹层片段的 SSR 渲染结果（批次 3 第三步b 采集），
 // 提取后本组件必须逐字节复现同一 DOM；有意变更须同步重采 golden。
 const GOLDENS = {
-  "loaded-items": "<div id=\"project-notifications\" class=\"pm-notifications\" role=\"status\" aria-live=\"polite\"><div class=\"pm-popover-head\"><b>未读通知</b><span>2 条</span></div><!--v-if--><!--[--><button disabled><i class=\"danger\"></i><span><b>NOTIF alpha</b><small>content alpha</small></span></button><button><i class=\"warning\"></i><span><b>NOTIF beta</b><small>content beta</small></span></button><!--]--><!--v-if--><button type=\"button\">查看全部通知</button></div>",
-  "loading": "<div id=\"project-notifications\" class=\"pm-notifications\" role=\"status\" aria-live=\"polite\"><div class=\"pm-popover-head\"><b>未读通知</b><span>0 条</span></div><p class=\"pm-notification-state\">正在加载未读通知…</p><!--[--><!--]--><!--v-if--><button type=\"button\">查看全部通知</button></div>",
-  "error-state": "<div id=\"project-notifications\" class=\"pm-notifications\" role=\"status\" aria-live=\"polite\"><div class=\"pm-popover-head\"><b>未读通知</b><span>0 条</span></div><p class=\"pm-notification-state danger\">ERR unreadable</p><!--[--><!--]--><!--v-if--><button type=\"button\">查看全部通知</button></div>",
-  "empty-no-viewall": "<div id=\"project-notifications\" class=\"pm-notifications\" role=\"status\" aria-live=\"polite\"><div class=\"pm-popover-head\"><b>未读通知</b><span>0 条</span></div><!--v-if--><!--[--><!--]--><div class=\"pm-empty-mini\" role=\"status\">暂无未读通知</div><!--v-if--></div>"
+  "loaded-items": "<div id=\"project-notifications\" class=\"pm-notifications\" role=\"status\" aria-live=\"polite\"><div class=\"pm-popover-head\"><b>待办与通知</b><span>2 条</span></div><!--v-if--><section class=\"pm-notification-group\" aria-label=\"未读通知\"><div class=\"pm-popover-subhead\"><b>未读通知</b><span>2 条</span></div><!--v-if--><!--[--><button disabled><i class=\"danger\"></i><span><b>NOTIF alpha</b><small>content alpha</small></span></button><button><i class=\"warning\"></i><span><b>NOTIF beta</b><small>content beta</small></span></button><!--]--><!--v-if--><button type=\"button\">查看全部通知</button></section></div>",
+  "loading": "<div id=\"project-notifications\" class=\"pm-notifications\" role=\"status\" aria-live=\"polite\"><div class=\"pm-popover-head\"><b>待办与通知</b><span>0 条</span></div><!--v-if--><section class=\"pm-notification-group\" aria-label=\"未读通知\"><div class=\"pm-popover-subhead\"><b>未读通知</b><span>0 条</span></div><p class=\"pm-notification-state\">正在加载未读通知…</p><!--[--><!--]--><!--v-if--><button type=\"button\">查看全部通知</button></section></div>",
+  "error-state": "<div id=\"project-notifications\" class=\"pm-notifications\" role=\"status\" aria-live=\"polite\"><div class=\"pm-popover-head\"><b>待办与通知</b><span>0 条</span></div><!--v-if--><section class=\"pm-notification-group\" aria-label=\"未读通知\"><div class=\"pm-popover-subhead\"><b>未读通知</b><span>0 条</span></div><p class=\"pm-notification-state danger\">ERR unreadable</p><!--[--><!--]--><!--v-if--><button type=\"button\">查看全部通知</button></section></div>",
+  "empty-no-viewall": "<div id=\"project-notifications\" class=\"pm-notifications\" role=\"status\" aria-live=\"polite\"><div class=\"pm-popover-head\"><b>待办与通知</b><span>0 条</span></div><!--v-if--><section class=\"pm-notification-group\" aria-label=\"未读通知\"><div class=\"pm-popover-subhead\"><b>未读通知</b><span>0 条</span></div><!--v-if--><!--[--><!--]--><div class=\"pm-empty-mini\" role=\"status\">暂无未读通知</div><!--v-if--></section></div>",
+  "approvals": "<div id=\"project-notifications\" class=\"pm-notifications\" role=\"status\" aria-live=\"polite\"><div class=\"pm-popover-head\"><b>待办与通知</b><span>3 条</span></div><section class=\"pm-notification-group\" aria-label=\"待审批\"><div class=\"pm-popover-subhead\"><b>待审批</b><span>1 条</span></div><!--v-if--><!--[--><button><i class=\"warning\"></i><span><b>报告更正 · A 站点</b><small>报告需更正</small></span></button><!--]--><button type=\"button\">查看全部审批</button></section><section class=\"pm-notification-group\" aria-label=\"未读通知\"><div class=\"pm-popover-subhead\"><b>未读通知</b><span>1 条</span></div><!--v-if--><!--[--><button><i class=\"warning\"></i><span><b>回退申请已处理</b><small>审批通过</small></span></button><!--]--><!--v-if--><button type=\"button\">查看全部通知</button></section></div>",
 }
+
 const CASES = {
   "loaded-items": {
     "count": 2,
@@ -102,6 +104,33 @@ const CASES = {
     "items": [],
     "actionId": "",
     "showViewAll": false
+  },
+  "approvals": {
+    "count": 3,
+    "loading": false,
+    "error": "",
+    "items": [
+      {
+        "delivery_id": "d3",
+        "category": "ROLLBACK_APPROVED",
+        "title": "回退申请已处理",
+        "content": "审批通过"
+      }
+    ],
+    "actionId": "",
+    "approvals": [
+      {
+        "id": "req-1",
+        "type": "REPORT_CORRECTION",
+        "site": "A 站点",
+        "reason": "报告需更正"
+      }
+    ],
+    "approvalLoading": false,
+    "approvalError": "",
+    "approvalActionId": "",
+    "showViewAll": true,
+    "showApprovalAll": true
   }
 }
 
@@ -127,8 +156,17 @@ test('通知弹层复现提取前 golden：空列表且分区不可见时无查�
   assert.equal(html, GOLDENS['empty-no-viewall'])
 })
 
+test('通知弹层同时呈现待审批与未读通知，并提供审批直达入口', async () => {
+  const html = await renderToString(Vue.createSSRApp({ render: () => Vue.h(component, CASES['approvals']) }))
+  assert.equal(html, GOLDENS['approvals'])
+  assert.match(html, /待审批/)
+  assert.match(html, /报告更正 · A 站点/)
+})
+
 test('通知弹层以事件转发条目点击与查看全部', () => {
   const popoverSource = readFileSync(new URL('./ProjectNotificationPopover.vue', import.meta.url), 'utf8')
   assert.ok(popoverSource.includes("$emit('open-item', item)"))
   assert.ok(popoverSource.includes("$emit('view-all')"))
+  assert.ok(popoverSource.includes("$emit('open-approval', task)"))
+  assert.ok(popoverSource.includes("$emit('view-all-approvals')"))
 })

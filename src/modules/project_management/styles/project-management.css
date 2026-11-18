@@ -533,7 +533,9 @@
 .pm-popover-head b { color: var(--pm-ink); font-size: var(--pm-fs-base); }
 .pm-popover-head span { color: var(--pm-blue-text); font-size: var(--pm-fs-hint); }
 
-.pm-notifications > button {
+.pm-notification-group { display: grid; }
+.pm-popover-subhead { display: flex; align-items: center; justify-content: space-between; gap: var(--pm-sp-2); padding: var(--pm-sp-2) var(--pm-sp-3) 0; color: var(--pm-muted); font-size: var(--pm-fs-hint); }
+.pm-notification-group > button {
   width: 100%;
   display: grid;
   grid-template-columns: 8px 1fr;
@@ -545,8 +547,8 @@
   text-align: left;
 }
 
-.pm-notifications > button:hover { background: var(--pm-sunken); }
-.pm-notifications > button:disabled { cursor: wait; opacity: .65; }
+.pm-notification-group > button:hover { background: var(--pm-sunken); }
+.pm-notification-group > button:disabled { cursor: wait; opacity: .65; }
 .pm-notifications i { width: 7px; height: 7px; margin-top: 5px; border-radius: 50%; background: var(--pm-primary); }
 .pm-notifications i.danger { background: var(--pm-red); }
 .pm-notifications i.warning { background: var(--pm-amber); }
