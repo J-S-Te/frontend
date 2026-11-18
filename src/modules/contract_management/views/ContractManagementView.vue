@@ -1563,16 +1563,19 @@ async function waitForInitiatedApproval(approvalID) {
 
 
 
-// refreshApprovalRealtime 独立刷新审批列表、待办和详情，保留通知状态未知语义。
-// 参数：无。
-// 返回值：异步完成；失败保留明确业务错误状态。
 // 审批命令成功后，除审批详情/待办外还要同步合同台账、统计、签署等受影响区域。
 // 台账读取不进入页面级 loading，旧内容保持可见；读取失败由各区域自己的错误态承担。
+// 用途：审批命令完成后同步待办、详情和合同业务区域。
+// 参数：无。
+// 返回值：异步完成审批刷新；合同业务区域在后台继续读取。
 async function refreshApprovalMutation() {
   await refreshApprovalRealtime({ queueIfBusy: true })
   void loadBusinessData()
 }
 
+// 用途：独立刷新审批列表、本人待办和详情，分别保留任务与流程状态。
+// 参数：queueIfBusy表示刷新繁忙时是否追加一次读取。
+// 返回值：异步完成；读取失败保留原状态，迟到响应不回写。
 async function refreshApprovalRealtime({ queueIfBusy = false } = {}) {
   if (!session.value || activeSection.value !== 'approvals' || document.visibilityState !== 'visible') return
   if (approvalRealtimeBusy) { if (queueIfBusy) approvalRealtimePending = true; return }
@@ -1599,12 +1602,18 @@ async function refreshApprovalRealtime({ queueIfBusy = false } = {}) {
     }
     if (isCurrent() && detailResult.status === 'fulfilled' && detailResult.value && selectedApproval.value?.id === detailResult.value.meta?.id) {
       approvalDetail.value = detailResult.value
-      if (Number.isInteger(detailResult.value.state?.current_node_index)) {
-        selectedApproval.value = { ...selectedApproval.value, step: `第 ${detailResult.value.state.current_node_index + 1} 节点` }
+      const state = detailResult.value.state
+      if (Number.isInteger(state?.current_node_index)) {
+        const node = state.nodes?.[state.current_node_index]?.node
+        selectedApproval.value = {
+          ...selectedApproval.value,
+          step: node?.name || `第 ${state.current_node_index + 1} 节点`,
+        }
       }
-      // 审批完成后 selectedApproval 也要拿到终态，否则动作按钮会继续显示可点击。
-      if (detailResult.value.state?.status) {
-        selectedApproval.value = { ...selectedApproval.value, status: detailResult.value.state.status }
+      // running只表示流程进行中；能否审批仍取决于本人任务的active状态。
+      // 流程结束时覆盖陈旧待办，避免继续显示审批按钮。
+      if (state?.status && state.status !== 'running') {
+        selectedApproval.value = { ...selectedApproval.value, status: state.status }
       }
     }
   } finally {
