@@ -13,6 +13,7 @@ import { useDialogFocusTrap } from '@/modules/shared/composables/useDialogFocusT
 import AppShell from '@/modules/shared/components/AppShell.vue'
 import { subsystemAccessMessage } from '@/modules/shared/authz/sessionCompatibility'
 import { authorizationScopeKey } from '@/modules/shared/authz/authorizationSnapshot.js'
+import { useAuthorizationRefresh } from '@/modules/shared/composables/useAuthorizationRefresh.js'
 import { closeSubsystemTabOrFallback } from '@/modules/shared/utils/returnToPortal'
 import { acknowledgeSecurityEvent, addFeedbackMessage, closeFeedback, createFeedback, createIdempotencyKey, createProjectConversation, createProjectExport, createReportRequest, downloadIssuedReport, downloadProjectExport, getAccountSecurity, getEvaluation, getEvaluationEligibility, getFeedback, getFeedbackNotificationUnreadCount, getPortalCapabilities, getPortalSession, getProject, getProjectConversation, getProjectExport, getReportRequest, getReportNotificationUnreadCount, listAccountSessions, listFeedbackNotifications, listFeedbacks, listProjectActivities, listProjects, listReportNotifications, listReportRequests, listReportRiskAlerts, logoutPortal, readFeedbackNotification, readProjectConversationMessages, readReportNotification, reportRequestFingerprint, revokeAccountSession, sendProjectConversationMessage, submitEvaluation } from '../api/portal.js'
 import FilingWizard from '../components/FilingWizard.vue'
@@ -1086,6 +1087,16 @@ watch(anyDialogOpen, (open) => {
     window.removeEventListener('keydown', onDialogKeydown)
   }
 })
+if (typeof useAuthorizationRefresh === 'function') useAuthorizationRefresh(async (isMounted) => {
+  if (!session.value || loading.value || refreshing.value) return
+  const generation = portalLoadGeneration
+  const current = await getPortalSession({ force: true })
+  if (!isMounted() || generation !== portalLoadGeneration) return
+  if (authorizationScopeKey(session.value) !== authorizationScopeKey(current)) {
+    await load({ background: true })
+  }
+})
+
 onMounted(async () => { await reloadList(); await restorePageTarget() })
 onBeforeUnmount(() => {
   portalLoadGeneration++

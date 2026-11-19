@@ -240,7 +240,9 @@ const pendingPersonnelChangeUserId = ref('')
 
 const { principal, refreshPrincipal } = useCurrentPrincipal()
 // 侧栏角色跟随平台当前主体：页面重新可见或定时重读，避免历史角色残留。
-if (typeof useAuthorizationRefresh === 'function') useAuthorizationRefresh(() => refreshPrincipal({ force: true }))
+if (typeof useAuthorizationRefresh === 'function') {
+  useAuthorizationRefresh(() => refreshPrincipal({ force: true }), { intervalMs: 60000 })
+}
 
 const currentAccountName = computed(() => loginUsername(principal.value))
 
