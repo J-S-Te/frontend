@@ -361,7 +361,7 @@ onMounted(load)
   height: 10px;
   border-radius: 5px;
   background: linear-gradient(90deg,
-    var(--surface-hover, #eef2f8) 25%, var(--surface-muted, #f8fafc) 50%, var(--surface-hover, #eef2f8) 75%);
+    var(--surface-hover, #eef2f8) 25%, var(--surface-muted) 50%, var(--surface-hover, #eef2f8) 75%);
   background-size: 200% 100%;
   animation: contract-outbox-shimmer 1.4s ease-in-out infinite;
 }

@@ -131,9 +131,9 @@
   border-radius: 8px;
 }
 .portal-info { color: var(--primary-ink-strong, #1d4ed8); border-color: var(--primary-border, #bfdbfe); background: var(--primary-soft, #eff6ff); }
-.portal-error { color: var(--danger-text, #b91c1c); border-color: var(--danger-border, #f3b4b4); background: var(--danger-soft, #fee2e2); }
-.portal-warning { color: var(--warning-text, #b45309); border-color: var(--warning-border, #fbd9a8); background: var(--warning-soft, #fef3c6); }
-.portal-success { color: var(--success-text, #15803d); border-color: var(--success-border, #bbe7cc); background: var(--success-soft, #dcfce7); }
+.portal-error { color: var(--danger-text); border-color: var(--danger-border); background: var(--danger-soft); }
+.portal-warning { color: var(--warning-text); border-color: var(--warning-border); background: var(--warning-soft); }
+.portal-success { color: var(--success-text); border-color: var(--success-border); background: var(--success-soft); }
 
 .portal-empty {
   padding: 46px;
@@ -184,7 +184,7 @@
 .project-overview dl div { display: grid; gap: 5px; padding: 11px; border-radius: 8px; background: var(--surface-head, #f5f8fc); }
 .project-overview dt { color: var(--muted, #64748b); font-size: 13px; }
 .project-overview dd { margin: 0; color: var(--text, #0f172a); font-size: 13px; }
-.project-delayed { color: var(--danger-text, #b91c1c); font-weight: 700; }
+.project-delayed { color: var(--danger-text); font-weight: 700; }
 .project-milestones { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; padding: 0; margin: 0; list-style: none; }
 .project-milestones li { display: grid; gap: 6px; padding: 10px; border-top: 4px solid var(--primary-border, #bfdbfe); border-radius: 5px; background: var(--surface-head, #f5f8fc); }
 .project-milestones span,
@@ -299,8 +299,8 @@
 .security-row > span { display: grid; gap: 5px; }
 .security-row strong { display: flex; align-items: center; gap: 8px; font-size: 13px; }
 .security-row em { padding: 3px 8px; color: var(--primary-ink-strong, #1d4ed8); font-size: 12px; font-style: normal; border-radius: 999px; background: var(--chip-brand, #e7efff); }
-.security-row .risk-high { color: var(--danger-text, #b91c1c); background: var(--danger-soft-strong, #fecaca); }
-.security-row .risk-medium { color: var(--warning-text, #b45309); background: var(--warning-soft, #fef3c6); }
+.security-row .risk-high { color: var(--danger-text); background: var(--danger-soft-strong, #fecaca); }
+.security-row .risk-medium { color: var(--warning-text); background: var(--warning-soft); }
 .security-row button {
   min-height: 32px;
   padding: 6px 12px;
@@ -321,7 +321,7 @@
   width: min(420px, calc(100vw - 32px));
   padding: 15px 18px;
   color: var(--danger-ink, #7f1d1d);
-  border: 1px solid var(--danger-border, #f3b4b4);
+  border: 1px solid var(--danger-border);
   border-radius: 12px;
   background: var(--danger-soft-strong, #fff7f7);
   box-shadow: 0 12px 30px rgba(127, 29, 29, .16);
@@ -402,7 +402,7 @@
   cursor: pointer;
   border: 0;
   border-radius: 6px;
-  background: var(--surface-muted, #f8fafc);
+  background: var(--surface-muted);
 }
 .portal-dialog .close:hover { color: var(--text, #0f172a); background: var(--surface-hover, #e2e8f0); }
 .portal-dialog form { display: grid; gap: 12px; margin-top: 14px; }
@@ -571,8 +571,8 @@
 .filing-step-panel > header h2 { margin: 0 0 5px; font-size: 17px; }
 .filing-step-panel > header small { color: var(--muted, #64748b); }
 .filing-step-panel > header strong { white-space: nowrap; }
-.save-good { color: var(--success-text, #15803d); }
-.save-bad { color: var(--danger-text, #b91c1c); }
+.save-good { color: var(--success-text); }
+.save-bad { color: var(--danger-text); }
 
 /* 表单字段：表格排版，左侧标签格 + 右侧控件格，两列对齐 */
 .filing-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 12px; margin-top: 14px; }
@@ -620,7 +620,7 @@
 .filing-field input[type=checkbox] { width: auto; min-height: 0; margin: 0; accent-color: var(--p, #2563eb); }
 .filing-field input:disabled,
 .filing-field select:disabled,
-.filing-field textarea:disabled { color: var(--muted, #64748b); background: var(--surface-muted, #f8fafc); cursor: not-allowed; }
+.filing-field textarea:disabled { color: var(--muted, #64748b); background: var(--surface-muted); cursor: not-allowed; }
 .filing-field:not(.material-declaration) .filing-field-control > label {
   display: inline-flex;
   align-items: center;
@@ -704,7 +704,7 @@
   font-weight: 400;
 }
 .material-declaration .filing-field-control > button { justify-self: start; }
-.material-declaration em { color: var(--warning-text, #b45309); font-style: normal; }
+.material-declaration em { color: var(--warning-text); font-style: normal; }
 
 /* 底部操作区 */
 .filing-step-panel footer { display: flex; justify-content: flex-end; gap: 10px; margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--border-soft, #e4ecfc); }
@@ -787,16 +787,16 @@
 .filing-validation-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 16px 18px; border-bottom: 1px solid var(--border-soft, #e4ecfc); background: var(--surface-tint, #fbfdff); }
 .filing-validation-heading h2 { margin: 3px 0 0; color: var(--text, #0f172a); font-size: 16px; }
 .filing-validation-eyebrow { color: var(--muted, #64748b); font-size: var(--fs-xs); }
-.filing-validation-badge { padding: 5px 10px; color: var(--warning-text, #b45309); font-size: 12px; font-weight: 600; white-space: nowrap; border: 1px solid var(--warning-border, #fbd9a8); border-radius: 999px; background: var(--warning-soft-strong, #fffbeb); }
-.filing-validation.is-valid .filing-validation-badge { color: var(--success-text, #15803d); border-color: var(--success-border, #bbe7cc); background: var(--success-soft-strong, #f0fdf4); }
+.filing-validation-badge { padding: 5px 10px; color: var(--warning-text); font-size: 12px; font-weight: 600; white-space: nowrap; border: 1px solid var(--warning-border); border-radius: 999px; background: var(--warning-soft-strong, #fffbeb); }
+.filing-validation.is-valid .filing-validation-badge { color: var(--success-text); border-color: var(--success-border); background: var(--success-soft-strong, #f0fdf4); }
 .filing-validation-summary { display: flex; align-items: center; gap: 11px; padding: 16px 18px 12px; }
-.filing-validation-icon { display: grid; width: 28px; height: 28px; flex: 0 0 auto; place-items: center; color: var(--warning-text, #b45309); font-size: 16px; font-weight: 700; border-radius: 50%; background: var(--warning-soft, #fef3c6); }
-.filing-validation.is-valid .filing-validation-icon { color: var(--success-text, #15803d); background: var(--success-soft-strong, #dcfce7); }
+.filing-validation-icon { display: grid; width: 28px; height: 28px; flex: 0 0 auto; place-items: center; color: var(--warning-text); font-size: 16px; font-weight: 700; border-radius: 50%; background: var(--warning-soft); }
+.filing-validation.is-valid .filing-validation-icon { color: var(--success-text); background: var(--success-soft-strong, #dcfce7); }
 .filing-validation-summary strong { color: var(--text, #0f172a); font-size: 13px; }
 .filing-validation-summary p { margin: 3px 0 0; color: var(--muted, #64748b); font-size: 12px; }
-.filing-validation ol { display: grid; gap: 7px; margin: 0 18px 18px 58px; padding: 12px 14px 12px 28px; color: var(--danger-text, #b91c1c); font-size: 12px; line-height: 1.6; border: 1px solid var(--danger-border, #f3b4b4); border-radius: 8px; background: var(--danger-soft-strong, #fffafa); }
+.filing-validation ol { display: grid; gap: 7px; margin: 0 18px 18px 58px; padding: 12px 14px 12px 28px; color: var(--danger-text); font-size: 12px; line-height: 1.6; border: 1px solid var(--danger-border); border-radius: 8px; background: var(--danger-soft-strong, #fffafa); }
 .filing-validation li { padding-left: 3px; }
-.filing-workspace .portal-error button { min-height: 30px; margin-left: 12px; padding: 5px 8px; color: var(--danger-text, #b91c1c); border: 1px solid currentColor; border-radius: 5px; background: var(--surface-card, #fff); }
+.filing-workspace .portal-error button { min-height: 30px; margin-left: 12px; padding: 5px 8px; color: var(--danger-text); border: 1px solid currentColor; border-radius: 5px; background: var(--surface-card, #fff); }
 
 /* ===== 响应式 ===== */
 @media (max-width: 1200px) {

@@ -126,17 +126,17 @@ defineExpose({ openRecord })
 .record-toolbar p { color: var(--text-secondary, #475569); font-size: var(--fs-sm, 13px); margin: 0; }
 .record-tabs { display: flex; padding: 4px; border: 1px solid var(--border, #e2e8f0); border-radius: 10px; }
 .record-tabs button { border: 0; background: transparent; padding: 8px 20px; border-radius: 7px; color: inherit; cursor: pointer; }
-.record-tabs button[aria-pressed='true'] { color: var(--on-primary, #ffffff); background: var(--primary, #2563eb); }
+.record-tabs button[aria-pressed='true'] { color: var(--on-primary); background: var(--primary, #2563eb); }
 .record-search label, .record-reason-input { display: grid; gap: 8px; }
-.record-search input, .record-reason-input textarea { padding: 10px 12px; border: 1px solid var(--line-strong, #cbd5e1); border-radius: 8px; font: inherit; max-width: 100%; color: var(--text, #0f172a); background: var(--surface-card, #ffffff); }
+.record-search input, .record-reason-input textarea { padding: 10px 12px; border: 1px solid var(--line-strong, #cbd5e1); border-radius: 8px; font: inherit; max-width: 100%; color: var(--text, #0f172a); background: var(--surface-card); }
 .record-reason-input textarea { box-sizing: border-box; width: 100%; resize: vertical; }
 .record-dialog-actions { justify-content: flex-end; margin-top: 24px; }
-.record-error, .record-blockers { color: var(--danger-text, #b91c1c); line-height: 1.65; }
-.record-notice { color: var(--success-text, #15803d); }
-.record-table-wrap { overflow-x: auto; border: 1px solid var(--border, #e2e8f0); border-radius: 12px; background: var(--surface-card, #ffffff); }
+.record-error, .record-blockers { color: var(--danger-text); line-height: 1.65; }
+.record-notice { color: var(--success-text); }
+.record-table-wrap { overflow-x: auto; border: 1px solid var(--border, #e2e8f0); border-radius: 12px; background: var(--surface-card); }
 .record-table { width: 100%; border-collapse: collapse; text-align: left; font-size: var(--fs-body, 14px); }
 .record-table th, .record-table td { padding: 14px 16px; border-bottom: 1px solid var(--border, #e2e8f0); vertical-align: top; }
-.record-table th { background: var(--surface-muted, #f8fafc); white-space: nowrap; }
+.record-table th { background: var(--surface-muted); white-space: nowrap; }
 .record-table td strong, .record-table td span { display: block; min-width: 150px; }
 .record-table td span { margin-top: 6px; color: var(--text-secondary, #475569); }
 .record-reason { min-width: 160px; max-width: 400px; overflow-wrap: anywhere; white-space: pre-wrap; }
