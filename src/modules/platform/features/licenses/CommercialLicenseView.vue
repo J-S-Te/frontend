@@ -847,7 +847,7 @@ onBeforeUnmount(() => {
 .license-steps li { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 2px 8px; flex: 1 1 170px; min-width: 0; padding-right: 16px; }
 .license-steps li i { grid-row: span 2; display: grid; place-items: center; width: 22px; height: 22px; border: 1px solid var(--license-border); border-radius: 999px; background: var(--surface-card, #fff); color: var(--license-muted); font-size: 11px; font-style: normal; font-weight: 700; }
 .license-steps li.is-done i { border-color: transparent; background: var(--success-soft, #dcfce7); color: var(--success-text, #15803d); }
-.license-steps li.is-current i { border-color: transparent; background: var(--primary, #2563eb); color: #fff; }
+.license-steps li.is-current i { border-color: transparent; background: var(--primary, #2563eb); color: var(--on-primary); }
 .license-step-label { font-size: 12.5px; font-weight: 600; color: var(--license-ink); }
 .license-steps li.is-todo .license-step-label { color: var(--license-muted); font-weight: 500; }
 .license-steps li.is-current .license-step-label { color: var(--primary-ink, var(--primary-dark, #1d4ed8)); }

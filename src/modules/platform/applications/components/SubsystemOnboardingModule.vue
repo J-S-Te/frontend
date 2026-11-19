@@ -1606,120 +1606,120 @@ onMounted(() => {
 .application-registry-header, .application-registry-detail-head, .application-registry-panel-head, .application-registry-sidebar-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
 .application-registry-header-actions { display: flex; flex: 0 0 auto; gap: 8px; }
 .application-registry-header h2 { margin: 6px 0 0; }
-.application-registry-header p, .application-registry-panel-head p { max-width: 820px; margin: 7px 0 0; color: #64748b; font-size: 13px; line-height: 1.65; }
-.application-registry-workspaces { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 16px; padding: 6px; border: 1px solid #dbeafe; border-radius: 10px; background: #f8fbff; }
-.application-registry-workspaces button { display: inline-flex; align-items: center; gap: 6px; padding: 8px 11px; color: #475569; border: 0; border-radius: 8px; background: transparent; font-weight: 650; font-size: 12px; cursor: pointer; }
-.application-registry-workspaces button:hover { color: #1d4ed8; background: #eff6ff; }
-.application-registry-workspaces button.is-active { color: #1d4ed8; background: #fff; box-shadow: 0 1px 3px rgb(15 23 42 / 12%); }
+.application-registry-header p, .application-registry-panel-head p { max-width: 820px; margin: 7px 0 0; color: var(--text-3); font-size: 13px; line-height: 1.65; }
+.application-registry-workspaces { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 16px; padding: 6px; border: 1px solid var(--primary-soft); border-radius: 10px; background: var(--surface-tint); }
+.application-registry-workspaces button { display: inline-flex; align-items: center; gap: 6px; padding: 8px 11px; color: var(--text-2); border: 0; border-radius: 8px; background: transparent; font-weight: 650; font-size: 12px; cursor: pointer; }
+.application-registry-workspaces button:hover { color: var(--primary-dark); background: var(--primary-soft); }
+.application-registry-workspaces button.is-active { color: var(--primary-dark); background: var(--surface-card); box-shadow: 0 1px 3px rgb(15 23 42 / 12%); }
 .application-registry-workspaces :deep(svg) { width: 15px; height: 15px; }
-.application-registry-eyebrow { display: inline-flex; align-items: center; gap: 6px; color: #2563eb; font-size: 11px; font-weight: 750; letter-spacing: .08em; }
+.application-registry-eyebrow { display: inline-flex; align-items: center; gap: 6px; color: var(--primary); font-size: 11px; font-weight: 750; letter-spacing: .08em; }
 .application-registry-eyebrow :deep(svg) { width: 15px; height: 15px; }
-.application-registry-onboard, .application-registry-editor { margin-top: 18px; padding: 16px; border: 1px solid #bfdbfe; border-radius: 12px; background: #f8fbff; }
+.application-registry-onboard, .application-registry-editor { margin-top: 18px; padding: 16px; border: 1px solid var(--primary-border); border-radius: 12px; background: var(--surface-tint); }
 .application-registry-section-title { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
 .application-registry-section-title strong, .application-registry-section-title small { display: block; }
-.application-registry-section-title small { margin-top: 4px; color: #64748b; font-size: 12px; }
+.application-registry-section-title small { margin-top: 4px; color: var(--text-3); font-size: 12px; }
 .application-registry-confirm { grid-column: span 2; }
-.application-registry-target-empty { display: grid; grid-column: span 2; justify-items: start; gap: 4px; padding: 12px; color: #64748b; border: 1px dashed #cbd5e1; border-radius: 8px; background: #f8fafc; font-size: 12px; }
+.application-registry-target-empty { display: grid; grid-column: span 2; justify-items: start; gap: 4px; padding: 12px; color: var(--text-3); border: 1px dashed var(--text-4); border-radius: 8px; background: var(--surface-muted); font-size: 12px; }
 .application-registry-target-empty :deep(svg) { width: 18px; height: 18px; color: #3b82f6; }
 .application-registry-target-empty strong { color: #334155; }
 .application-registry-discovery { display: grid; gap: 10px; margin-top: 16px; padding: 14px; border: 1px solid #c7d2fe; border-radius: 12px; background: linear-gradient(135deg, #f8faff, #faf8ff); }
 .application-registry-discovery > div > strong, .application-registry-discovery > div > small { display: block; }
-.application-registry-discovery > div > small { margin-top: 3px; color: #64748b; font-size: 12px; line-height: 1.55; }
-.application-registry-discovery article { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 11px 12px; border: 1px solid #e0e7ff; border-radius: 8px; background: #fff; }
+.application-registry-discovery > div > small { margin-top: 3px; color: var(--text-3); font-size: 12px; line-height: 1.55; }
+.application-registry-discovery article { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 11px 12px; border: 1px solid #e0e7ff; border-radius: 8px; background: var(--surface-card); }
 .application-registry-discovery article > div { min-width: 0; }
 .application-registry-discovery article strong, .application-registry-discovery article span, .application-registry-discovery article small { display: block; }
-.application-registry-discovery article strong { color: #1e293b; font-size: 13px; overflow-wrap: anywhere; word-break: break-all; }
-.application-registry-discovery article span, .application-registry-discovery article small { margin-top: 3px; overflow: hidden; color: #64748b; font-size: 11.5px; text-overflow: ellipsis; white-space: nowrap; }
-.application-registry-error { display: grid; gap: 4px; margin: 14px 0 0; padding: 10px 12px; color: #b91c1c; border: 1px solid #fecaca; border-radius: 8px; background: #fff7f7; font-size: 12px; line-height: 1.55; }
+.application-registry-discovery article strong { color: var(--text-1); font-size: 13px; overflow-wrap: anywhere; word-break: break-all; }
+.application-registry-discovery article span, .application-registry-discovery article small { margin-top: 3px; overflow: hidden; color: var(--text-3); font-size: 11.5px; text-overflow: ellipsis; white-space: nowrap; }
+.application-registry-error { display: grid; gap: 4px; margin: 14px 0 0; padding: 10px 12px; color: var(--danger); border: 1px solid var(--danger-border); border-radius: 8px; background: #fff7f7; font-size: 12px; line-height: 1.55; }
 .application-registry-error-actions { display: flex; gap: 8px; margin-top: 4px; }
 .application-registry-error span, .application-registry-error small { color: #7f1d1d; overflow-wrap: anywhere; word-break: break-all; }
-.application-registry-error-detail { margin: 6px 0 0; padding: 8px; overflow: auto; max-height: 220px; color: #7f1d1d; border: 1px solid #fecaca; border-radius: 6px; background: #fff; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 11px; line-height: 1.5; white-space: pre-wrap; word-break: break-all; }
-.application-registry-environment-guidance.is-error { color: #b91c1c; }
+.application-registry-error-detail { margin: 6px 0 0; padding: 8px; overflow: auto; max-height: 220px; color: #7f1d1d; border: 1px solid var(--danger-border); border-radius: 6px; background: var(--surface-card); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 11px; line-height: 1.5; white-space: pre-wrap; word-break: break-all; }
+.application-registry-environment-guidance.is-error { color: var(--danger); }
 .application-registry-environment-guidance.is-error span { display: block; margin-top: 2px; color: #7f1d1d; }
-.application-registry-inline-warning { margin: 10px 0 0; color: #b45309; font-size: 12px; }
+.application-registry-inline-warning { margin: 10px 0 0; color: var(--warning); font-size: 12px; }
 .application-registry-layout { display: grid; grid-template-columns: 290px minmax(0, 1fr); gap: 18px; margin-top: 20px; }
-.application-registry-sidebar { min-width: 0; padding: 14px; border: 1px solid #e2e8f0; border-radius: 12px; background: #f8fafc; }
+.application-registry-sidebar { min-width: 0; padding: 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface-muted); }
 .application-registry-sidebar-head { align-items: center; }
-.application-registry-sidebar-head strong { color: #1e293b; }
+.application-registry-sidebar-head strong { color: var(--text-1); }
 .application-registry-filters { display: grid; gap: 8px; margin: 12px 0; }
-.application-registry-filters input, .application-registry-filters select { width: 100%; min-height: 34px; padding: 0 9px; border: 1px solid #dbe3ee; border-radius: 8px; background: #fff; color: #334155; font-size: 12px; }
+.application-registry-filters input, .application-registry-filters select { width: 100%; min-height: 34px; padding: 0 9px; border: 1px solid #dbe3ee; border-radius: 8px; background: var(--surface-card); color: #334155; font-size: 12px; }
 .application-registry-list-item { display: flex; align-items: center; width: 100%; gap: 9px; padding: 10px 8px; border: 0; border-radius: 8px; background: transparent; color: #334155; text-align: left; cursor: pointer; }
 .application-registry-list-item:hover, .application-registry-list-item.is-selected { background: #eaf2ff; }
-.application-registry-app-icon { display: grid; flex: 0 0 28px; width: 28px; height: 28px; place-items: center; color: #2563eb; border-radius: 8px; background: #dbeafe; }
+.application-registry-app-icon { display: grid; flex: 0 0 28px; width: 28px; height: 28px; place-items: center; color: var(--primary); border-radius: 8px; background: var(--primary-soft); }
 .application-registry-app-icon :deep(svg) { width: 15px; height: 15px; }
 .application-registry-list-copy { min-width: 0; flex: 1; }
 .application-registry-list-copy strong, .application-registry-list-copy small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .application-registry-list-copy strong { font-size: 12px; }
-.application-registry-list-copy small { margin-top: 2px; color: #94a3b8; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; }
+.application-registry-list-copy small { margin-top: 2px; color: var(--text-3); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; }
 .application-registry-status { display: inline-flex; align-items: center; padding: 3px 7px; border-radius: 999px; font-size: 11px; font-weight: 700; white-space: nowrap; }
 .application-registry-status.is-active, .application-registry-status.is-ready { color: #047857; background: #d1fae5; }
-.application-registry-status.is-draft, .application-registry-status.is-provisioning, .application-registry-status.is-updating { color: #1d4ed8; background: #dbeafe; }
-.application-registry-status.is-disabled, .application-registry-status.is-suspended, .application-registry-status.is-offboarded { color: #64748b; background: #e2e8f0; }
-.application-registry-status.is-retired, .application-registry-status.is-provision-failed { color: #b91c1c; background: #fee2e2; }
-.application-registry-status.is-draining { color: #b45309; background: #fef3c7; }
-.application-registry-list-state { padding: 18px 8px; color: #94a3b8; font-size: 12px; text-align: center; }
+.application-registry-status.is-draft, .application-registry-status.is-provisioning, .application-registry-status.is-updating { color: var(--primary-dark); background: var(--primary-soft); }
+.application-registry-status.is-disabled, .application-registry-status.is-suspended, .application-registry-status.is-offboarded { color: var(--text-3); background: var(--line); }
+.application-registry-status.is-retired, .application-registry-status.is-provision-failed { color: var(--danger); background: var(--danger-soft); }
+.application-registry-status.is-draining { color: var(--warning); background: var(--warning-soft); }
+.application-registry-list-state { padding: 18px 8px; color: var(--text-3); font-size: 12px; text-align: center; }
 .application-registry-detail { min-width: 0; }
-.application-registry-detail-head { align-items: center; padding-bottom: 15px; border-bottom: 1px solid #e2e8f0; }
-.application-registry-detail-head h3 { margin: 5px 0 0; color: #0f172a; font-size: 21px; }
-.application-registry-detail-head p { margin: 5px 0 0; color: #94a3b8; font-size: 11px; }
+.application-registry-detail-head { align-items: center; padding-bottom: 15px; border-bottom: 1px solid var(--line); }
+.application-registry-detail-head h3 { margin: 5px 0 0; color: var(--text-1); font-size: 21px; }
+.application-registry-detail-head p { margin: 5px 0 0; color: var(--text-3); font-size: 11px; }
 .application-registry-detail-head code, .application-registry-environment-uri span, .application-registry-environment-uri small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .application-registry-detail-actions { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 7px; }
 .application-registry-panel { margin-top: 18px; }
 .application-registry-panel-head { align-items: center; margin-bottom: 11px; }
-.application-registry-panel-head h4 { margin: 0; color: #1e293b; font-size: 15px; }
+.application-registry-panel-head h4 { margin: 0; color: var(--text-1); font-size: 15px; }
 .application-registry-panel-head p { margin-top: 4px; font-size: 11px; }
 .application-registry-environments { display: grid; gap: 8px; }
-.application-registry-environment { padding: 12px; border: 1px solid #e2e8f0; border-radius: 8px; background: #fff; cursor: pointer; }
-.application-registry-environment:hover, .application-registry-environment.is-selected { border-color: #93c5fd; box-shadow: 0 0 0 2px #eff6ff; }
+.application-registry-environment { padding: 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-card); cursor: pointer; }
+.application-registry-environment:hover, .application-registry-environment.is-selected { border-color: var(--primary-border); box-shadow: 0 0 0 2px var(--primary-soft); }
 .application-registry-environment-main, .application-registry-environment-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.application-registry-environment-main strong { color: #0f172a; font-size: 13px; }
-.application-registry-environment-main small { color: #94a3b8; font-size: 11px; }
-.application-registry-environment-uri { display: grid; min-width: 0; gap: 3px; margin: 7px 0; color: #475569; font-size: 11px; }
-.application-registry-environment-uri small { color: #94a3b8; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.application-registry-environment-main strong { color: var(--text-1); font-size: 13px; }
+.application-registry-environment-main small { color: var(--text-3); font-size: 11px; }
+.application-registry-environment-uri { display: grid; min-width: 0; gap: 3px; margin: 7px 0; color: var(--text-2); font-size: 11px; }
+.application-registry-environment-uri small { color: var(--text-3); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 .application-registry-environment.authentication { cursor: default; }
-.application-registry-environment.authentication:hover { border-color: #e2e8f0; box-shadow: none; }
-.application-registry-auth-details { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 14px; margin: 10px 0; padding: 10px; border: 1px solid #dbeafe; border-radius: 8px; background: #f8fbff; }
+.application-registry-environment.authentication:hover { border-color: var(--line); box-shadow: none; }
+.application-registry-auth-details { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 14px; margin: 10px 0; padding: 10px; border: 1px solid var(--primary-soft); border-radius: 8px; background: var(--surface-tint); }
 .application-registry-auth-details div { min-width: 0; }
-.application-registry-auth-details dt { color: #64748b; font-size: 11px; font-weight: 700; }
-.application-registry-auth-details dd { min-width: 0; margin: 3px 0 0; overflow: hidden; color: #1e293b; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.application-registry-auth-details dt { color: var(--text-3); font-size: 11px; font-weight: 700; }
+.application-registry-auth-details dd { min-width: 0; margin: 3px 0 0; overflow: hidden; color: var(--text-1); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
 .application-registry-auth-details code { font-size: 11px; }
-.application-registry-switch-gates { margin: 8px 0; padding: 8px 10px; border: 1px solid #fde68a; border-radius: 8px; background: #fffbeb; color: #78350f; font-size: 11px; }
+.application-registry-switch-gates { margin: 8px 0; padding: 8px 10px; border: 1px solid var(--warning-border); border-radius: 8px; background: #fffbeb; color: #78350f; font-size: 11px; }
 .application-registry-switch-gates > strong { display: block; margin-bottom: 4px; }
 .application-registry-switch-gates ul { display: grid; gap: 3px; margin: 0; padding: 0; list-style: none; }
 .application-registry-switch-gates li { display: grid; grid-template-columns: 44px 1fr; gap: 4px; align-items: baseline; }
 .application-registry-switch-gates li code { overflow-wrap: anywhere; word-break: break-all; }
-.application-registry-switch-gates li span { color: #b45309; font-weight: 700; }
-.application-registry-switch-gates li.is-passed span { color: #15803d; }
+.application-registry-switch-gates li span { color: var(--warning); font-weight: 700; }
+.application-registry-switch-gates li.is-passed span { color: var(--success); }
 .application-registry-switch-gates li small { grid-column: 2; color: #92400e; line-height: 1.45; }
 .application-registry-switch-gates p { margin: 6px 0 0; line-height: 1.45; }
-.application-registry-environment-guidance { margin: 7px 0; color: #b45309; font-size: 11px; line-height: 1.55; }
+.application-registry-environment-guidance { margin: 7px 0; color: var(--warning); font-size: 11px; line-height: 1.55; }
 .application-registry-environment-actions { justify-content: flex-end; }
-.application-registry-empty { display: grid; min-height: 180px; place-items: center; align-content: center; gap: 7px; margin-top: 20px; color: #94a3b8; text-align: center; }
+.application-registry-empty { display: grid; min-height: 180px; place-items: center; align-content: center; gap: 7px; margin-top: 20px; color: var(--text-3); text-align: center; }
 .application-registry-empty :deep(svg) { width: 28px; height: 28px; color: #60a5fa; }
-.application-registry-empty strong { color: #475569; font-size: 14px; }
+.application-registry-empty strong { color: var(--text-2); font-size: 14px; }
 .application-registry-empty p { margin: 0; font-size: 12px; }
 .application-registry-empty.compact { min-height: 90px; display: flex; justify-content: center; }
 .application-registry-modal-backdrop { position: fixed; z-index: 30; inset: 0; display: grid; place-items: center; padding: 20px; background: rgb(15 23 42 / 35%); }
-.application-registry-modal { width: min(460px, 100%); padding: 22px; border-radius: 14px; background: #fff; box-shadow: 0 20px 60px rgb(15 23 42 / 25%); }
-.application-registry-modal h3 { margin: 0; color: #0f172a; font-size: 16px; }
-.application-registry-modal p { margin: 10px 0 16px; color: #64748b; font-size: 12px; line-height: 1.65; }
+.application-registry-modal { width: min(460px, 100%); padding: 22px; border-radius: 14px; background: var(--surface-card); box-shadow: 0 20px 60px rgb(15 23 42 / 25%); }
+.application-registry-modal h3 { margin: 0; color: var(--text-1); font-size: 16px; }
+.application-registry-modal p { margin: 10px 0 16px; color: var(--text-3); font-size: 12px; line-height: 1.65; }
 .application-registry-modal .console-form-actions { justify-content: flex-end; margin-top: 16px; }
-.console-button.danger { color: #b91c1c; border-color: #fecaca; background: #fff7f7; }
+.console-button.danger { color: var(--danger); border-color: var(--danger-border); background: #fff7f7; }
 @media (max-width: 900px) { .application-registry-layout { grid-template-columns: 1fr; } .application-registry-sidebar { max-height: 300px; overflow: auto; } }
 @media (max-width: 640px) { .application-registry-header, .application-registry-detail-head, .application-registry-panel-head { flex-direction: column; align-items: stretch; } .application-registry-confirm { grid-column: auto; } .application-registry-detail-actions { justify-content: flex-start; } .application-registry-workspaces { display: grid; grid-template-columns: 1fr; } .application-registry-auth-details { grid-template-columns: 1fr; } }
 
 /* 接入进度 stepper */
 .application-registry-progress { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: 18px 0 4px; }
 .application-registry-progress ol { display: flex; flex: 1 1 auto; gap: 0; margin: 0; padding: 0; list-style: none; }
-.application-registry-progress li { display: flex; flex: 1; align-items: center; gap: 6px; min-width: 0; color: #94a3b8; font-size: 11px; }
-.application-registry-progress li::after { content: ''; flex: 1; min-width: 12px; height: 1px; margin: 0 6px; background: #e2e8f0; }
+.application-registry-progress li { display: flex; flex: 1; align-items: center; gap: 6px; min-width: 0; color: var(--text-3); font-size: 11px; }
+.application-registry-progress li::after { content: ''; flex: 1; min-width: 12px; height: 1px; margin: 0 6px; background: var(--line); }
 .application-registry-progress li:last-child::after { display: none; }
-.application-registry-progress li i { display: grid; width: 18px; height: 18px; flex: 0 0 auto; place-items: center; color: #94a3b8; font-size: 11px; font-style: normal; font-weight: 700; border: 1px solid #cbd5e1; border-radius: var(--radius-pill); background: #fff; }
-.application-registry-progress li.is-done { color: #15803d; }
-.application-registry-progress li.is-done i { color: #fff; border-color: #16a34a; background: #16a34a; }
-.application-registry-progress li.is-current { color: #1d4ed8; font-weight: 600; }
-.application-registry-progress li.is-current i { color: #fff; border-color: #2563eb; background: #2563eb; box-shadow: 0 0 0 3px rgb(37 99 235 / 12%); }
-.application-registry-progress > small { flex: 0 0 auto; color: #94a3b8; font-size: 11px; }
+.application-registry-progress li i { display: grid; width: 18px; height: 18px; flex: 0 0 auto; place-items: center; color: var(--text-3); font-size: 11px; font-style: normal; font-weight: 700; border: 1px solid var(--text-4); border-radius: var(--radius-pill); background: var(--surface-card); }
+.application-registry-progress li.is-done { color: var(--success); }
+.application-registry-progress li.is-done i { color: var(--on-primary); border-color: var(--success); background: var(--success); }
+.application-registry-progress li.is-current { color: var(--primary-dark); font-weight: 600; }
+.application-registry-progress li.is-current i { color: var(--on-primary); border-color: var(--primary); background: var(--primary); box-shadow: 0 0 0 3px rgb(37 99 235 / 12%); }
+.application-registry-progress > small { flex: 0 0 auto; color: var(--text-3); font-size: 11px; }
 
 /* 环境卡片分区 */
 .application-registry-environment { padding: 0; cursor: pointer; }
@@ -1727,25 +1727,25 @@ onMounted(() => {
 .application-registry-zone { padding: 12px 14px; border-top: 1px solid #eef2f7; }
 .application-registry-zone:first-of-type { border-top: 0; }
 .application-registry-zone-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 8px; }
-.application-registry-zone-head h5 { margin: 0; color: #475569; font-size: 12px; font-weight: 700; }
-.application-registry-zone-hint { color: #94a3b8; font-size: 11px; }
-.application-registry-zone-toggle { padding: 2px 8px; color: #2563eb; font-size: 11px; font-weight: 600; border: 0; border-radius: 6px; background: #eff6ff; cursor: pointer; }
-.application-registry-zone-toggle:hover { background: #dbeafe; }
+.application-registry-zone-head h5 { margin: 0; color: var(--text-2); font-size: 12px; font-weight: 700; }
+.application-registry-zone-hint { color: var(--text-3); font-size: 11px; }
+.application-registry-zone-toggle { padding: 2px 8px; color: var(--primary); font-size: 11px; font-weight: 600; border: 0; border-radius: 6px; background: var(--primary-soft); cursor: pointer; }
+.application-registry-zone-toggle:hover { background: var(--primary-soft); }
 .application-registry-provider { display: inline-flex; align-items: center; padding: 3px 8px; border-radius: 999px; font-size: 11px; font-weight: 700; white-space: nowrap; }
-.application-registry-provider.is-platform { color: #475569; background: #f1f5f9; }
+.application-registry-provider.is-platform { color: var(--text-2); background: var(--surface-content); }
 .application-registry-provider.is-keycloak { color: #6d28d9; background: #f5f3ff; }
-.application-registry-auth-summary { display: flex; flex-wrap: wrap; gap: 8px 16px; color: #64748b; font-size: 12px; }
+.application-registry-auth-summary { display: flex; flex-wrap: wrap; gap: 8px 16px; color: var(--text-3); font-size: 12px; }
 .application-registry-auth-summary span { white-space: nowrap; }
-.application-registry-auth-summary span:nth-child(2) { color: #b45309; }
+.application-registry-auth-summary span:nth-child(2) { color: var(--warning); }
 
 /* 新增接入向导弹窗 */
 .application-registry-wizard-modal { width: min(720px, 100%); max-height: min(86vh, 720px); overflow: auto; }
 .application-registry-wizard-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 16px; }
 .application-registry-wizard-head h3 { margin: 4px 0 0; }
 .application-registry-wizard-head p { margin: 6px 0 0; font-size: 11px; }
-.application-registry-wizard-close { width: 30px; height: 30px; border: 0; border-radius: 6px; background: #f1f5f9; color: #64748b; font-size: 16px; line-height: 1; cursor: pointer; }
-.application-registry-wizard-close:hover { background: #e2e8f0; }
-.application-registry-inline-note { margin: 10px 0 0; color: #475569; font-size: 12px; line-height: 1.6; }
+.application-registry-wizard-close { width: 30px; height: 30px; border: 0; border-radius: 6px; background: var(--surface-content); color: var(--text-3); font-size: 16px; line-height: 1; cursor: pointer; }
+.application-registry-wizard-close:hover { background: var(--line); }
+.application-registry-inline-note { margin: 10px 0 0; color: var(--text-2); font-size: 12px; line-height: 1.6; }
 
 /* ==========================================================================
    深色主题：接入向导里写死的浅蓝底、白卡片、浅描边与墨色
