@@ -15,6 +15,7 @@ const props = defineProps({
 const emit = defineEmits(['select', 'toggle'])
 
 const keyword = ref('')
+const statusFilter = ref('')
 const projectByID = computed(() => new Map(props.projects.map(project => [project.id, project])))
 // 用途：兼容分配子阶段标签，并复用其他节点的主状态及报告徽章。
 // 参数：item 为队列中的当前服务项快照。
@@ -24,14 +25,21 @@ function pickerStatusBadges(item) {
   const label = props.statusLabel(item)
   return [{ key: 'status', label, tone: statusTone(label) }]
 }
+const statusOptions = computed(() => [...new Set(
+  props.items.flatMap((item) => pickerStatusBadges(item).map((badge) => badge.label)).filter(Boolean),
+)].sort((a, b) => a.localeCompare(b, 'zh-CN')))
 const filteredItems = computed(() => {
   const query = keyword.value.trim().toLowerCase()
-  if (!query) return props.items
-  return props.items.filter((item) => [
-    projectByID.value.get(item.project_id)?.name,
-    item.id, item.site, item.category, item.batch, item.system, item.status,
-    ...pickerStatusBadges(item).map(badge => badge.label),
-  ].join(' ').toLowerCase().includes(query))
+  return props.items.filter((item) => {
+    const badges = pickerStatusBadges(item)
+    if (statusFilter.value && !badges.some((badge) => badge.label === statusFilter.value)) return false
+    if (!query) return true
+    return [
+      projectByID.value.get(item.project_id)?.name,
+      item.id, item.site, item.category, item.batch, item.system, item.status,
+      ...badges.map(badge => badge.label),
+    ].join(' ').toLowerCase().includes(query)
+  })
 })
 // 用途：按稳定编号判断服务项是否被选中。
 // 参数：item 为当前卡片对应的服务项快照。
@@ -56,6 +64,10 @@ function choose(item) {
         <input v-model="keyword" type="search" placeholder="搜索项目 / 系统 / 服务项编号"
           aria-label="搜索服务项队列" maxlength="100" />
       </label>
+      <select v-model="statusFilter" class="pm-picker-filter" aria-label="按状态筛选服务项">
+        <option value="">全部状态</option>
+        <option v-for="label in statusOptions" :key="label" :value="label">{{ label }}</option>
+      </select>
       <span class="pm-picker-count">{{ filteredItems.length }} / {{ items.length }} 项</span>
     </div>
     <div class="pm-picker-list" role="listbox" :aria-multiselectable="multiple">

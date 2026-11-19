@@ -1329,8 +1329,10 @@
 
 /* 搜索卡片选择器（服务项） */
 .pm-picker { display: grid; gap: 10px; padding: var(--pm-sp-4) var(--pm-sp-5); }
-.pm-picker-toolbar { display: flex; align-items: center; gap: 10px; }
-.pm-picker-search { flex: 1; display: flex; align-items: center; gap: var(--pm-sp-2); padding: 0 var(--pm-sp-3); border: 1px solid var(--pm-line); border-radius: var(--pm-r-sm); background: var(--pm-sunken); color: var(--pm-muted); }
+.pm-picker-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.pm-picker-search { flex: 1 1 220px; min-width: 0; display: flex; align-items: center; gap: var(--pm-sp-2); padding: 0 var(--pm-sp-3); border: 1px solid var(--pm-line); border-radius: var(--pm-r-sm); background: var(--pm-sunken); color: var(--pm-muted); }
+.pm-picker-filter { height: var(--pm-h-control); max-width: 150px; padding: 0 8px; color: var(--pm-body); font-size: var(--pm-fs-ui); border: 1px solid var(--pm-line); border-radius: var(--pm-r-sm); background: var(--pm-card); }
+.pm-picker-count { margin-left: auto; }
 .pm-picker-search svg { flex: 0 0 auto; width: 15px; height: 15px; }
 .pm-picker-search input { flex: 1; min-height: var(--pm-h-button); padding: 0; border: 0; background: transparent; color: var(--pm-ink); font-size: var(--pm-fs-ui); }
 .pm-picker-search input:focus { box-shadow: none; }
