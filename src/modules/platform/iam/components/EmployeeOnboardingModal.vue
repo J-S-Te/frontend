@@ -527,7 +527,7 @@ async function submit() {
 .personnel-workbench-modal .console-wizard-role-list > div::before { position: absolute; top: 0; bottom: 0; left: 0; width: 3px; content: ''; border-radius: 8px 0 0 7px; background: #7b9ce2; }
 .personnel-workbench-modal .console-wizard-empty { background: #fbfdff; }
 .personnel-workbench-modal .console-form-actions { position: sticky; bottom: 0; z-index: 2; margin: 1rem -1.75rem -1.5rem; padding: .9rem 1.75rem; border-top: 1px solid #e3ebf6; background: #fff; }
-@media (max-width: 760px) {
+@media (max-width: 640px) {
   .personnel-workbench-header { padding: 1.2rem 1.15rem 1.1rem; }
   .personnel-workbench-modal .console-wizard-body { padding: 1rem 1.15rem 1.25rem; }
   .personnel-workbench-summary { margin-top: .85rem; }

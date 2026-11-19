@@ -3591,12 +3591,12 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
-@media (min-width: 821px) {
+@media (min-width: 901px) {
   .is-sidebar-collapsed > .contract-sidebar { transform: translateX(-100%); visibility: hidden; }
   .is-sidebar-collapsed > .contract-main { margin-left: 0; }
 }
 </style>
 
 <style scoped>
-@media (min-width: 821px) and (max-width: 900px) { :deep(.shell-preferences-collapse) { display: inline-block; } }
+@media (min-width: 901px) and (max-width: 900px) { :deep(.shell-preferences-collapse) { display: inline-block; } }
 </style>

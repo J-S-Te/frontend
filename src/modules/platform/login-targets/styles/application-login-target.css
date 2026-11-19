@@ -234,7 +234,7 @@
   background: var(--surface-muted);
 }
 
-@media (max-width: 720px) {
+@media (max-width: 640px) {
   /* 分页条不参与纵向分组：它是 shared/components/PaginationBar.vue 的 flex 行，
      改成 column 会把「上一页 / 页码 / 下一页 / 跳至 / 每页」竖着堆起来。
      这里只让页头与筛选工具条改为纵向，分页页脚保持行方向、内部自行换行。 */

@@ -158,7 +158,7 @@ const acknowledgedTitle = computed(() => {
 /* 每张卡只有一个动作；没有动作时给纯文字提示，不留禁用按钮 */
 .license-app-action { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; min-width: 0; }
 
-@media (max-width: 720px) {
+@media (max-width: 640px) {
   .license-app-card { aspect-ratio: auto; min-height: 200px; padding: 14px; }
 }
 </style>

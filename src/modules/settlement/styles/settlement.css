@@ -667,7 +667,7 @@
   border-color: var(--success-border, #bbe7cc);
   background: var(--success-soft, #dcfce7);
 }
-@media (max-width: 980px) {
+@media (max-width: 900px) {
   /* 侧栏宽度/主区偏移已由共享 console.css 统一：≤820px 侧栏为完整 272px 抽屉。
      这里只保留内容区栅格的收敛，不再隐藏导航文案或改主区偏移。 */
   .settlement-cards {
@@ -685,7 +685,7 @@
     min-height: 0;
   }
 }
-@media (max-width: 620px) {
+@media (max-width: 640px) {
   .settlement-content {
     padding: 20px 14px 28px;
   }
@@ -864,7 +864,7 @@
 .settlement-timeline p {
   margin: 5px 0 0 !important;
 }
-@media (max-width: 760px) {
+@media (max-width: 900px) {
   .settlement-detail-kpis,
   .settlement-detail-grid {
     grid-template-columns: 1fr;
@@ -923,7 +923,7 @@
   font-weight: 600;
   white-space: nowrap;
 }
-@media (max-width: 620px) {
+@media (max-width: 640px) {
   .settlement-head-actions {
     justify-content: flex-start;
   }
@@ -1090,7 +1090,7 @@
   min-width: 930px;
   margin: 12px 0 0;
 }
-@media (max-width: 620px) {
+@media (max-width: 640px) {
   .settlement-section-head {
     align-items: flex-start;
     flex-direction: column;
@@ -1386,7 +1386,7 @@
 .settlement-panel table tbody tr:hover {
   background: var(--surface-tint, #fafcff);
 }
-@media (max-width: 620px) {
+@media (max-width: 640px) {
   .settlement-invoices .settlement-section-head > div:last-child {
     width: 100%;
   }

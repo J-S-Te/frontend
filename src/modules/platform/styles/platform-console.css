@@ -1015,7 +1015,7 @@
 
 /* ---------------------------------------------------------------- 响应式 */
 
-@media (max-width: 1360px) {
+@media (max-width: 1200px) {
   .console-page--platform {
     --pc-gutter: 22px;
   }
@@ -1025,13 +1025,13 @@
   }
 }
 
-@media (max-width: 1180px) {
+@media (max-width: 1200px) {
   .console-page--platform .audit-health-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
-@media (max-width: 820px) {
+@media (max-width: 900px) {
   .console-page--platform .console-content {
     padding: 18px 18px 36px;
   }
@@ -1061,7 +1061,7 @@
   }
 }
 
-@media (max-width: 620px) {
+@media (max-width: 640px) {
   .console-page--platform {
     --pc-gutter: 14px;
     --pc-card-pad: 18px;
@@ -1149,7 +1149,7 @@
   white-space: normal;
 }
 
-@media (max-width: 1343px) {
+@media (max-width: 1200px) {
   .console-page--platform .settings-content .iam-management-guide {
     grid-template-columns: minmax(0, 1fr);
     gap: 16px;
@@ -1174,7 +1174,7 @@
   }
 }
 
-@media (max-width: 1203px) {
+@media (max-width: 1200px) {
   .console-page--platform .settings-content .iam-summary-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }

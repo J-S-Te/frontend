@@ -206,7 +206,7 @@ test('高密度工作台在桌面与窄屏下保持可导航和可理解', () =>
   assert.match(styles, /\.pm-col-actions \{ width: 90px; min-width: 90px; text-align: right; \}/)
   assert.match(source, /class="pm-table pm-responsive-list"/)
   assert.match(source, /data-label="客户"/)
-  assert.match(styles, /@media \(max-width: 760px\) \{[\s\S]*?\.pm-responsive-list tbody tr \{ display: grid;/)
+  assert.match(styles, /@media \(max-width: 900px\) \{[\s\S]*?\.pm-responsive-list tbody tr \{ display: grid;/)
 
   // 仪表盘 KPI 最多保留标签、数值、说明三层。
   assert.doesNotMatch(source, /pm-kpi-corner|pm-kpi-note/)
@@ -956,9 +956,9 @@ test('项目列表卡片按角色职责展示并使用服务端裁剪后的统�
   assert.match(source, /pm-project-kpi-columns-\$\{projectKpiColumnCount\}/)
   assert.match(styles, /\.pm-project-kpi-grid \{ display: flex; flex-wrap: wrap;/)
   assert.match(styles, /\.pm-project-kpi-grid > \.pm-kpi \{ flex: 1 1 calc\(25% - 12px\);/)
-  assert.match(styles, /@media \(max-width: 1280px\) \{[\s\S]*?\.pm-project-kpi-columns-5 > \.pm-kpi \{ flex-basis: calc\(33\.333333% - 10\.666667px\); \}/)
-  assert.match(styles, /@media \(max-width: 760px\) \{[\s\S]*?\.pm-project-kpi-grid > \.pm-kpi \{ flex-basis: calc\(50% - 8px\); \}/)
-  assert.match(styles, /@media \(max-width: 520px\) \{[\s\S]*?\.pm-project-kpi-grid > \.pm-kpi \{ flex-basis: 100%; \}/)
+  assert.match(styles, /@media \(max-width: 1200px\) \{[\s\S]*?\.pm-project-kpi-columns-5 > \.pm-kpi \{ flex-basis: calc\(33\.333333% - 10\.666667px\); \}/)
+  assert.match(styles, /@media \(max-width: 900px\) \{[\s\S]*?\.pm-project-kpi-grid > \.pm-kpi \{ flex-basis: calc\(50% - 8px\); \}/)
+  assert.match(styles, /@media \(max-width: 480px\) \{[\s\S]*?\.pm-project-kpi-grid > \.pm-kpi \{ flex-basis: 100%; \}/)
 })
 
 test('实施计划提交人员清单，设备清单在实施准备登记并校验占用', () => {

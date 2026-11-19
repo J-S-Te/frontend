@@ -376,7 +376,7 @@ test('样式契约：分页条自带 scoped 样式，用双写类名压过模块
   // 根节点显式声明行方向：页面规则（登录目标页 ≤720px 的 column 分组）不得把分页条改成纵向。
   const rootRule = PAGER_STYLE.match(/\.ui-pager\.ui-pager \{([\s\S]*?)\}/)?.[1] || ''
   assert.match(rootRule, /flex-direction:\s*row/, '分页条根节点必须显式 flex-direction: row 兜底')
-  assert.match(PAGER_STYLE, /@media \(max-width: 720px\)/, '窄屏必须允许换行并改为左对齐')
+  assert.match(PAGER_STYLE, /@media \(max-width: 640px\)/, '窄屏必须允许换行并改为左对齐')
   assert.match(PAGER_STYLE, /@media \(pointer: coarse\)/, '触控目标需要 44px 兜底')
 })
 

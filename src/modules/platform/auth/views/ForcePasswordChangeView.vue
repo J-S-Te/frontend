@@ -143,7 +143,7 @@ async function submit() {
   text-align: center;
 }
 
-@media (max-width: 520px) {
+@media (max-width: 480px) {
   .password-policy-rules {
     grid-template-columns: 1fr;
   }

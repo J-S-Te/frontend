@@ -457,7 +457,7 @@ function changePageSize(event: Event): void {
 }
 
 /* 窄屏：整体换行并改为左对齐；组内不拆行，标签不折字。 */
-@media (max-width: 720px) {
+@media (max-width: 640px) {
   .ui-pager.ui-pager,
   .ui-pager.ui-pager .ui-pager__pages,
   .ui-pager.ui-pager .ui-pager__extra {

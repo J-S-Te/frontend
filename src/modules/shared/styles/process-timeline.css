@@ -251,7 +251,7 @@
   background: var(--ui-primary);
 }
 
-@media (max-width: 760px) {
+@media (max-width: 640px) {
   :root body .crm-timeline-step {
     grid-template-columns: 30px minmax(0, 1fr);
   }

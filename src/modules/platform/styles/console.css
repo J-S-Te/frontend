@@ -476,7 +476,7 @@
 .console-page.is-sidebar-collapsed .console-sidebar-toggle svg { transform: rotate(180deg); }
 .console-page.is-sidebar-collapsed .console-sidebar { transition: transform var(--duration-normal) ease; }
 
-@media (min-width: 821px) {
+@media (min-width: 901px) {
   .console-page.is-sidebar-collapsed .console-sidebar {
     width: var(--shell-collapsed, 64px);
     transform: none;
@@ -1085,7 +1085,7 @@
   .console-toast-leave-to { transform: none; }
 }
 
-@media (max-width: 820px) {
+@media (max-width: 900px) {
   .console-sidebar {
     width: 272px;
     transform: translateX(-100%);
@@ -1133,7 +1133,7 @@
   }
 }
 
-@media (max-width: 620px) {
+@media (max-width: 640px) {
   .console-topbar {
     min-height: 56px;
     padding: 0 14px;
@@ -1801,7 +1801,7 @@
   }
 }
 
-@media (max-width: 620px) {
+@media (max-width: 640px) {
   .audit-filter-bar .console-search-field {
     min-width: 100%;
   }
@@ -1848,7 +1848,7 @@
   min-width: 92px;
 }
 
-@media (max-width: 760px) {
+@media (max-width: 900px) {
   .audit-table-card {
     overflow: visible;
     border: 0;
@@ -1983,7 +1983,7 @@
 .audit-export-status { display:flex; align-items:center; gap:10px; }
 .audit-export-status span { flex:1; min-width:0; overflow-wrap:anywhere; }
 
-@media (max-width: 420px) {
+@media (max-width: 480px) {
   .audit-data-table td {
     grid-template-columns: 82px minmax(0, 1fr);
     gap: 7px;
@@ -2028,7 +2028,7 @@
   margin-left: 4px;
 }
 
-@media (max-width: 760px) {
+@media (max-width: 900px) {
   .audit-data-table {
     border-spacing: 0 8px;
   }
@@ -2155,7 +2155,7 @@
   color: var(--p);
 }
 
-@media (max-width: 760px) {
+@media (max-width: 900px) {
   .console-stepper {
     flex-wrap: wrap;
     gap: 8px;
@@ -2549,7 +2549,7 @@
   background: var(--danger-soft-strong, #fef7f7);
 }
 
-@media (max-width: 760px) {
+@media (max-width: 900px) {
   .console-wizard-modal {
     width: 100%;
   }
@@ -2739,7 +2739,7 @@
 }
 
 /* ≤720px：抽屉改整屏，头部固定、列表自己滚、分页留在底部，关闭按钮 44px。 */
-@media (max-width: 720px) {
+@media (max-width: 900px) {
   .console-sheet-mask {
     background: var(--surface-card);
   }

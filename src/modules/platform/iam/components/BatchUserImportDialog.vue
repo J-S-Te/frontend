@@ -1472,7 +1472,7 @@ function formatFileSize(bytes) {
   background: rgba(255, 255, 255, .96);
 }
 
-@media (max-width: 760px) {
+@media (max-width: 640px) {
   .iam-batch-import-modal { width: 100%; }
   .iam-batch-import-modal > header { padding: 20px; }
   .iam-batch-import-heading-icon { display: none; }

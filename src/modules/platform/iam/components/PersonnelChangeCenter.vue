@@ -807,12 +807,12 @@ onBeforeUnmount(() => { requestReferenceSeq++ })
 .personnel-role-list { display: grid; gap: .4rem; margin: .75rem 0 0; padding: 0; list-style: none; }
 .personnel-role-list li { display: flex; justify-content: space-between; gap: 1rem; padding: .5rem .65rem; border-radius: .5rem; background: var(--sunken, #f8fafc); }
 .personnel-role-list small { color: var(--muted, #71829b); white-space: nowrap; }
-@media (max-width: 980px) {
+@media (max-width: 900px) {
   .personnel-change-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .personnel-change-hero { align-items: flex-start; flex-direction: column; }
   .personnel-change-heading-actions { width: 100%; }
 }
-@media (max-width: 720px) {
+@media (max-width: 640px) {
   .personnel-change-hero, .personnel-change-summary { padding-right: 1rem; padding-left: 1rem; }
   .personnel-change-flow, .personnel-change-toolbar, .personnel-change-table-shell, .personnel-change-loading, .personnel-change-center > .console-card-body > .settings-empty { margin-right: 1rem; margin-left: 1rem; }
   .personnel-change-flow ol { grid-template-columns: repeat(2, 1fr); row-gap: .7rem; }

@@ -11,7 +11,7 @@ const styles = read('./styles/application-login-target.css')
 // 的 flex 行，被页面规则改成 column 后「上一页 / 页码 / 下一页 / 跳至 / 每页」会纵向
 // 堆叠。这里锁住：窄屏只允许页头与工具条改纵向，分页页脚必须保持行方向。
 test('≤720px 分页页脚不再被并入 flex-direction: column 分组', () => {
-  const start = styles.indexOf('@media (max-width: 720px)')
+  const start = styles.indexOf('@media (max-width: 640px)')
   assert.ok(start >= 0, '缺少 ≤720px 媒体查询')
   const next = styles.indexOf('\n@media ', start + 1)
   const block = styles.slice(start, next === -1 ? undefined : next)
@@ -31,7 +31,7 @@ test('≤720px 分页页脚不再被并入 flex-direction: column 分组', () =>
 
 test('分页条在页脚里保持行方向并于窄屏左对齐', () => {
   assert.match(moduleSource, /<footer class="login-target-module__pagination">\s*<PaginationBar label="登录目标分页"/)
-  const start = styles.indexOf('@media (max-width: 720px)')
+  const start = styles.indexOf('@media (max-width: 640px)')
   const next = styles.indexOf('\n@media ', start + 1)
   const block = styles.slice(start, next === -1 ? undefined : next)
   const paginationRule = [...block.matchAll(/([^{}]+)\{([^{}]*)\}/g)]

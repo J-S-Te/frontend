@@ -147,19 +147,19 @@ select { overflow-x: clip; }
   }
 }
 
-@media (max-width: 1366px) {
+@media (max-width: 1200px) {
   .console-topbar-actions,
   .contract-topbar-actions{ gap: 4px; }
   .operation-result { margin-bottom: 12px; }
 }
 
-@media (max-width: 560px) {
+@media (max-width: 480px) {
   .operation-result { align-items: flex-start; }
   .operation-result dl { flex-direction: column; gap: 4px; }
 }
 
 /* 1366×768 and 125%/150% zoom commonly produce a ~600–700px CSS viewport. */
-@media (max-width: 1366px) {
+@media (max-width: 1200px) {
   .pm-table th,
   .pm-table td,
   .contract-data-table th,
@@ -276,7 +276,7 @@ select { overflow-x: clip; }
 .subsystem-sidebar-user.subsystem-sidebar-user > button:hover { background: rgba(255,255,255,.08); color: #fff; }
 .subsystem-sidebar-user.subsystem-sidebar-user > button:disabled { cursor: wait; opacity: .55; }
 .subsystem-sidebar-user.subsystem-sidebar-user > button svg { width: 16px; height: 16px; }
-@media (max-width: 980px) {
+@media (max-width: 900px) {
   /* 结算侧栏在 ≤820px 收敛为整宽抽屉，不再有 64px 图标栏；
      用户区保持横向（头像 + 姓名 + 退出）并压缩高度，为低矮视口留出导航空间。 */
   .settlement-sidebar .subsystem-sidebar-user.subsystem-sidebar-user { min-height: 64px; padding: 10px 16px; }

@@ -1705,7 +1705,7 @@ onMounted(() => {
 .application-registry-modal p { margin: 10px 0 16px; color: #64748b; font-size: 12px; line-height: 1.65; }
 .application-registry-modal .console-form-actions { justify-content: flex-end; margin-top: 16px; }
 .console-button.danger { color: #b91c1c; border-color: #fecaca; background: #fff7f7; }
-@media (max-width: 980px) { .application-registry-layout { grid-template-columns: 1fr; } .application-registry-sidebar { max-height: 300px; overflow: auto; } }
+@media (max-width: 900px) { .application-registry-layout { grid-template-columns: 1fr; } .application-registry-sidebar { max-height: 300px; overflow: auto; } }
 @media (max-width: 640px) { .application-registry-header, .application-registry-detail-head, .application-registry-panel-head { flex-direction: column; align-items: stretch; } .application-registry-confirm { grid-column: auto; } .application-registry-detail-actions { justify-content: flex-start; } .application-registry-workspaces { display: grid; grid-template-columns: 1fr; } .application-registry-auth-details { grid-template-columns: 1fr; } }
 
 /* 接入进度 stepper */

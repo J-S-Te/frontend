@@ -173,7 +173,7 @@ onBeforeUnmount(deactivate)
 .shared-confirm-button.secondary { border-color: #cbd5e1; background: #fff; color: #334155; }
 .shared-confirm-button.primary { background: #235fcb; color: #fff; }
 .shared-confirm-button.danger { background: #b42318; color: #fff; }
-@media (max-width: 520px) {
+@media (max-width: 480px) {
   .shared-confirm-mask { padding: 12px; }
   .shared-confirm footer { flex-direction: column-reverse; }
   .shared-confirm-button { width: 100%; }
@@ -185,7 +185,7 @@ onBeforeUnmount(deactivate)
 .shared-confirm header > div { min-width: 0; }
 .shared-confirm header > button { flex: 0 0 auto; }
 .shared-confirm footer button { white-space: normal; overflow-wrap: anywhere; min-width: 0; }
-@media (max-width: 520px) { .shared-confirm { max-height: calc(100dvh - 24px); } }
+@media (max-width: 480px) { .shared-confirm { max-height: calc(100dvh - 24px); } }
 
 /* 进出场：遮罩淡入淡出，卡片轻微上浮缩放；退场约为进场的 65%。 */
 .shared-confirm-enter-active,

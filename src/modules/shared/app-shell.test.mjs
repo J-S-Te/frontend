@@ -364,7 +364,7 @@ test('抽屉遮罩受 menuOpen 控制，且渲染在 </main> 之后（不属于�
 })
 
 test('遮罩与抽屉断点绑定 console.css：桌面隐藏，≤820px 才显示且侧栏变抽屉', () => {
-  const mediaStart = consoleCss.indexOf('@media (max-width: 820px) {')
+  const mediaStart = consoleCss.indexOf('@media (max-width: 900px) {')
   assert.ok(mediaStart >= 0, 'console.css 必须保留 ≤820px 抽屉断点')
   // 取该 media 块的配对右括号，限制断言范围，避免误匹配其他断点。
   let depth = 0
@@ -872,10 +872,10 @@ test('折叠状态从存储恢复，刷新后不会跳回展开', async () => {
 })
 
 test('≤620px 保留通知铃铛的样式护栏与折叠按钮的桌面限定', () => {
-  const narrow620 = consoleCss.slice(consoleCss.indexOf('@media (max-width: 620px)'))
+  const narrow620 = consoleCss.slice(consoleCss.indexOf('@media (max-width: 640px)'))
   assert.match(narrow620, /\.console-notification-menu\s+\.console-icon-button\s*\{[^}]*display:\s*grid/, '620px 下通知铃铛必须仍可见')
-  assert.match(consoleCss, /@media \(min-width: 821px\)[\s\S]*?\.console-page\.is-sidebar-collapsed \.console-sidebar/, '折叠只作用于桌面')
-  assert.match(consoleCss, /@media \(max-width: 820px\)[\s\S]*?\.console-sidebar-toggle\s*\{[^}]*display:\s*none/, '窄屏隐藏桌面折叠按钮')
+  assert.match(consoleCss, /@media \(min-width: 901px\)[\s\S]*?\.console-page\.is-sidebar-collapsed \.console-sidebar/, '折叠只作用于桌面')
+  assert.match(consoleCss, /@media \(max-width: 900px\)[\s\S]*?\.console-sidebar-toggle\s*\{[^}]*display:\s*none/, '窄屏隐藏桌面折叠按钮')
 })
 
 test('二级分组标题可折叠，且不影响同级其他分组', async () => {

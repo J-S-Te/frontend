@@ -275,7 +275,7 @@ test('指标卡设置面板具备开关语义、焦点与关闭行为，窄屏�
   assert.match(source, /userID: computed\(\(\) => session\.value\?\.user_id\)/)
   assert.doesNotMatch(source, /localStorage/)
   // 窄屏面板改为整行宽度，不超出视口。
-  assert.match(styles, /@media \(max-width: 760px\) \{[\s\S]*?\.pm-kpi-settings-panel \{ left: 0; right: 0; width: auto;/)
+  assert.match(styles, /@media \(max-width: 900px\) \{[\s\S]*?\.pm-kpi-settings-panel \{ left: 0; right: 0; width: auto;/)
   assert.match(styles, /\.pm-kpi-settings-panel \{[\s\S]*?width: min\(342px, calc\(100vw - 32px\)\);/)
   assert.match(styles, /\.pm-kpi-switch\[aria-checked="true"\] \.pm-kpi-switch-track \{ background: var\(--pm-primary\); \}/)
 })

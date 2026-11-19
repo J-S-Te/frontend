@@ -133,7 +133,7 @@ const eventsError = ref('')
 const eventsSheetOpen = ref(false)
 const eventsTrigger = ref(null)
 // 同一个 matchMedia 既给初值也给后续监听，避免两处各建一个查询对象。
-let narrowMedia = typeof matchMedia === 'function' ? matchMedia('(max-width:720px)') : null
+let narrowMedia = typeof matchMedia === 'function' ? matchMedia('(max-width:640px)') : null
 const narrowViewport = ref(Boolean(narrowMedia?.matches))
 function syncNarrowViewport(event) { narrowViewport.value = Boolean(event.matches) }
 // 三态闸门：加载中 / 加载失败 / 没有事件都交给 ListState，失败时绝不渲染成「暂无授权事件」。
@@ -970,10 +970,10 @@ onBeforeUnmount(() => {
 .license-alert { margin: 0; padding: 12px 14px; border: 1px solid var(--danger-border, #f3b4b4); border-radius: 10px; background: var(--danger-soft, #fee2e2); color: var(--danger-text, #b91c1c); font-size: 13px; }
 
 /* 卡片网格自己负责列数，这里只剩顶部摘要卡在中等宽度下的对齐调整。 */
-@media (max-width: 1080px) {
+@media (max-width: 1200px) {
   .license-hero-cta { justify-items: start; text-align: left; }
 }
-@media (max-width: 720px) {
+@media (max-width: 640px) {
   .license-hero, .license-section, .license-init { padding: 16px; }
   .license-hero-title { font-size: 18px; }
   .license-steps li { flex-basis: 100%; padding-right: 0; }

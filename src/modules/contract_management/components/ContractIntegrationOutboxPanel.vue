@@ -413,7 +413,7 @@ onMounted(load)
   color: var(--cm-muted);
 }
 
-@media (max-width: 720px) {
+@media (max-width: 640px) {
   .contract-outbox-toolbar {
     align-items: stretch;
     flex-direction: column;

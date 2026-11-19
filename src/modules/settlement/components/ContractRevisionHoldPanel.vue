@@ -550,7 +550,7 @@ onBeforeUnmount(() => {
   gap: 10px;
   margin-top: 12px;
 }
-@media (max-width: 720px) {
+@media (max-width: 640px) {
   .revision-holds-pagination {
     justify-content: flex-start;
   }

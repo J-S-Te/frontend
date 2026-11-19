@@ -256,7 +256,7 @@ async function submitDecision() {
 .manual-recovery .manual-recovery__terminate { color: #8f2929; border-color: #d99898; }
 .manual-recovery__error { color: #9f2222; }
 
-@media (max-width: 620px) {
+@media (max-width: 640px) {
   .manual-recovery__compare { grid-template-columns: minmax(0, 1fr); }
   /* 堆叠后符号独占一行：做成居中的小圆牌，才不会被读成列表项。 */
   .manual-recovery__compare-op {

@@ -1074,7 +1074,7 @@ function resetFlow() {
 .subsystem-access-wizard__preview { padding: 14px; gap: 10px; }
 .subsystem-access-wizard__hint { padding: 8px 10px; font-size: 12px; }
 
-@media (max-width: 720px) {
+@media (max-width: 640px) {
   .subsystem-access-wizard { padding: 14px; }
   .subsystem-access-wizard__steps { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }

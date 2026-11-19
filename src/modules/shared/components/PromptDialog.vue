@@ -253,7 +253,7 @@ function onKeydown(event) {
 .shared-prompt-button.secondary { border-color: #cbd5e1; background: #fff; color: #334155; }
 .shared-prompt-button.primary { background: #235fcb; color: #fff; }
 .shared-prompt-button.danger { background: #b42318; color: #fff; }
-@media (max-width: 520px) { .shared-prompt-mask { padding: 12px; } .shared-prompt footer { flex-direction: column-reverse; } .shared-prompt-button { width: 100%; } }
+@media (max-width: 480px) { .shared-prompt-mask { padding: 12px; } .shared-prompt footer { flex-direction: column-reverse; } .shared-prompt-button { width: 100%; } }
 
 /* Keep long titles and server messages inside the existing dialog. */
 .shared-prompt-mask { overflow-y: auto; box-sizing: border-box; }
@@ -261,7 +261,7 @@ function onKeydown(event) {
 .shared-prompt header > div { min-width: 0; }
 .shared-prompt header > button { flex: 0 0 auto; align-self: flex-start; }
 .shared-prompt footer button { white-space: normal; overflow-wrap: anywhere; min-width: 0; }
-@media (max-width: 520px) { .shared-prompt { max-height: calc(100dvh - 24px); } }
+@media (max-width: 480px) { .shared-prompt { max-height: calc(100dvh - 24px); } }
 
 /* 进出场：遮罩淡入淡出，卡片轻微上浮缩放；退场约为进场的 65%。 */
 .shared-prompt-enter-active,

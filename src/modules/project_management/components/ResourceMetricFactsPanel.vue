@@ -717,7 +717,7 @@ onScopeDispose(() => { disposed = true; loadSequence++; orgSequence++; directory
 .pm-resource-scroll tbody tr:last-child td { border-bottom: 0; }
 .pm-resource-scroll td textarea { min-height: 48px; }
 .pm-resource-ledger footer { display: flex; align-items: center; gap: var(--pm-sp-2); }
-@media (max-width: 960px) {
+@media (max-width: 900px) {
   .pm-resource-form { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 @media (max-width: 640px) {
