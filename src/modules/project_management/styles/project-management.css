@@ -50,10 +50,10 @@
   --pm-card-border: #f2f6fc;
 
   /* 1.5 深色侧栏 */
-  --pm-sidebar: #001529;
-  --pm-sidebar-hover: #1f2d3d;
+  --pm-sidebar: var(--sidebar);
+  --pm-sidebar-hover: var(--sidebar-hover);
   --pm-sidebar-active: var(--pm-primary);
-  --pm-sidebar-text: #c0c4cc;
+  --pm-sidebar-text: var(--text-4);
   --pm-sidebar-label: rgba(255, 255, 255, .38);
   --pm-sidebar-dot: #334155;
   --pm-sidebar-badge: #f56c6c;
@@ -62,17 +62,17 @@
   --pm-sidebar-badge-active: rgba(255, 255, 255, .25);
 
   /* 1.6 语义色（图形/图标/大字号用） */
-  --pm-green: #67c23a;    --pm-green-soft: #f0f9eb;    --pm-green-border: #e1f3d8;
-  --pm-amber: #e6a23c;    --pm-amber-soft: #fdf6ec;    --pm-amber-border: #faecd8;
-  --pm-red: #f56c6c;      --pm-red-soft: #fef0f0;      --pm-red-border: #fde2e2;
+  --pm-green: var(--success);    --pm-green-soft: var(--success-soft);    --pm-green-border: var(--success-border);
+  --pm-amber: var(--warning);    --pm-amber-soft: var(--warning-soft);    --pm-amber-border: var(--warning-border);
+  --pm-red: var(--danger);       --pm-red-soft: var(--danger-soft);       --pm-red-border: var(--danger-border);
   --pm-sky: #0ea5e9;      --pm-sky-soft: #ecf5ff;      --pm-sky-border: #c6e2ff;
   --pm-violet: #8b5cf6;   --pm-violet-soft: #f5f3ff;   --pm-violet-border: #ddd6fe;
   --pm-gray: #909399;     --pm-gray-soft: #f4f4f5;     --pm-gray-border: #e9e9eb;
 
   /* 1.7 语义色 · 文本安全变体（≤14px 必须使用，均 ≥4.5:1） */
-  --pm-green-text: #3f7a1f;
-  --pm-amber-text: #9c5b00;
-  --pm-red-text: #b3382f;
+  --pm-green-text: var(--success-text);
+  --pm-amber-text: var(--warning-text);
+  --pm-red-text: var(--danger-text);
   --pm-sky-text: #0369a1;
   --pm-violet-text: #6d28d9;
   --pm-gray-text: #606266;
@@ -149,7 +149,7 @@
   --pm-on-primary: #ffffff;
 
   /* 1.14 布局尺寸（原型：210 侧栏 / 56 顶栏 / 32 控件） */
-  --pm-w-sidebar: 210px;
+  --pm-w-sidebar: var(--shell-sidebar);
   --pm-h-topbar: 56px;
   --pm-w-drawer: 420px;
   --pm-w-modal: 560px;
@@ -240,10 +240,10 @@
   background: var(--pm-sidebar);
 }
 
-.pm-main { min-width: 0; min-height: 100vh; margin-left: var(--pm-w-sidebar); }
+.pm-main { min-width: 0; min-height: 100vh; margin-left: var(--shell-sidebar); }
 
 .pm-page {
-  width: min(100%, 1440px);
+  width: min(100%, 1600px);
   margin: 0 auto;
   padding: var(--pm-pad-page) var(--pm-pad-page) var(--pm-sp-8);
 }

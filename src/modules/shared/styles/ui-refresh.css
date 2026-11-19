@@ -296,6 +296,37 @@ body {
   background: var(--brand-weak);
 }
 
+/* 表格基线兜底：除上面的主力表外，其余业务表格（IAM/通知/台账/审计等）
+   也统一到 44/48 行高与同一套表头/悬停规则；需要更紧凑的表格显式加 .ui-table-compact。 */
+:root :is(.console-page, .contract-app, .pm-page, .crm-page, .da-shell,
+  .settlement-page, .expense-canvas, .portal-page) table:not(.ui-table-compact) {
+  border-collapse: separate;
+  border-spacing: 0;
+  color: var(--ui-text);
+  font-size: 14px;
+}
+:root :is(.console-page, .contract-app, .pm-page, .crm-page, .da-shell,
+  .settlement-page, .expense-canvas, .portal-page) table:not(.ui-table-compact) th {
+  height: 44px;
+  padding: 0 16px;
+  color: var(--text-2);
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 20px;
+  border-bottom: 1px solid var(--line);
+  background: var(--ui-table-head);
+}
+:root :is(.console-page, .contract-app, .pm-page, .crm-page, .da-shell,
+  .settlement-page, .expense-canvas, .portal-page) table:not(.ui-table-compact) td {
+  height: 48px;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--line-2);
+}
+:root :is(.console-page, .contract-app, .pm-page, .crm-page, .da-shell,
+  .settlement-page, .expense-canvas, .portal-page) table:not(.ui-table-compact) tbody tr:hover td {
+  background: var(--brand-weak);
+}
+
 /* Tabs：Ant 的下划线页签，而非 pill。 */
 :root :is(.contract-tabs, .settlement-tabs, .settings-tab-bar, .crm-tabs, .crm-customer-tabs,
   .crm-catalog-tabs, .pm-sm-tabs, .pm-detail-tabs, .pm-notification-tabs, .notification-tabs,
@@ -382,6 +413,7 @@ body {
 
 /* Modal：Ant 8px 圆角、轻阴影。 */
 :root :is(.console-modal, .contract-detail-modal, .pm-dialog, .da-modal, .settlement-modal, .crm-detail) {
+  max-width: min(720px, calc(100vw - 32px));
   border: 1px solid var(--line);
   border-radius: var(--radius-panel);
   background: var(--ui-card);
@@ -424,9 +456,9 @@ body {
   background: var(--ui-canvas);
 }
 :root body :is(.console-sidebar, .contract-sidebar, .pm-sidebar, .crm-sidebar, .da-sidebar, .settlement-sidebar, .portal-sidebar) {
-  color: rgba(255, 255, 255, .65);
+  color: var(--text-4);
   border-right: 0;
-  background: #001529;
+  background: var(--sidebar);
 }
 :root body :is(.console-topbar, .contract-topbar, .pm-topbar, .crm-topbar, .da-topbar, .settlement-topbar, .portal-topbar) {
   color: var(--ui-text);
