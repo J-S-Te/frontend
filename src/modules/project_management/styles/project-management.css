@@ -204,10 +204,10 @@
   .pm-shell *,
   .pm-shell *::before,
   .pm-shell *::after {
-    scroll-behavior: auto !important;
-    animation-duration: .01ms !important;
-    animation-iteration-count: 1 !important;
-    transition-duration: .01ms !important;
+    scroll-behavior: auto;
+    animation-duration: .01ms;
+    animation-iteration-count: 1;
+    transition-duration: .01ms;
   }
 }
 
@@ -741,7 +741,7 @@
 .pm-kpi-meta { margin-top: 4px; color: var(--pm-faint); font-size: var(--pm-fs-micro); line-height: 1.6; }
 
 .pm-shell .positive,
-.pm-shell .pm-text-success { color: var(--pm-green-text) !important; }
+.pm-shell .pm-text-success { color: var(--pm-green-text); }
 
 .pm-dashboard-grid { display: grid; grid-template-columns: 1.28fr 1fr; gap: var(--pm-gap-grid); margin-bottom: var(--pm-gap-grid); }
 .pm-dashboard-grid-3 { display: grid; grid-template-columns: 1.1fr .95fr 1fr; gap: var(--pm-gap-grid); margin-bottom: var(--pm-gap-grid); }
@@ -1005,7 +1005,7 @@
 .pm-progress-cell .pm-inline-progress { flex: 1; width: auto; }
 .pm-progress-cell small { margin-top: 0; white-space: nowrap; }
 .pm-shell .mono { color: var(--pm-muted); font-family: var(--pm-font-mono); font-size: var(--pm-fs-hint); }
-.pm-text-danger { color: var(--pm-red-text) !important; }
+.pm-text-danger { color: var(--pm-red-text); }
 
 /* ==========================================================================
    §10 标签 / 芯片 / 徽标（统一使用 -text 安全变体）
@@ -1463,7 +1463,7 @@
 .pm-supplement-closure > div { flex: 1 1 auto; min-width: 0; }
 .pm-supplement-closure b { display: block; margin-bottom: 3px; color: var(--pm-amber-text); font-size: var(--pm-fs-sm); font-weight: var(--pm-fw-semibold); }
 .pm-supplement-closure p { margin: 0; color: var(--pm-body); font-size: var(--pm-fs-hint); line-height: var(--pm-lh-loose); }
-.pm-supplement-closure-locked { margin-top: 6px !important; color: var(--pm-red-text) !important; font-weight: var(--pm-fw-semibold); }
+.pm-supplement-closure-locked { margin-top: 6px; color: var(--pm-red-text); font-weight: var(--pm-fw-semibold); }
 .pm-supplement-closure > .pm-button { flex: none; align-self: center; }
 
 .pm-supplement-closure-context {

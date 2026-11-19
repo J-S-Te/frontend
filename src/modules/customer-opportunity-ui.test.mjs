@@ -1712,7 +1712,7 @@ test('新建售前申请使用分区式响应布局并保留完整提交动作',
   assert.match(style, /\.crm-presale-create-page \{ width: min\(100%, 1040px\); margin: 0 auto; \}/)
   assert.match(style, /\.crm-presale-create-section \{ display: grid; grid-template-columns: 190px minmax\(0, 1fr\)/)
   assert.match(style, /\.crm-presale-create-steps \{\n  display: flex;\n  align-items: center;\n  gap: 16px;/)
-  assert.match(style, /\.crm-presale-create-steps li b \{[^}]*background: var\(--primary, #2563eb\)/)
+  assert.match(style, /\.crm-presale-create-steps li b \{[^}]*background: var\(--primary\)/)
   assert.doesNotMatch(style, /\.crm-presale-create-hero/)
   assert.match(style, /@media \(max-width: 640px\)[\s\S]*\.crm-presale-create-fields \{ grid-template-columns: 1fr; \}/)
   assert.match(style, /@media \(max-width: 640px\)[\s\S]*\.crm-presale-create-steps ol \{ display: grid;/)

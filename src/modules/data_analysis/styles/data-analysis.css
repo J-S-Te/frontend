@@ -129,7 +129,7 @@
 .da-table tbody tr.risk { box-shadow: inset 3px 0 var(--da-red); }
 .da-table b { color: var(--da-ink); font-size: 13.5px; }
 .da-table small { display: block; margin-top: 3px; color: var(--da-muted); font-size: 12px; }
-.da-source-code { color: var(--da-faint) !important; font-size: var(--fs-xs) !important; }
+.da-source-code { color: var(--da-faint); font-size: var(--fs-xs); }
 .da-table-panel > footer { display: flex; justify-content: space-between; padding: 12px 16px; background: var(--da-soft); color: var(--da-muted); font-size: 12px; }
 .da-shell .mono { font-family: "SFMono-Regular", Consolas, monospace; font-size: 12px; color: var(--da-muted); }
 .da-badge { display: inline-flex; align-items: center; justify-content: center; width: fit-content; padding: 3px 9px; border-radius: var(--radius-pill, 999px); background: var(--status-neutral-bg); color: var(--status-neutral-text); font-size: var(--fs-xs); font-weight: 700; white-space: nowrap; }
@@ -216,7 +216,7 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .da-shell *, .da-shell *::before, .da-shell *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
+  .da-shell *, .da-shell *::before, .da-shell *::after { scroll-behavior: auto; animation-duration: .01ms; animation-iteration-count: 1; transition-duration: .01ms; }
 }
 
 /* 参考高保真模型的总览/报告/财务本地兜底布局。真实快照接入后仅替换数值，不改变层级。 */

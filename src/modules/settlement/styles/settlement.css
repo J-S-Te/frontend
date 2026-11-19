@@ -760,10 +760,10 @@
   font-size: 14px;
 }
 .settlement-detail-notice {
-  margin: -6px 0 18px !important;
+  margin: -6px 0 18px;
   padding: 10px 13px;
-  color: var(--primary-ink-strong, #1d4ed8) !important;
-  font-size: 12px !important;
+  color: var(--primary-ink-strong, #1d4ed8);
+  font-size: 12px;
   border: 1px solid var(--primary-border, #bfdbfe);
   border-radius: 8px;
   background: var(--primary-soft, #eff6ff);
@@ -862,7 +862,7 @@
   font-size: 14px;
 }
 .settlement-timeline p {
-  margin: 5px 0 0 !important;
+  margin: 5px 0 0;
 }
 @media (max-width: 900px) {
   .settlement-detail-kpis,
@@ -1072,7 +1072,7 @@
   background: var(--status-neutral-bg);
 }
 .settlement-table-empty {
-  padding: 42px !important;
+  padding: 42px;
   color: var(--muted, #64748b);
   text-align: center;
 }
@@ -1259,15 +1259,15 @@
   justify-content: space-between;
   gap: 16px;
   min-height: 68px;
-  padding: 12px 14px !important;
-  color: var(--text, #0f172a) !important;
+  padding: 12px 14px;
+  color: var(--text, #0f172a);
   text-align: left;
-  border-color: var(--border-brand, #dbeafe) !important;
-  background: var(--surface-tint, #f8fbff) !important;
+  border-color: var(--border-brand, #dbeafe);
+  background: var(--surface-tint, #f8fbff);
 }
 .settlement-match-list > button:hover {
-  border-color: var(--border-brand-strong, #93c5fd) !important;
-  background: var(--primary-soft, #eff6ff) !important;
+  border-color: var(--border-brand-strong, #93c5fd);
+  background: var(--primary-soft, #eff6ff);
 }
 .settlement-match-list span {
   display: grid;
@@ -1296,8 +1296,8 @@
 }
 .settlement-document-link {
   display: block;
-  min-height: auto !important;
-  padding: 2px 0 !important;
+  min-height: auto;
+  padding: 2px 0;
   text-align: left;
 }
 
@@ -1351,17 +1351,17 @@
   color: var(--muted, #64748b);
 }
 .settlement-task-more {
-  margin: 6px 4px 0 !important;
-  color: var(--muted, #64748b) !important;
-  font-size: 12px !important;
+  margin: 6px 4px 0;
+  color: var(--muted, #64748b);
+  font-size: 12px;
 }
 
 /* ============ Timeline 附属 ============ */
 .settlement-timeline-hint {
-  margin: 12px 0 0 !important;
-  padding: 10px 12px !important;
-  color: var(--orange-text, #b45309) !important;
-  font-size: 12.5px !important;
+  margin: 12px 0 0;
+  padding: 10px 12px;
+  color: var(--orange-text, #b45309);
+  font-size: 12.5px;
   background: var(--orange-bg, #fef3c7);
   border-radius: 8px;
 }
