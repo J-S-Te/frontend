@@ -4,13 +4,16 @@ const endpoint = '/api/v1/notifications/inbox/stream'
 
 /**
  * 用途：合并当前页面的收件箱订阅，断线时继续校准并在重连后补查。
- * 参数：connect 建立同源 SSE，coalesceMs 为批量刷新等待，fallbackMs 为断线初始间隔。
+ * 参数：connect/changeEvent 指定同源流，两个 fallback 间隔控制退避，visibility 可限制为前台补查。
  * 返回值：接收刷新回调并返回取消函数的订阅器。
  */
 export function createNotificationStream({
   connect = () => new EventSource(endpoint),
   coalesceMs = 80,
   fallbackMs = 15000,
+  maxFallbackMs = 60000,
+  changeEvent = 'inbox-changed',
+  visibility = null,
 } = {}) {
   const listeners = new Set()
   let source
@@ -24,9 +27,10 @@ export function createNotificationStream({
    * 返回值：无。
    */
   function scheduleRefresh() {
-    if (refreshTimer !== undefined) return
+    if (visibility?.hidden || refreshTimer !== undefined) return
     refreshTimer = setTimeout(() => {
       refreshTimer = undefined
+      if (visibility?.hidden) return
       for (const listener of listeners) {
         if (listener.running) {
           listener.pending = true
@@ -49,6 +53,9 @@ export function createNotificationStream({
         listener.pending = false
         await listener.run()
       } while (listener.pending && listeners.has(listener))
+    } catch (error) {
+      // 调用方提供错误反馈时仍保持连接，等待后续事件再次读取。
+      console.error('SSE refresh failed', error)
     } finally {
       listener.running = false
     }
@@ -64,7 +71,7 @@ export function createNotificationStream({
     recoveryTimer = setTimeout(() => {
       recoveryTimer = undefined
       if (typeof document === 'undefined' || !document.hidden) scheduleRefresh()
-      delay = Math.min(delay * 2, 60000)
+      delay = Math.min(delay * 2, maxFallbackMs)
       if (source?.readyState === 2) start()
       recover()
     }, delay)
@@ -76,6 +83,7 @@ export function createNotificationStream({
    * 返回值：无。
    */
   function start() {
+    if (visibility?.hidden) return
     source?.close()
     try {
       const connection = connect()
@@ -87,7 +95,7 @@ export function createNotificationStream({
         delay = fallbackMs
         scheduleRefresh()
       })
-      connection.addEventListener('inbox-changed', () => {
+      connection.addEventListener(changeEvent, () => {
         if (source === connection) scheduleRefresh()
       })
       connection.addEventListener('error', () => {
@@ -100,13 +108,33 @@ export function createNotificationStream({
     }
   }
 
+  // 用途：前台恢复时重连并补查；隐藏时关闭项目长连接和补查计时器。
+  // 参数：无。
+  // 返回值：无。
+  function reconcileVisibility() {
+    if (visibility.hidden) {
+      source?.close()
+      source = undefined
+      clearTimeout(recoveryTimer)
+      recoveryTimer = undefined
+      delay = fallbackMs
+      return
+    }
+    if (!source) start()
+    scheduleRefresh()
+  }
+
   return (run) => {
     const listener = { run, running: false, pending: false }
     listeners.add(listener)
-    if (listeners.size === 1) start()
+    if (listeners.size === 1) {
+      visibility?.addEventListener('visibilitychange', reconcileVisibility)
+      start()
+    }
     return () => {
       listeners.delete(listener)
       if (listeners.size) return
+      visibility?.removeEventListener('visibilitychange', reconcileVisibility)
       source?.close()
       source = undefined
       clearTimeout(refreshTimer)

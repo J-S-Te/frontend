@@ -5,12 +5,12 @@ import { useNativeScopeChange } from '../composables/useNativeScopeChange.js'
 
 const props = defineProps({ projectId: { type: String, required: true },
   changeId: { type: String, default: '' }, categories: { type: Array, default: () => [] },
-  disabled: Boolean, initialState: { type: Object, default: null } })
+  disabled: Boolean, refreshVersion: { type: Number, default: 0 }, initialState: { type: Object, default: null } })
 const emit = defineEmits(['changed', 'close', 'locked'])
 const ui = useNativeScopeChange({ projectId: props.projectId, changeId: props.changeId, initialState: props.initialState,
   disabled: () => props.disabled, onChanged: (value) => emit('changed', value),
   api: { read: getNativeProjectScope, request: requestNativeProjectScope, decide: decideNativeProjectScope, withdraw: withdrawNativeProjectScope } })
-const { state, lines, reason, confirmed, busy, loading, error, notice, pending, canRequest } = ui
+const { state, lines, reason, confirmed, busy, loading, error, notice, pending, canRequest, draftOutdated } = ui
 const comments = reactive({})
 const categories = computed(() => props.categories.filter((entry) => entry.enabled))
 const locked = computed(() => props.disabled || busy.value || loading.value || !!pending.value)
@@ -36,6 +36,12 @@ async function decide(change, decision) { await ui.decide(change, decision, comm
 // 参数：无。
 // 返回值：无；失败显示原错误。
 async function load() { await ui.load() }
+let reconciled = props.refreshVersion
+watch([() => props.refreshVersion, busy, loading, pending], () => {
+  if (reconciled === props.refreshVersion || busy.value || loading.value || pending.value) return
+  reconciled = props.refreshVersion
+  void ui.load({ background: true })
+})
 onMounted(load)
 </script>
 
@@ -44,6 +50,7 @@ onMounted(load)
     <header><h3>原生委托范围变更</h3><button type="button" :disabled="busy || loading" @click="load">刷新并核对</button><button type="button" :disabled="busy || !!pending" @click="emit('close')">关闭</button></header>
     <p>仅支持未开工或已按原受控流程退回待确认的项目。业务管理员发起，技术总监或项目管理员异人单级审批；批准后仍须重新确认拆解与履约资格。</p>
     <p v-if="error" role="alert">{{ error }}</p><p v-if="notice" role="status">{{ notice }}</p>
+    <p v-if="draftOutdated && !changeId" role="status">项目范围版本已变化，当前草稿已保留。请刷新核对最新范围后再提交。</p>
     <p v-if="pending">操作号 {{ pending.payload.operation_id }} 尚未确认。保留原载荷，请刷新核对或 <button type="button" :disabled="busy || disabled" @click="ui.retry">按原操作精确重试</button>。</p>
     <template v-if="state">
       <h4>当前生效范围 v{{ state.scope_version }} · 项目版本 {{ state.project_version }}</h4>

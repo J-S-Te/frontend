@@ -11,10 +11,11 @@ const props = defineProps({
   requestId: { type: String, default: '' },
   context: { type: String, required: true },
   userId: { type: String, required: true },
+  refreshVersion: { type: Number, default: 0 },
 })
 const emit = defineEmits(['open-request', 'back', 'changed'])
 const comment = ref('')
-const { items, total, page, view, pageSize, loading, saving, error, success,
+const { items, total, page, view, pageSize, loading, refreshing, saving, error, success,
   load, changeView, changePage, canDecide, decide } = useProjectApprovalInbox({
   requestID: toRef(props, 'requestId'), context: toRef(props, 'context'),
   userID: toRef(props, 'userId'), listApprovalTasks, decideRollback, decideReportCorrection,
@@ -49,6 +50,12 @@ function displayTime(value) {
 watch([() => props.requestId, () => props.context, () => props.userId], () => {
   comment.value = ''
 }, { flush: 'sync' })
+let reconciled = props.refreshVersion
+watch([() => props.refreshVersion, loading, refreshing, saving], () => {
+  if (reconciled === props.refreshVersion || loading.value || refreshing.value || saving.value) return
+  reconciled = props.refreshVersion
+  void load({ background: true })
+})
 onMounted(load)
 </script>
 
@@ -110,8 +117,8 @@ onMounted(load)
             <textarea v-model="comment" rows="3" maxlength="1000" :disabled="saving"
               placeholder="请说明批准或驳回的依据" /></label>
           <div class="pm-actions"><button type="button" class="pm-button primary"
-            :disabled="saving || !comment.trim()" @click="submitDecision('APPROVED')">批准申请</button>
-            <button type="button" class="pm-button danger" :disabled="saving || !comment.trim()"
+            :disabled="saving || refreshing || !comment.trim()" @click="submitDecision('APPROVED')">批准申请</button>
+            <button type="button" class="pm-button danger" :disabled="saving || refreshing || !comment.trim()"
               @click="submitDecision('REJECTED')">驳回申请</button>
             <span v-if="saving" role="status">正在保存审批结果…</span>
           </div>

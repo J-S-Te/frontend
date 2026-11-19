@@ -131,3 +131,25 @@ test('原页处理完成后重读同一偏离结果并关闭写状态，保留�
     assert.equal(link.ui.canProcess.value, false)
   } finally { link.stop() }
 })
+
+test('同一深链后台读取保留当前表单坐标，申请失去可见性时清除旧结果', async () => {
+  const task = { id: 'DV-2', type: 'FIELD_DEVIATION', project_id: 'PJ-2',
+    service_item_id: 'SI-2', status: 'PENDING', can_decide: true }
+  let finish
+  const before = { items: [task], total: 1 }
+  let result = Promise.resolve(before)
+  const link = mountLink({ readTasks: () => result })
+  try {
+    await link.ui.load()
+    result = new Promise(resolve => { finish = resolve })
+    const refresh = link.ui.load({ background: true })
+    assert.equal(link.ui.loading.value, false)
+    assert.equal(link.ui.serviceItem.value.id, 'SI-2')
+    assert.equal(link.ui.canProcess.value, false)
+    finish({ items: [], total: 0 })
+    await refresh
+    assert.equal(link.ui.task.value, null)
+    assert.equal(link.ui.serviceItem.value, null)
+    assert.equal(link.ui.project.value, null)
+  } finally { link.stop() }
+})

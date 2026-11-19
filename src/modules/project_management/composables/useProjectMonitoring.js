@@ -5,17 +5,20 @@ import { formatUserError } from '@/modules/shared/utils/userError.js'
 import { formatDateTime, monitoringFilterQuery, monitoringStatusBuckets } from '@/modules/project_management/projectDisplay'
 
 /**
- * 在途项目实时监控域（治理批次 4 项目，自 ProjectManagementView.vue 逐字迁移）。
+ * 用途：管理在途项目快照、筛选和实时刷新。
+ * 参数：activeSection 及 context 表示栏目及权限上下文，其余为筛选、人员及导航入口。
+ * 返回值：监控快照、分页、筛选、加载和导航操作。
  * 收编：服务端快照状态、筛选/分页、状态分布聚合、15 秒轮询与可见性刷新、
  * 筛选防抖、请求作用域守卫与监听器生命周期。
  *
  * 注入项与组件内同名标识一一对应：activeSection/keyword/teamFilter/loadPersonnelNames/navigate/openProject。
  */
-export function useProjectMonitoring({ activeSection, keyword, teamFilter, loadPersonnelNames, navigate, openProject }) {
+export function useProjectMonitoring({ activeSection, keyword, teamFilter, loadPersonnelNames, navigate, openProject, context = () => '' }) {
 // 监控页（PG-DASH-02）使用独立的服务端快照：项目、服务项、SLA 和事件在
 // 同一授权范围内聚合。页面只提交筛选/分页，不再用普通项目列表重建“在途”口径。
 const monitorFilter = ref('')
-const monitoringSnapshot = ref({ items: [], recent_events: [], status_counts: {}, report_stage_counts: {}, categories: [], teams: [], project_manager_ids: [], total: 0, page: 1, page_size: 20, server_time: '', snapshot_version: '' })
+const initialSnapshot = { items: [], recent_events: [], status_counts: {}, report_stage_counts: {}, categories: [], teams: [], project_manager_ids: [], total: 0, page: 1, page_size: 20, server_time: '', snapshot_version: '' }
+const monitoringSnapshot = ref(initialSnapshot)
 const monitoringLoading = ref(false)
 const monitoringError = ref('')
 const monitorPage = ref(1)
@@ -104,10 +107,16 @@ function openMonitoringAction(row) {
   // 筛选变化防抖 250ms 后重查；翻页立即重查。
   // 进入监控页即装载快照；离开也保持轮询调度（原视图行为：每次 section 变化都重排轮询）。
   // immediate：直接深链接或刷新进入监控页时也要装载快照，不能只在栏目切换时读取。
-  watch(activeSection, (section) => {
+  watch([activeSection, context], ([section, owner], previous) => {
+    monitoringScope.invalidate()
+    monitoringLoading.value = false
+    if (owner !== previous?.[1]) {
+      monitoringSnapshot.value = initialSnapshot
+      monitoringError.value = ''
+    }
     if (section === 'monitoring') loadMonitoring()
     scheduleMonitoringPoll()
-  }, { immediate: true })
+  }, { immediate: true, flush: 'sync' })
 
 watch([keyword, teamFilter, monitorFilter, monitorCategory, monitorProjectManager, monitorSLAOnly, monitorConflictOnly, monitorDueFrom, monitorDueTo], () => {
   if (activeSection.value !== 'monitoring') return

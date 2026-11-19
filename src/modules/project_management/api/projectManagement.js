@@ -15,6 +15,14 @@ import { DOWNLOAD_TIMEOUT_MESSAGE, downloadRequestSignal } from '../../shared/ut
 const runtimeEnv = import.meta.env || {}
 const PUBLIC_PATH_PREFIX = (runtimeEnv.VITE_PROJECT_PUBLIC_PATH_PREFIX || '/project_management').replace(/\/$/, '')
 const API_BASE_URL = (runtimeEnv.VITE_PROJECT_API_BASE_URL || `${PUBLIC_PATH_PREFIX}/api/v1`).replace(/\/$/, '')
+// 用途：用项目管理同源会话开启工作流变更订阅。
+// 参数：projectID 为详情项目，空串监听当前账号可读项目集合。
+// 返回值：原生 EventSource，由 Vue 作用域关闭。
+export function connectProjectWorkflow(projectID = '') {
+  const query = projectID ? `?${new URLSearchParams({ project_id: projectID })}` : ''
+  return new EventSource(`${API_BASE_URL}/workflow/stream${query}`)
+}
+
 const projectSessionReader = createAuthorizationSnapshotReader({
   load: options => request('/auth/me', { ...options, cache: 'no-store',
     headers: AUTHORIZATION_REFRESH_HEADERS, suppressLoginRedirect: true }),

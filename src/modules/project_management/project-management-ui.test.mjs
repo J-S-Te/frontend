@@ -1681,7 +1681,9 @@ test('过期设备展示派生无效状态且检测类别使用受控域', () =>
 })
 
 test('在途监控使用服务端快照、自动刷新、真分页和节点下钻', () => {
-  assert.match(monitoringSource, /monitoringSnapshot = ref\(\{ items: \[\], recent_events: \[\], status_counts:/)
+  assert.match(monitoringSource, /const initialSnapshot = \{ items: \[\], recent_events: \[\], status_counts:/)
+  assert.match(monitoringSource, /monitoringSnapshot = ref\(initialSnapshot\)/)
+  assert.match(monitoringSource, /watch\(\[activeSection, context\],[\s\S]*monitoringScope\.invalidate\(\)[\s\S]*monitoringSnapshot\.value = initialSnapshot/)
   // 快照读取按查询条件持有 requestScope 票据，旧筛选迟到响应不回写（见 monitoringScope）。
   assert.match(monitoringSource, /const params = monitoringParams\(\)/)
   assert.match(monitoringSource, /await getProjectMonitoring\(params\)/)

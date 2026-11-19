@@ -12,6 +12,7 @@ export function useProjectApprovalInbox({ requestID, context, userID,
   const page = ref(1)
   const view = ref('assigned')
   const loading = ref(false)
+  const refreshing = ref(false)
   const saving = ref(false)
   const error = ref('')
   const success = ref('')
@@ -27,41 +28,50 @@ export function useProjectApprovalInbox({ requestID, context, userID,
   }
 
   // 用途：查询服务端受权分页或精确申请，清除过期结果以免重复审批。
-  // 参数：无；查询条件来自当前路由、视图和页码。
+  // 参数：background 为后台刷新，查询条件来自当前路由、视图和页码。
   // 返回值：成功读取为 true，失败或响应失效为 false。
-  async function load() {
+  async function load({ background = false } = {}) {
     if (disposed) return false
     const ticket = ++generation
     const id = String(requestID.value || '')
     const query = { page: id ? 1 : page.value, page_size: pageSize, view: view.value }
     if (id) query.request_id = id
-    loading.value = true
+    loading.value = !background
+    refreshing.value = background
     error.value = ''
-    items.value = []
-    total.value = 0
+    if (!background) { items.value = []; total.value = 0 }
     try {
       const result = await listApprovalTasks(query)
       if (!current(ticket)) return false
       if (!Array.isArray(result?.items) || !Number.isFinite(Number(result.total))) {
+        items.value = []; total.value = 0
         throw new Error('审批待办响应异常，请重新加载。')
       }
       const rows = id ? result.items.filter(item => item.id === id) : result.items
-      if (id && rows.length !== 1) throw new Error('申请不存在或当前账号无权查看。')
+      if (id && rows.length !== 1) {
+        items.value = []; total.value = 0
+        throw new Error('申请不存在或当前账号无权查看。')
+      }
       items.value = rows
       total.value = Number(result.total)
       const pages = Math.max(1, Math.ceil(total.value / pageSize))
       if (!id && page.value > pages) {
         page.value = pages
-        return await load()
+        return await load({ background })
       }
       return true
     } catch (cause) {
       if (!current(ticket)) return false
+      if (cause?.status === 401 || cause?.status === 403 || cause?.status === 404) {
+        items.value = []; total.value = 0
+      }
       error.value = cause?.status === 403 ? '当前账号无权查看该审批申请。'
         : cause?.status === 404 ? '申请不存在或当前账号无权查看。'
           : formatUserError(cause, { fallback: '审批待办加载失败，请重试。' })
       return false
-    } finally { if (current(ticket)) loading.value = false }
+    } finally {
+      if (current(ticket)) { loading.value = false; refreshing.value = false }
+    }
   }
 
   // 用途：切换我的待审批和我提交的申请。
@@ -89,7 +99,7 @@ export function useProjectApprovalInbox({ requestID, context, userID,
   // 参数：task 为当前列表内的申请。
   // 返回值：申请待处理、可审批、异人且版本有效时返回 true。
   function canDecide(task) {
-    return !!userID.value && !loading.value && !saving.value && !!task
+    return !!userID.value && !loading.value && !saving.value && !error.value && !!task
       && items.value.includes(task) && task.status === 'PENDING' && task.can_decide === true
       && task.requester_user_id !== userID.value && !!task.id && !!task.service_item_id
       && ['REPORT_REWORK', 'REPORT_CORRECTION', 'FIELD_ROLLBACK'].includes(task.type)
@@ -100,7 +110,7 @@ export function useProjectApprovalInbox({ requestID, context, userID,
   // 参数：task 为当前申请，decision 为决定，comment 为必填审批意见。
   // 返回值：已收到业务写成功回执时返回 true；未写入、失败或回执过期时返回 false。
   async function decide(task, decision, comment) {
-    if (!canDecide(task) || !['APPROVED', 'REJECTED'].includes(decision)) return false
+    if (refreshing.value || !canDecide(task) || !['APPROVED', 'REJECTED'].includes(decision)) return false
     const opinion = String(comment || '').trim()
     if (!opinion || opinion.length > 1000) {
       error.value = '请填写 1 至 1000 字审批意见。'
@@ -159,6 +169,6 @@ export function useProjectApprovalInbox({ requestID, context, userID,
     disposed = true
     generation += 1
   })
-  return { items, total, page, view, pageSize, loading, saving, error, success,
+  return { items, total, page, view, pageSize, loading, refreshing, saving, error, success,
     load, changeView, changePage, canDecide, decide }
 }

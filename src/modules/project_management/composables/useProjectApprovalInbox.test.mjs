@@ -173,3 +173,17 @@ test('写回后刷新期间切换申请，不把旧审批成功或失败发布�
     } finally { h.stop() }
   }
 })
+
+test('后台读取成功返回空结果时撤下之前可见的精确申请', async () => {
+  const task = { id: 'req-1', status: 'PENDING', can_decide: true }
+  let response = { items: [task], total: 1 }
+  const h = await fixture({ listApprovalTasks: async () => response })
+  try {
+    h.requestID.value = task.id
+    assert.equal(await h.load(), true)
+    response = { items: [], total: 0 }
+    assert.equal(await h.load({ background: true }), false)
+    assert.equal(h.items.value.length, 0)
+    assert.equal(h.total.value, 0)
+  } finally { h.stop() }
+})
