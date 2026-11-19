@@ -386,16 +386,7 @@ const navGroups = computed(() => [
         label: '系统设置',
         icon: 'nav-settings',
         active: currentView.value === 'settings',
-        expanded: currentView.value === 'settings',
         visible: canOpenSettings.value,
-        children: filteredSettingsTabGroups.value.flatMap((group) => group.tabs.map((tab) => ({
-          key: `settings:${tab.key}`,
-          settingsTab: tab.key,
-          label: tab.label,
-          icon: tab.icon,
-          groupLabel: group.label,
-          active: currentView.value === 'settings' && activeSettingsTab.value === tab.key,
-        }))),
       },
       { key: 'audit', label: '审计日志', icon: 'nav-audit', note: '只读', active: currentView.value === 'audit', visible: canViewAudit.value },
     ],
@@ -1422,6 +1413,26 @@ onBeforeUnmount(() => {
         </div>
       </header>
 
+      <!-- 设置模块改内容区 Tabs：侧栏只保留一个“系统设置”，不再铺 11 个三级入口。 -->
+      <nav v-if="!hasNoVisibleSettingsTab" class="settings-inline-tabs" aria-label="设置模块">
+        <div v-for="group in filteredSettingsTabGroups" :key="group.key" class="settings-inline-group">
+          <span class="settings-inline-label">{{ group.label }}</span>
+          <button
+            v-for="tab in group.tabs"
+            :key="tab.key"
+            type="button"
+            class="settings-inline-tab"
+            :class="{ active: activeSettingsTab === tab.key }"
+            :aria-current="activeSettingsTab === tab.key ? 'page' : undefined"
+            @click="activeSettingsTab = tab.key"
+          >
+            <ConsoleIcon :name="tab.icon" />
+            <span>{{ tab.label }}</span>
+            <em v-if="tab.badge">{{ tab.badge }}</em>
+          </button>
+        </div>
+      </nav>
+
       <div v-if="hasNoVisibleSettingsTab" class="settings-empty" role="status">
         <span class="settings-empty-icon" aria-hidden="true"><ConsoleIcon name="shield" /></span>
         <h3>当前账号没有可访问的设置模块</h3>
@@ -1433,13 +1444,6 @@ onBeforeUnmount(() => {
       </div>
 
       <div v-else class="settings-content">
-        <!-- 页面标题为 <h1>。除“身份、组织与授权”外的 10 个设置模块自身首个标题就是 <h2>，
-             大纲已经连续，再补隐藏 <h2> 会让读屏标题列表出现两条同名同级的条目。
-             只有 IAM 模块内部从 <h3> 起（“按归属、职责和例外分层管理”），此处在它的面板前
-             补一层隐藏的 <h2> 承载 tab 名称，让大纲保持 h1 → h2 → h3，且不改变任何可见标题的
-             级别与布局。条件必须与下面 IamSettingsModule 的渲染条件一致。 -->
-        <h2 v-if="hasActiveFilteredSettingsTab && activeSettingsTab === 'iam'" class="shared-visually-hidden">{{ activeSettingsTabLabel }}</h2>
-
         <div v-if="hasActiveFilteredSettingsTab && activeSettingsTab === 'base'" class="console-card settings-card">
           <div class="console-card-body">
             <h2>平台基础信息</h2>

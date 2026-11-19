@@ -2385,7 +2385,7 @@ onBeforeUnmount(() => {
     <section class="iam-management-guide" aria-labelledby="iam-management-guide-title">
       <div class="iam-management-guide-copy">
         <span class="iam-section-kicker"><span></span>推荐管理流程</span>
-        <h3 id="iam-management-guide-title">按归属、职责和例外分层管理</h3>
+        <h2 id="iam-management-guide-title">按归属、职责和例外分层管理</h2>
         <p>组织只维护归属，岗位定义职责，岗位授权模板是标准应用角色的唯一日常配置入口。新增员工统一创建用户、登录账号和任职；只有个人确有特殊需要时，才在用户详情中追加例外角色。</p>
       </div>
       <ol class="iam-management-flow" aria-label="推荐管理步骤">

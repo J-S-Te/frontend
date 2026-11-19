@@ -99,11 +99,10 @@ test('设置分区全部分组登记，新增分区不会从左侧导航消失',
 
 test('设置模块按分组进入主侧栏二级折叠菜单，权限与当前项仍由页面状态决定', () => {
   assert.match(source, /const filteredSettingsTabGroups = computed\(\(\) => \{/)
-  assert.match(source, /children: filteredSettingsTabGroups\.value\.flatMap/)
-  assert.match(source, /settingsTab: tab\.key/)
-  assert.match(source, /groupLabel: group\.label/)
-  assert.match(source, /expanded: currentView\.value === 'settings'/)
-  assert.match(source, /active: currentView\.value === 'settings' && activeSettingsTab\.value === tab\.key/)
+  assert.match(source, /class="settings-inline-tabs"/)
+  assert.match(source, /v-for="group in filteredSettingsTabGroups"/)
+  assert.match(source, /@click="activeSettingsTab = tab\.key"/)
+  assert.doesNotMatch(source, /children: filteredSettingsTabGroups\.value\.flatMap/)
   assert.match(source, /function handleNavigate\(key, item\)/)
   assert.match(source, /item\?\.settingsTab/)
   assert.match(source, /key\.startsWith\('settings:'\)/)
