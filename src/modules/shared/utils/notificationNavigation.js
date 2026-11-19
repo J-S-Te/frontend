@@ -28,14 +28,88 @@ const projectNotificationSections = {
   DECOMPOSITION_RETURNED: 'decomposition',
 }
 
+// 用途：核对项目审批引用，兼容旧偏离提醒原本支持的编码业务编号。
+// 参数：value 为业务编号，legacy 为仅限旧 SERVICE_ITEM 偏离提醒的兼容开关。
+// 返回值：编号可安全放入查询参数时为 true，空值或控制字符返回 false。
+function projectNotificationID(value, legacy = false) {
+  return typeof value === 'string' && (legacy
+    ? !!value && value.length <= 128 && !/[\\\u0000-\u0020\u007f]/.test(value)
+    : /^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$/.test(value))
+}
+
+// 用途：核对项目新审批及结果通知引用，历史缺目标时保留精确实例坐标。
+// 参数：type/category/id 为通知业务引用，target 为已验证的站内目标。
+// 返回值：已知类别的受控路径或拒绝空串；非此类通知返回 null。
+function projectWorkflowNotificationTarget(type, category, id, target) {
+  const references = {
+    SPECIAL_METHOD_REVIEW_REQUESTED: ['SERVICE_ITEM'],
+    SPECIAL_METHOD_REVIEWED: ['SPECIAL_METHOD_REVIEW', 'SERVICE_ITEM'],
+    DEVIATION_REPORTED: ['DEVIATION', 'SERVICE_ITEM'], DEVIATION_REVIEWED: ['DEVIATION', 'SERVICE_ITEM'],
+    NATIVE_SCOPE_CHANGE_REQUESTED: ['NATIVE_SCOPE_CHANGE'],
+    NATIVE_SCOPE_CHANGE_APPROVED: ['NATIVE_SCOPE_CHANGE'], NATIVE_SCOPE_CHANGE_REJECTED: ['NATIVE_SCOPE_CHANGE'],
+  }
+  if (!references[category]) return null
+  if (!references[category].includes(type)) return ''
+  const legacy = type === 'SERVICE_ITEM' && category.startsWith('DEVIATION_')
+  if (type === 'SERVICE_ITEM' && ['DEVIATION_REVIEWED', 'SPECIAL_METHOD_REVIEWED'].includes(category)) {
+    const path = category === 'DEVIATION_REVIEWED' ? '/project_management/exceptions'
+      : '/project_management/methods'
+    if (!projectNotificationID(id, legacy)) return ''
+    if (target) {
+      const url = new URL(target, 'https://notification.invalid')
+      if (url.pathname !== path || url.hash || [...url.searchParams].length !== 1
+        || url.searchParams.get('service_item_id') !== id) return ''
+    }
+    // 旧结果只有服务项坐标，无法证明审批轮次；保留原页面入口，交由用户查看通知正文。
+    return path
+  }
+  let section, key
+  if (type === 'SERVICE_ITEM' && category === 'SPECIAL_METHOD_REVIEW_REQUESTED') {
+    section = 'methods'; key = 'service_item_id'
+  } else if (type === 'SERVICE_ITEM' && category === 'DEVIATION_REPORTED') {
+    section = 'exceptions'; key = 'service_item_id'
+  } else if (type === 'SPECIAL_METHOD_REVIEW' && category === 'SPECIAL_METHOD_REVIEWED') {
+    section = 'methods'; key = 'review_id'
+  } else if (type === 'DEVIATION' && ['DEVIATION_REPORTED', 'DEVIATION_REVIEWED'].includes(category)) {
+    section = 'exceptions'; key = 'deviation_id'
+  } else if (type === 'NATIVE_SCOPE_CHANGE' && ['NATIVE_SCOPE_CHANGE_REQUESTED',
+    'NATIVE_SCOPE_CHANGE_APPROVED', 'NATIVE_SCOPE_CHANGE_REJECTED'].includes(category)) {
+    section = 'project_detail'; key = 'scope_change_id'
+  } else return null
+  if (!projectNotificationID(id, legacy)) return ''
+  const path = `/project_management/${section}`
+  if (!target) return `${path}?${new URLSearchParams({ [key]: id })}`
+  const url = new URL(target, 'https://notification.invalid')
+  const allowed = key === 'service_item_id' ? ['service_item_id'] : { methods: ['service_item_id', 'review_id'],
+    exceptions: ['service_item_id', 'deviation_id'],
+    project_detail: ['project', 'scope_change_id'] }[section]
+  // 旧范围变更结果只在链接中带项目编号，实际申请编号仍由通知引用提供。
+  if (section === 'project_detail' && category !== 'NATIVE_SCOPE_CHANGE_REQUESTED'
+    && url.pathname === path && !url.hash && [...url.searchParams].length === 1
+    && projectNotificationID(url.searchParams.get('project'))) {
+    url.searchParams.set(key, id)
+    return `${path}${url.search}`
+  }
+  if (url.pathname !== path || url.hash || url.searchParams.get(key) !== id) return ''
+  for (const [name, value] of url.searchParams) {
+    if (!allowed.includes(name) || url.searchParams.getAll(name).length !== 1
+      || !projectNotificationID(value, legacy)) return ''
+  }
+  return target
+}
+
 // 用途：把保留了真实业务引用的历史通知转换为现有业务页面坐标。
 // 参数：item 为通知详情，target 为已验证的可选站内目标。
 // 返回值：兼容后的路径；没有已知引用或目标时返回空串。
 function referencedNotificationTarget(item, target) {
-  const source = String(item.source_application || '').toLowerCase()
-  const type = String(item.reference_type || '').toUpperCase()
-  const category = String(item.category || '').toUpperCase()
+  const source = String(item.source_application || '').trim().toLowerCase()
+  const type = String(item.reference_type || '').trim().toUpperCase()
+  const category = String(item.category || '').trim().toUpperCase()
   const id = String(item.reference_id || '')
+  if (source === 'project_management') {
+    const controlled = projectWorkflowNotificationTarget(type, category, id, target)
+    if (controlled !== null) return controlled
+  }
   if (source === 'contract_management') {
     const legacy = target.match(/^\/contract_management\/(contracts|approvals)\/([^/?#]+)$/)
     const record = id || (legacy ? decodeURIComponent(legacy[2]) : '')

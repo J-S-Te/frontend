@@ -19,6 +19,7 @@ function allocationQueueState(rows, projectStatus = '待分配', executionAllowe
   const scope = effectScope()
   const state = {
     projects: ref([{ id: 'P-QUEUE', status: projectStatus }]), serviceItems: ref(rows),
+    approvalDeepLink: { project: ref(null) },
     deliveryEvents: ref(events),
     canExecutionAssign: ref(executionAllowed), canAssignTeam: ref(teamAllowed),
     selectedServiceItemIDs: ref(rows.map(row => row.id)),

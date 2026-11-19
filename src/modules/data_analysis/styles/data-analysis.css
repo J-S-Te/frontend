@@ -85,7 +85,7 @@
 .da-icon-button:hover { color: var(--da-blue); background: var(--da-blue-soft); }
 .da-icon-button svg { width: 18px; height: 18px; }
 .da-topbar-avatar { width: 33px; height: 33px; }
-.da-menu-button, .da-mobile-close { display: none; }
+.da-menu-button { display: none; }
 .da-menu-mask { position: fixed; inset: 0; z-index: 35; background: rgba(15,23,42,.5); }
 
 /* —— 页面区 —— */
@@ -192,8 +192,7 @@
   .da-sidebar { transform: translateX(-100%); transition: transform .22s ease; width: min(280px, 86vw); }
   .da-sidebar.open { transform: translateX(0); }
   .da-main { margin-left: 0; }
-  .da-menu-button, .da-mobile-close { display: grid; }
-  .da-mobile-close { margin-left: auto; color: var(--text-dim); }
+  .da-menu-button { display: grid; }
   .da-topbar { padding-inline: 16px; }
   .da-breadcrumb span { display: none; }
   .da-page { padding: 22px 16px 32px; }
@@ -509,7 +508,7 @@
 .da-brand { height: auto; padding: 20px 20px 14px; gap: 10px; border-bottom: 1px solid var(--da-sidebar-line); }
 .da-brand-dot { width: 10px; height: 10px; flex: 0 0 auto; border-radius: 50%; background: var(--da-blue-light); }
 .da-brand b { color: var(--da-on-sidebar); font-size: var(--da-fs-15); font-weight: 700; letter-spacing: 0; }
-.da-brand-sub { padding: 10px 20px 4px; color: var(--da-muted); font-size: var(--da-fs-11); }
+.da-brand-sub { color: var(--da-muted); font-size: var(--da-fs-11); }
 .da-nav { padding: 8px 0 12px; }
 .da-nav-label { padding: 16px 20px 6px; color: var(--da-muted); font-size: var(--da-fs-11); font-weight: 600; letter-spacing: .04em; text-transform: none; }
 .da-nav-item { width: 100%; min-height: 44px; padding: 11px 20px; gap: 11px; border: 0; border-left: 3px solid transparent; border-radius: 0; color: var(--da-sidebar-text); font-size: var(--da-fs-13-5); transition: background .15s ease, color .15s ease, border-color .15s ease; }
@@ -531,6 +530,7 @@
 .da-breadcrumb span { color: var(--da-faint); }
 .da-breadcrumb strong { color: var(--da-muted); font-weight: 400; }
 .da-topbar-filters { display: flex; align-items: center; gap: 10px; margin-left: auto; }
+.da-topbar .console-topbar-actions { margin-left: 0; }
 .da-topbar-filters label { color: var(--da-muted); font-size: var(--da-fs-12); }
 .da-select { height: 34px; padding: 0 10px; border: 1px solid var(--da-line); border-radius: 8px; background: var(--da-page-bg); color: var(--da-ink); font-size: var(--da-fs-13); outline: none; }
 .da-select:focus-visible { outline: 2px solid var(--da-blue); outline-offset: 2px; }

@@ -250,7 +250,7 @@ function clearCapsLockState() {
                 v-model="account"
                 type="text"
                 name="account"
-                placeholder="用户名 / 手机号 / 邮箱"
+                placeholder="用户名"
                 autocomplete="username"
                 maxlength="100"
                 :disabled="submitting"

@@ -21,6 +21,23 @@ async function component() {
   return new Function(...Object.keys(bindings), body.replace('export default', 'return'))(...Object.values(bindings))
 }
 
+test('旧范围链接只渲染该提案结果，不渲染其他待办或新提案写入口', async () => {
+  const panel = await component()
+  const state = { project_id: 'PJ-1', project_version: 3, scope_version: 2,
+    can_request: true, can_approve: true, actor_id: 'director', service_items: [], changes: [
+      { id: 'old', status: 'APPROVED', requested_by: 'business', reason: '旧范围', service_items: [] },
+      { id: 'new', status: 'PENDING', requested_by: 'other', reason: '新范围不得串入', service_items: [] },
+    ] }
+  const html = await renderToString(Vue.createSSRApp(panel,
+    { projectId: 'PJ-1', changeId: 'old', initialState: state }))
+  assert.match(html, /旧范围/)
+  assert.doesNotMatch(html, /新范围不得串入|提交异人审批|批准并生效新版本|撤回我的提案/)
+  const missing = await renderToString(Vue.createSSRApp(panel,
+    { projectId: 'PJ-1', changeId: 'missing', initialState: state }))
+  assert.match(missing, /未能定位/)
+  assert.doesNotMatch(missing, /批准并生效新版本|提交异人审批/)
+})
+
 test('真实SFC显示冻结范围与来源行、转义文本，申请人不可自批', async () => {
   const panel = await component()
   const state = { project_id: 'PJ-1', project_version: 3, scope_version: 1, can_request: true, can_approve: true, actor_id: 'business', service_items: [], changes: [
