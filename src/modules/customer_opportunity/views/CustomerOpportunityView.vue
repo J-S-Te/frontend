@@ -877,6 +877,9 @@ function opportunityCustomerText(item) {
 function opportunityOwnerUnavailable(item) {
   return ownerLabel(item?.owner_user_id) === '负责人账号已失效'
 }
+function opportunityOwnerDisplay(item) {
+  return opportunityOwnerUnavailable(item) ? '未知' : ownerLabel(item?.owner_user_id)
+}
 function operationUserLabel(item) { return usableOperationName(item?.actor_name, item?.actor_id) || ownerLabel(item?.actor_id) }
 function followupTypeText(value) { return ({ PHONE: '电话', VISIT: '拜访', EMAIL: '邮件', OTHER: '其他' })[value] || value || '跟进' }
 function operationSubjectLabel(item) { return usableOperationName(item?.subject_name, item?.subject_id) || ownerLabel(item?.subject_id) }
@@ -4152,7 +4155,7 @@ onMounted(async () => {
       <span aria-hidden="true">·</span>
       <span>{{ opportunityCustomerText(selectedOpportunity) }}</span>
       <span aria-hidden="true">·</span>
-      <span>负责人 {{ ownerLabel(selectedOpportunity.owner_user_id) }}<em v-if="opportunityOwnerUnavailable(selectedOpportunity)" class="crm-owner-warning">账号已失效</em></span>
+      <span>负责人 {{ opportunityOwnerDisplay(selectedOpportunity) }}<em v-if="opportunityOwnerUnavailable(selectedOpportunity)" class="crm-owner-warning">账号已失效</em></span>
     </p>
   </div>
   <div class="crm-detail-head-actions crm-opportunity-head-actions">
@@ -4219,7 +4222,7 @@ onMounted(async () => {
         <dl class="crm-opportunity-facts">
           <div><dt>商机编号</dt><dd>{{ selectedOpportunity.opportunity_no }}</dd></div>
           <div><dt>客户</dt><dd>{{ opportunityCustomerText(selectedOpportunity) }}</dd></div>
-          <div><dt>负责人</dt><dd>{{ ownerLabel(selectedOpportunity.owner_user_id) }}</dd></div>
+          <div><dt>负责人</dt><dd>{{ opportunityOwnerUnavailable(selectedOpportunity) ? '未知（账号已失效）' : ownerLabel(selectedOpportunity.owner_user_id) }}</dd></div>
           <div><dt>预计签单</dt><dd>{{ formatDate(selectedOpportunity.expected_sign_date) }}</dd></div>
           <div><dt>系统数量</dt><dd>{{ selectedOpportunity.system_count || 0 }}</dd></div>
           <div><dt>累计已签约合同</dt><dd>{{ formatSignedContractCount(selectedOpportunity.signed_contract_count) }}</dd></div>
@@ -4408,7 +4411,8 @@ onMounted(async () => {
   </div>
   <div class="crm-opportunity-actionbar">
     <div class="crm-opportunity-action-meta">
-      <span>负责人 <strong>{{ ownerLabel(selectedOpportunity.owner_user_id) }}</strong><em v-if="opportunityOwnerUnavailable(selectedOpportunity)" class="crm-owner-warning">账号已失效</em></span>
+      <span>负责人 <strong>{{ opportunityOwnerDisplay(selectedOpportunity) }}</strong><em v-if="opportunityOwnerUnavailable(selectedOpportunity)" class="crm-owner-warning">账号已失效</em></span>
+      <span aria-hidden="true">·</span>
       <span>最近更新 {{ formatDate(selectedOpportunity.updated_at) }}</span>
     </div>
     <div class="crm-opportunity-action-buttons">

@@ -333,6 +333,8 @@ test('商机详情工作台：指标通栏、340px 关键资料栏、底部操�
   assert.match(view, /团队任期明细/)
   assert.match(style, /\.crm-opportunity-terms-drawer/)
   assert.match(view, /opportunityCustomerText\(selectedOpportunity\)/)
+  assert.match(view, /opportunityOwnerDisplay\(selectedOpportunity\)/)
+  assert.match(view, /未知（账号已失效）/)
   assert.doesNotMatch(view, /'客户 #' \+ selectedOpportunity\.customer_id/)
 })
 
