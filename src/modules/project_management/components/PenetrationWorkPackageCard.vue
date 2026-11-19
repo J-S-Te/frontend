@@ -25,6 +25,8 @@ const emit = defineEmits(['updated', 'notify'])
 
 const workPackage = ref(props.item?.penetration_work_package || null)
 const busy = ref(false)
+const draftConflict = ref(false)
+let savedDraft = ''
 const initializedItem = ref('')
 const reportFile = ref(null)
 const pendingReportArtifact = ref(null)
@@ -72,10 +74,17 @@ function retryKey(name, payload) {
   return next.key
 }
 function commandSucceeded(name) { retryCommands.delete(name) }
+// 用途：应用本人操作的受权回执并同步表单基准。
+// 参数：next 为服务端返回的持久工作包。
+// 返回值：无。
 function accept(next) {
   workPackage.value = next
+  resetPackageDraft()
   emit('updated', next)
 }
+// 用途：把当前工作包版本映射到三个可编辑表单。
+// 参数：value 为有权读取的工作包。
+// 返回值：无；设置草稿比较基准。
 function fillForms(value) {
   if (!value) return
   decision.value = {
@@ -91,7 +100,22 @@ function fillForms(value) {
     rollbackPlan: value.rollback_plan || '',
   }
   cancellation.value = { reason: '', customerContact: value.customer_contact || '', communicatedAt: localDate(value.communicated_at), summary: '' }
+  savedDraft = packageDraft()
 }
+
+// 用途：检测专项表单自上一次读取后是否有用户输入。
+// 参数：无。
+// 返回值：当前三个表单的比较值。
+function packageDraft() { return JSON.stringify([decision.value, plan.value, cancellation.value]) }
+
+// 用途：让用户确认采用最新服务端版本，并以该版本重新初始化草稿。
+// 参数：无。
+// 返回值：无。
+function resetPackageDraft() {
+  draftConflict.value = false
+  fillForms(workPackage.value)
+}
+
 
 async function ensurePackage() {
   if (!canManage.value || busy.value || workPackage.value) return
@@ -109,7 +133,7 @@ async function ensurePackage() {
 // 参数：无；读取当前表单、专项版本及父项状态。
 // 返回值：无；成功更新专项，失败保留草稿并提示原因。
 async function submitDecision() {
-  if (!workPackage.value || !canManage.value || !canChangeDecision.value || busy.value) return
+  if (!workPackage.value || !canManage.value || !canChangeDecision.value || busy.value || draftConflict.value) return
   busy.value = true
   try {
     const payload = {
@@ -127,8 +151,11 @@ async function submitDecision() {
   finally { busy.value = false }
 }
 
+// 用途：保存当前版本的专项计划。
+// 参数：无。
+// 返回值：无；成功使用服务端回执更新。
 async function submitPlan() {
-  if (!workPackage.value || busy.value) return
+  if (!workPackage.value || busy.value || draftConflict.value) return
   busy.value = true
   try {
     const payload = {
@@ -145,8 +172,11 @@ async function submitPlan() {
   finally { busy.value = false }
 }
 
+// 用途：对当前版本执行开始、完成或取消操作。
+// 参数：action 为用户明确选择的操作。
+// 返回值：无；根据真实回执更新或反馈错误。
 async function execute(action) {
-  if (!workPackage.value || busy.value) return
+  if (!workPackage.value || busy.value || draftConflict.value) return
   busy.value = true
   try {
     const payload = { action, expected_version: workPackage.value.version }
@@ -162,7 +192,11 @@ async function execute(action) {
   finally { busy.value = false }
 }
 
+// 用途：将已选择报告作为当前版本的证据登记。
+// 参数：无。
+// 返回值：无；失败保留待核对的证据引用。
 async function uploadReport() {
+  if (draftConflict.value) return
   if (!workPackage.value || !(reportFile.value instanceof File) || busy.value) { notify('请选择 PDF 专项报告', 'warning'); return }
   busy.value = true
   try {
@@ -177,8 +211,11 @@ async function uploadReport() {
   finally { busy.value = false }
 }
 
+// 用途：按当前版本推进专项报告节点。
+// 参数：无。
+// 返回值：无；写入结果以服务端回执为准。
 async function advanceReport() {
-  if (!workPackage.value || !reportNext.value || busy.value) return
+  if (!workPackage.value || !reportNext.value || busy.value || draftConflict.value) return
   busy.value = true
   try {
     const payload = { phase: reportNext.value, expected_version: workPackage.value.version }
@@ -190,15 +227,21 @@ async function advanceReport() {
   finally { busy.value = false }
 }
 
-watch(() => props.item, (item) => {
-  workPackage.value = item?.penetration_work_package || null
-  fillForms(workPackage.value)
-  if (props.autoEnsure && item?.id && initializedItem.value !== item.id) {
-    initializedItem.value = item.id
+watch(() => [props.item?.id, props.item?.penetration_work_package || null], ([itemID, next], [oldID] = []) => {
+  const sameItem = itemID === oldID
+  const samePackage = next?.id && next.id === workPackage.value?.id
+  if (sameItem && samePackage && Number(next.version) <= Number(workPackage.value.version)) return
+  if (sameItem && !next && !workPackage.value) return
+  const keepDraft = sameItem && next?.id && next.id === workPackage.value?.id
+    && (draftConflict.value || packageDraft() !== savedDraft)
+  workPackage.value = next
+  if (keepDraft) draftConflict.value = true
+  else resetPackageDraft()
+  if (props.autoEnsure && itemID && initializedItem.value !== itemID) {
+    initializedItem.value = itemID
     ensurePackage()
   }
 }, { immediate: true, deep: false })
-watch(workPackage, fillForms)
 </script>
 
 <template>
@@ -207,10 +250,13 @@ watch(workPackage, fillForms)
       <div><small>父服务项附属工作 · 不计入服务项与结算</small><h3>渗透测试专项</h3></div>
       <div class="pen-statuses"><span>{{ decisionLabel }}</span><span v-if="workPackage">{{ executionLabel }}</span><span v-if="workPackage">报告：{{ reportLabel }}</span></div>
     </header>
+    <p v-if="draftConflict" role="status">专项版本已变化，已保留当前输入。
+      <button class="pm-button" type="button" :disabled="busy" @click="resetPackageDraft">采用最新版本</button>
+    </p>
 
     <div v-if="!workPackage" class="pen-empty">
       <p>{{ canManage ? '该历史等保服务项尚未建立专项记录，可按需建立。' : '专项将在项目经理进入实施计划时建立。' }}</p>
-      <button v-if="canManage && !compact" class="pm-button primary" type="button" :disabled="busy" @click="ensurePackage">建立专项工作包</button>
+      <button v-if="canManage && !compact" class="pm-button primary" type="button" :disabled="busy || draftConflict" @click="ensurePackage">建立专项工作包</button>
     </div>
 
     <template v-else>
@@ -229,7 +275,7 @@ watch(workPackage, fillForms)
         <label><span>沟通时间 *</span><input v-model="decision.communicatedAt" type="datetime-local" /></label>
         <label class="wide"><span>沟通结论 *</span><textarea v-model.trim="decision.summary" rows="2" maxlength="2000"></textarea></label>
         <label v-if="workPackage.decision_status !== 'PENDING' && workPackage.decision_status !== decision.status" class="wide"><span>结论变更原因 *</span><textarea v-model.trim="decision.changeReason" rows="2" maxlength="1000"></textarea></label>
-        <button class="pm-button primary" type="button" :disabled="busy" @click="submitDecision">保存沟通结论</button>
+        <button class="pm-button primary" type="button" :disabled="busy || draftConflict" @click="submitDecision">保存沟通结论</button>
       </section>
 
       <section v-if="workPackage.decision_status === 'REQUIRED'" class="pen-stage">
@@ -246,7 +292,7 @@ watch(workPackage, fillForms)
           <label><span>测试时间窗 *</span><input v-model.trim="plan.testWindow" placeholder="例如 00:00-06:00"  maxlength="128"/></label>
           <label><span>应急联系人 *</span><input v-model.trim="plan.emergencyContact" placeholder="姓名 + 电话"  maxlength="128"/></label>
           <label class="wide"><span>回滚方案 *</span><textarea v-model.trim="plan.rollbackPlan" rows="2" maxlength="5000"></textarea></label>
-          <button class="pm-button primary" type="button" :disabled="busy" @click="submitPlan">保存专项计划</button>
+          <button class="pm-button primary" type="button" :disabled="busy || draftConflict" @click="submitPlan">保存专项计划</button>
         </div>
         <dl v-else class="pen-summary details">
           <div><dt>计划窗口</dt><dd>{{ workPackage.planned_start ? `${formatBusinessDateTime(workPackage.planned_start)} 至 ${formatBusinessDateTime(workPackage.planned_end)}` : '待制定' }}</dd></div>
@@ -256,8 +302,8 @@ watch(workPackage, fillForms)
         </dl>
 
         <div v-if="!compact" class="pen-actions">
-          <button v-if="canExecute && workPackage.execution_status === 'NOT_STARTED'" class="pm-button primary" type="button" :disabled="busy" @click="execute('START')">开始测试</button>
-          <button v-if="canExecute && workPackage.execution_status === 'IN_PROGRESS'" class="pm-button primary" type="button" :disabled="busy" @click="execute('COMPLETE')">确认测试完成</button>
+          <button v-if="canExecute && workPackage.execution_status === 'NOT_STARTED'" class="pm-button primary" type="button" :disabled="busy || draftConflict" @click="execute('START')">开始测试</button>
+          <button v-if="canExecute && workPackage.execution_status === 'IN_PROGRESS'" class="pm-button primary" type="button" :disabled="busy || draftConflict" @click="execute('COMPLETE')">确认测试完成</button>
         </div>
 
         <div v-if="!compact && canManage && ['NOT_STARTED', 'IN_PROGRESS'].includes(workPackage.execution_status)" class="pen-form cancellation">
@@ -266,7 +312,7 @@ watch(workPackage, fillForms)
           <label><span>沟通时间 *</span><input v-model="cancellation.communicatedAt" type="datetime-local" /></label>
           <label class="wide"><span>最新沟通结论 *</span><textarea v-model.trim="cancellation.summary" rows="2" maxlength="2000"></textarea></label>
           <label class="wide"><span>取消原因 *</span><textarea v-model.trim="cancellation.reason" rows="2" maxlength="1000"></textarea></label>
-          <button class="pm-button danger" type="button" :disabled="busy" @click="execute('CANCEL')">取消专项</button>
+          <button class="pm-button danger" type="button" :disabled="busy || draftConflict" @click="execute('CANCEL')">取消专项</button>
         </div>
       </section>
 
@@ -274,9 +320,9 @@ watch(workPackage, fillForms)
         <div class="pen-stage-head"><h4>独立专项报告</h4><span>R{{ workPackage.report_revision }}</span></div>
         <div v-if="workPackage.report_status === 'DRAFTING' && permissionSet.has('project.report.prepare')" class="pen-upload">
           <input type="file" accept="application/pdf" @change="reportFile = $event.target.files?.[0] || null; pendingReportArtifact = null" />
-          <button class="pm-button" type="button" :disabled="busy" @click="uploadReport">上传专项报告</button>
+          <button class="pm-button" type="button" :disabled="busy || draftConflict" @click="uploadReport">上传专项报告</button>
         </div>
-        <button v-if="canAdvanceReport" class="pm-button primary" type="button" :disabled="busy" @click="advanceReport">{{ reportActionLabel }}</button>
+        <button v-if="canAdvanceReport" class="pm-button primary" type="button" :disabled="busy || draftConflict" @click="advanceReport">{{ reportActionLabel }}</button>
       </section>
     </template>
   </article>

@@ -34,6 +34,8 @@ import { useProjectAuxiliaryResource } from '@/modules/project_management/compos
 import { useProjectEquipment } from '@/modules/project_management/composables/useProjectEquipment.js'
 import { useProjectPersonnelNames } from '@/modules/project_management/composables/useProjectPersonnelNames.js'
 import { useProjectMonitoring } from '@/modules/project_management/composables/useProjectMonitoring'
+import { reconcileWorkflowServiceItems, replaceWorkflowRows, useProjectWorkflowSync } from '@/modules/project_management/composables/useProjectWorkflowSync'
+import { connectProjectWorkflow } from '@/modules/project_management/api/projectManagement'
 import { useProjectNotifications } from '@/modules/project_management/composables/useProjectNotifications'
 import { useAuthorizationRefresh } from '@/modules/shared/composables/useAuthorizationRefresh.js'
 import { rectifyingProjectCount, useProjectKpiVisibility } from '@/modules/project_management/composables/useProjectKpiVisibility'
@@ -461,6 +463,7 @@ const dashboard = ref({ project_count: 0, in_flight_projects: 0, risk_projects: 
 const slaOverdueItems = ref([])
 const session = ref(null)
 const lastUpdatedAt = ref(null)
+const workflowUpdatedAt = ref(null)
 // 附加/辅助数据严格按用户、租户、授权修订和导航隔离，不跨身份永久缓存。
 // 换用户、换租户或授权修订变化后，旧代次的在途读取不得回写任何数据/错误/加载态。
 const sectionDataContext = computed(() => JSON.stringify([
@@ -1782,7 +1785,10 @@ const planningBlocked = computed(() => {
   }
   return null
 })
-const lastUpdatedLabel = computed(() => lastUpdatedAt.value ? formatBusinessDateTime(lastUpdatedAt.value) : '尚未加载')
+const lastUpdatedLabel = computed(() => {
+  const latest = Math.max(lastUpdatedAt.value?.getTime() || 0, workflowUpdatedAt.value?.getTime() || 0)
+  return latest ? formatBusinessDateTime(new Date(latest)) : '尚未加载'
+})
 const serviceFlow = computed(() => [
   { key: '待分配', color: 'slate', count: allocationItems.value.length, route: 'allocation' },
   { key: '待实施', color: 'violet', count: preparationItems.value.length, route: 'preparation' },
@@ -1951,7 +1957,7 @@ const {
   monitoringUpdatedLabel, monitoringLagSeconds,
   monitoringParams, loadMonitoring, scheduleMonitoringPoll, onMonitoringVisibility,
   resetMonitoringFilters, changeMonitoringPage, openMonitoringAction,
-} = useProjectMonitoring({ activeSection, keyword, teamFilter, loadPersonnelNames, navigate, openProject })
+} = useProjectMonitoring({ activeSection, keyword, teamFilter, loadPersonnelNames, navigate, openProject, context: sectionDataContext })
 
 // 人员姓名按需读取：汇总当前已加载业务记录引用的人员 ID（服务项、交付事件、监控快照），
 // 只解析其中尚未解析的 ID；租户/用户/授权代次变化或工作区刷新后重新确认。
@@ -3904,6 +3910,79 @@ const equipmentPanel = shallowRef(createEquipmentPanel())
 // 返回值：无；替换为新实例以重新请求代码块。
 function retryEquipmentPanel() { equipmentPanel.value = createEquipmentPanel() }
 
+const workflowSections = new Set([
+  'dashboard', 'projects', 'project_detail', 'monitoring', 'decomposition',
+  'allocation', 'inbox', 'planning', 'preparation', 'assignments',
+  'methods', 'implementation', 'exceptions', 'reports', 'approvals',
+])
+const workflowProjectID = computed(() => activeSection.value === 'project_detail'
+  && typeof route.query.project === 'string' ? route.query.project : '')
+const workflowRefreshVersion = ref(0)
+const workflowError = ref('')
+
+/**
+ * 用途：后台更新当前可见的项目流程，保持页面结构和未提交输入。
+ * 参数：target 为当前栏目和可选的项目坐标；current 检查原会话、路由及读取是否仍有效。
+ * 返回值：异步完成；网络失败提示继续核对，授权失效时清除旧数据。
+ */
+async function refreshWorkflow({ section, projectID }, current) {
+  if (section === 'approvals') { workflowRefreshVersion.value++; return }
+  if (section === 'monitoring') {
+    await Promise.all([loadMonitoring({ quiet: true }), loadSlaOverdueDetails({ force: true })])
+    return
+  }
+  try {
+    const [projectData, items, events, overview] = await Promise.all([
+      projectID ? getProject(projectID).then(item => ({ items: [item] })) : listProjectsSnapshot(),
+      listServiceItemsSnapshot(projectID), listDeliveryEvents(projectID),
+      ['dashboard', 'projects'].includes(section) ? getDashboard() : null,
+    ])
+    if (!current()) return
+    projects.value = replaceWorkflowRows(projects.value, projectData.items, projectID, row => row.id)
+    const refreshedItems = reconcileWorkflowServiceItems(serviceItems.value, items.items)
+    serviceItems.value = replaceWorkflowRows(serviceItems.value, refreshedItems, projectID, row => row.project_id)
+    deliveryEvents.value = replaceWorkflowRows(deliveryEvents.value, events, projectID, row => row.project_id)
+    sectionEventsReady.value = true
+    if (overview) dashboard.value = overview
+    if (!projectID) workspaceTruncated.value = Boolean(projectData.truncated || items.truncated)
+    workflowError.value = ''
+    workflowUpdatedAt.value = new Date()
+    workflowRefreshVersion.value++
+    if (approvalTargetRequested.value) void approvalDeepLink.load({ background: true })
+    if (selectedServiceItem.value) void refreshSelectedFieldEvidence()
+  } catch (error) {
+    if (current()) rejectWorkflowRead(error, projectID)
+  }
+}
+
+/**
+ * 用途：移除确实失去访问权限的旧数据，其他读取异常显示可恢复提示。
+ * 参数：error 为当前读取异常，projectID 为可能失去权限的精确项目。
+ * 返回值：无。
+ */
+function rejectWorkflowRead(error, projectID) {
+  if (projectID && [403, 404].includes(error?.status)) {
+    projects.value = replaceWorkflowRows(projects.value, [], projectID, row => row.id)
+    serviceItems.value = replaceWorkflowRows(serviceItems.value, [], projectID, row => row.project_id)
+    deliveryEvents.value = replaceWorkflowRows(deliveryEvents.value, [], projectID, row => row.project_id)
+    if (approvalTargetRequested.value) void approvalDeepLink.load()
+  } else if (error?.status === 401 || error?.status === 403) {
+    clearProjectAuthorizationData()
+  }
+  workflowError.value = '项目状态暂未同步，请稍后重试刷新。'
+}
+
+watch([activeSection, workflowProjectID, sectionDataContext], () => {
+  workflowError.value = ''
+  workflowUpdatedAt.value = null
+})
+useProjectWorkflowSync({
+  enabled: computed(() => workspaceReady.value && !workspaceAuthorizationPending.value
+    && !sectionExtrasLoading.value && !saving.value && !nativeScopeLocked.value
+    && !!session.value?.permissions?.includes('project.read') && workflowSections.has(activeSection.value)),
+  context: sectionDataContext, section: activeSection, projectID: workflowProjectID,
+  connect: connectProjectWorkflow, refresh: refreshWorkflow,
+})
 onMounted(loadWorkspace)
 watch(() => fieldQueueOwner(), (ownerKey) => {
   pendingFieldSyncCount.value = 0
@@ -4027,12 +4106,12 @@ function applyNotificationSelection() {
   if (exact) {
     if (loading.value || !workspaceReady.value || loadError.value) return
     const task = approvalDeepLink.task.value
-    if (approvalDeepLink.loading.value || approvalDeepLink.error.value || !task) {
+    if (approvalDeepLink.loading.value || !task) {
       selectedServiceItemIDs.value = []; operationForm.value.deviationID = ''
       notificationSelectionContext = ''
       return
     }
-    if (context === notificationSelectionContext) return
+    if (approvalDeepLink.error.value || context === notificationSelectionContext) return
     notificationSelectionContext = context
     selectedServiceItemIDs.value = []; operationForm.value.deviationID = ''
     if (task.type === 'NATIVE_SCOPE_CHANGE') {
@@ -4269,6 +4348,7 @@ onBeforeUnmount(() => {
             <p v-if="!approvalDeepLink.canProcess.value" class="pm-form-hint">本条记录仅供查看，请从当前待办进入可处理的申请。</p>
           </template>
         </section>
+        <p v-if="workflowError" class="pm-form-hint" role="status">{{ workflowError }}</p>
         <ListState v-if="!workspaceReady && (loading || sectionExtrasLoading)" loading loading-title="正在读取当前栏目数据…" />
         <ListState v-else-if="loadError || !workspaceReady" error-title="后端数据加载失败" :error="loadError || '工作区数据尚未确认，请重新读取。'" retry-text="重新加载" @retry="loadWorkspace" />
         <ListState v-else-if="sectionExtrasError" error-title="当前栏目数据读取失败" :error="sectionExtrasError" retry-text="重试当前栏目" @retry="loadSectionExtras" />
@@ -4278,7 +4358,8 @@ onBeforeUnmount(() => {
           @open-approval="openApprovalTarget" @read-error="showToast($event, 'warning')" />
         <ProjectApprovalInbox v-else-if="activeSection === 'approvals'" :key="sectionDataContext"
           :request-id="String(route.query.request_id || '')" :context="sectionDataContext"
-          :user-id="String(session?.user_id || '')" @open-request="openApprovalRequest"
+          :user-id="String(session?.user_id || '')" :refresh-version="workflowRefreshVersion"
+          @open-request="openApprovalRequest"
           @back="navigate('approvals')" @changed="refreshAfterWrite" />
         <template v-else-if="activeSection === 'dashboard'">
           <section class="pm-kpis">
@@ -4475,7 +4556,8 @@ onBeforeUnmount(() => {
                     && focusedApprovalTask.id === String(route.query.scope_change_id || '')))"
                 :key="`${detailProject.id}:${String(route.query.scope_change_id || '')}`"
                 :project-id="detailProject.id" :change-id="String(route.query.scope_change_id || '')"
-                :categories="detectionCategories" :disabled="saving || !nativeProjectEnabled
+                :categories="detectionCategories" :refresh-version="workflowRefreshVersion"
+                :disabled="saving || !nativeProjectEnabled
                   || (!!focusedApprovalTask && focusedApprovalTask.status !== 'PENDING')"
                 @close="nativeScopeProjectID = ''" @changed="onNativeScopeChanged"
                 @locked="nativeScopeLocked = $event"

@@ -45,34 +45,40 @@ function coordinates(section, query) {
 // 返回值：精确申请与原资源、可处理状态和重读动作；失败显式保留未知状态。
 export function useProjectApprovalDeepLink({ route, section, context, ready, busy, api }) {
   const task = ref(null), serviceItem = ref(null), project = ref(null)
-  const loading = ref(false), error = ref('')
+  const loading = ref(false), refreshing = ref(false), error = ref('')
   let generation = 0, disposed = false, selection = ''
   const requested = computed(() => {
     try { return coordinates(section.value, route.query) }
     catch (cause) { return { invalid: cause.message } }
   })
-  const canProcess = computed(() => !loading.value && !busy.value && !error.value
+  const canProcess = computed(() => !loading.value && !refreshing.value && !busy.value && !error.value
     && !requested.value?.historical && task.value?.status === 'PENDING'
     && task.value.can_decide === true)
 
   // 用途：读取指定类型的唯一授权申请及单条业务资源，不依赖当前分页。
-  // 参数：无；使用当前路由与授权上下文。
+  // 参数：options.background 为同坐标的后台重读，使用当前路由与授权上下文。
   // 返回值：无；迟到响应作废，已处理记录保留只读结果。
-  async function load() {
+  async function load({ background = false } = {}) {
     const ticket = ++generation, target = requested.value
     const signature = JSON.stringify([target, context.value])
     const changed = signature !== selection
     selection = signature
+    const quiet = background && !changed
+    refreshing.value = false
     if (busy.value) {
       if (changed) { task.value = null; serviceItem.value = null; project.value = null; error.value = '' }
       loading.value = false
       return
     }
-    task.value = null; serviceItem.value = null; project.value = null; error.value = ''
+    if (!quiet) {
+      task.value = null; serviceItem.value = null; project.value = null
+    }
+    error.value = ''
     loading.value = false
     if (!target || !ready.value || disposed) return
     if (target.invalid) { error.value = target.invalid; return }
-    loading.value = true
+    loading.value = !quiet
+    refreshing.value = quiet
     try {
       const page = await api.listApprovalTasks({ request_id: target.id, task_type: target.type,
         page: 1, page_size: 1, view: 'assigned' })
@@ -103,13 +109,18 @@ export function useProjectApprovalDeepLink({ route, section, context, ready, bus
       project.value = parent; serviceItem.value = item; task.value = value
     } catch (cause) {
       if (disposed || ticket !== generation) return
+      if ([401, 403, 404].includes(cause?.status) || cause?.approvalTargetValidation === true) {
+        task.value = null; serviceItem.value = null; project.value = null
+      }
       error.value = cause?.status === 403 || cause?.status === 404
         ? '该申请不存在或当前账号无权查看，请返回待办核对。'
         : cause?.approvalTargetValidation === true ? cause.message
           : '审批详情暂时读取失败，请稍后重试。'
-    } finally { if (!disposed && ticket === generation) loading.value = false }
+    } finally {
+      if (!disposed && ticket === generation) { loading.value = false; refreshing.value = false }
+    }
   }
-  watch([requested, context, ready, busy], load, { immediate: true, flush: 'sync' })
+  watch([requested, context, ready, busy], () => load(), { immediate: true, flush: 'sync' })
   onScopeDispose(() => { disposed = true; generation += 1 })
   return { task, serviceItem, project, loading, error, requested, canProcess, load }
 }

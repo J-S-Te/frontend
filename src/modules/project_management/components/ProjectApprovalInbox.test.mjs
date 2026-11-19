@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { existsSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { mountSFC } from '../../../test/helpers/mountSFC.mjs'
 
@@ -53,4 +53,12 @@ test('三类新待办向原业务页传递完整坐标且不能调用旧统一�
       assert.deepEqual(writes, [])
     } finally { mounted.unmount() }
   }
+})
+
+test('审批后台重读期间禁用决定按钮，同时保留审批意见输入', () => {
+  const template = readFileSync(new URL('./ProjectApprovalInbox.vue', import.meta.url), 'utf8').replace(/\s+/g, ' ')
+  for (const decision of ['APPROVED', 'REJECTED']) {
+    assert.ok(template.includes(`:disabled="saving || refreshing || !comment.trim()" @click="submitDecision('${decision}')"`))
+  }
+  assert.match(template, /<textarea v-model="comment"/)
 })
