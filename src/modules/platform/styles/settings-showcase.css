@@ -314,6 +314,70 @@
   line-height: 1.6;
 }
 
+/* 内容区横向 Tabs：设置模块不再占用侧栏三级菜单。 */
+.settings-inline-tabs {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 16px;
+  padding: 0 0 12px;
+  overflow-x: auto;
+  border-bottom: 1px solid var(--line);
+  scrollbar-width: thin;
+}
+
+.settings-inline-group {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 4px;
+}
+
+.settings-inline-label {
+  padding: 0 6px;
+  color: var(--text-3);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.settings-inline-tab {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 10px;
+  color: var(--text-2);
+  font-size: 13px;
+  font-weight: 550;
+  white-space: nowrap;
+  cursor: pointer;
+  border: 1px solid transparent;
+  border-radius: var(--radius-control);
+  background: transparent;
+}
+
+.settings-inline-tab svg {
+  width: 15px;
+  height: 15px;
+}
+
+.settings-inline-tab:hover {
+  color: var(--text-1);
+  background: var(--surface-muted);
+}
+
+.settings-inline-tab.active {
+  color: var(--primary);
+  border-color: var(--primary-border);
+  background: var(--primary-soft);
+}
+
+.settings-inline-tab:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 1px;
+}
+
 /* ---------------------------------------------------------------- 右侧内容 */
 
 .settings-content {

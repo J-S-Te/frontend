@@ -25,19 +25,11 @@ test('系统设置页标题使用 <h1>系统设置</h1>', () => {
   assert.match(view, /<h1>系统设置<\/h1>/)
 })
 
-// 回归锁定：视觉隐藏的 <h2> 只在 IAM tab 渲染——其余 10 个设置模块自身首个标题就是 <h2>，
-// 再补一层同名同级标题会让读屏标题列表出现重复条目；条件必须同时包含 tab 守卫与 'iam'。
-test('视觉隐藏的 <h2> 只在 IAM tab 渲染', () => {
+// 回归锁定：标题层级由设置模块自身连续表达，不再用视觉隐藏 <h2> 补 IAM 的层级。
+test('设置页标题层级由模块自身 h2/h3 连续表达，不再使用视觉隐藏标题', () => {
   const view = read('./platform/views/PlatformConsoleView.vue')
-  assert.match(
-    view,
-    /<h2 v-if="hasActiveFilteredSettingsTab && activeSettingsTab === 'iam'" class="shared-visually-hidden">/,
-  )
-  assert.equal((view.match(/shared-visually-hidden/g) || []).length, 1, '只允许一处视觉隐藏标题')
-  const css = read('./shared/styles/global-ux.css')
-  const hidden = ruleBody(css, '.shared-visually-hidden')
-  // 必须保留在可访问性树中：用 1px 裁剪盒，而不是 display:none / visibility:hidden。
-  assert.match(hidden, /position:\s*absolute/)
-  assert.match(hidden, /clip-path:\s*inset\(50%\)/)
-  assert.doesNotMatch(hidden, /display:\s*none|visibility:\s*hidden/)
+  assert.doesNotMatch(view, /shared-visually-hidden/, '设置页不再补视觉隐藏标题')
+  const iam = read('./platform/iam/components/IamSettingsModule.vue')
+  assert.match(iam, /<h2 id="iam-management-guide-title">按归属、职责和例外分层管理<\/h2>/)
+  assert.doesNotMatch(iam, /<h3 id="iam-management-guide-title">/)
 })

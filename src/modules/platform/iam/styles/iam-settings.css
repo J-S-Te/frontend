@@ -124,7 +124,7 @@
 }
 .iam-management-guide-copy { min-width: 0; }
 .iam-management-guide .iam-section-kicker { margin-bottom: 6px; }
-.iam-management-guide h3 {
+.iam-management-guide h2 {
   margin: 0;
   color: var(--ink-1);
   font-size: 16px;
