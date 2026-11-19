@@ -321,6 +321,7 @@ test('商机详情工作台：指标通栏、340px 关键资料栏、底部操�
   const mainAt = view.indexOf('class="crm-opportunity-main"')
   assert.ok(headerEnd >= 0 && metricsAt > headerEnd, '指标必须位于头部之后')
   assert.ok(metricsAt < mainAt, '指标必须移出主栏，位于工作区之前')
+  assert.match(style, /\.crm-modal > article\.crm-opportunity-detail \{[\s\S]*?width: min\(1400px, calc\(100vw - 24px\)\)/)
   assert.match(style, /\.crm-opportunity-workspace \{[^}]*grid-template-columns: minmax\(0, 1fr\) 340px/)
   assert.match(style, /\.crm-opportunity-main \{ grid-column: 1; grid-row: 1;/)
   assert.match(style, /\.crm-opportunity-side-rail \{[\s\S]*?grid-column: 2;[\s\S]*?grid-row: 1;/)
