@@ -71,17 +71,17 @@ onBeforeUnmount(() => { if (resetTimer) clearTimeout(resetTimer) })
   align-items: flex-start;
   gap: 12px;
   padding: 14px 16px;
-  border: 1px solid var(--danger-border, #f3b4b4);
-  border-left: 3px solid var(--danger, #dc2626);
+  border: 1px solid var(--danger-border);
+  border-left: 3px solid var(--danger);
   border-radius: 10px;
-  background: var(--danger-soft, #fee2e2);
-  color: var(--danger-text, #b91c1c);
+  background: var(--danger-soft);
+  color: var(--danger-text);
 }
 .license-problem[data-tone="warning"] {
-  border-color: var(--warning-border, #fbd9a8);
-  border-left-color: var(--warning, #d97706);
+  border-color: var(--warning-border);
+  border-left-color: var(--warning);
   background: var(--warning-soft);
-  color: var(--warning-text, #b45309);
+  color: var(--warning-text);
 }
 .license-problem-icon { flex: 0 0 auto; width: 18px; height: 18px; margin-top: 1px; }
 .license-problem-body { display: grid; flex: 1 1 auto; gap: 4px; min-width: 0; }

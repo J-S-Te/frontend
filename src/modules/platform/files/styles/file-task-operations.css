@@ -3,7 +3,7 @@
 .filetask-module__eyebrow { display: inline-block; margin-bottom: 7px; color: var(--primary-ink); font-size: 12px; font-weight: 800; letter-spacing: .12em; }
 .filetask-module h2, .filetask-card h3 { margin: 0; color: var(--text); }
 .filetask-module h2 { font-size: 22px; }.filetask-module p { margin: 7px 0 0; color: var(--text-muted); font-size: 14px; line-height: 1.65; }
-.filetask-module__error { margin: 0; border: 1px solid var(--danger-border, #f3b4b4); border-radius: 8px; background: var(--danger-soft); color: var(--danger-text); padding: 10px 13px; font-size: 14px; overflow-wrap: anywhere; word-break: break-word; }
+.filetask-module__error { margin: 0; border: 1px solid var(--danger-border); border-radius: 8px; background: var(--danger-soft); color: var(--danger-text); padding: 10px 13px; font-size: 14px; overflow-wrap: anywhere; word-break: break-word; }
 .filetask-module__empty { margin: 0; border: 1px solid var(--chip-brand, #dbeafe); border-radius: 10px; background: var(--primary-soft); color: var(--primary-ink, #1e40af); padding: 14px 16px; }
 .filetask-guide { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
 .filetask-guide > div { display: grid; gap: 5px; padding: 14px 16px; border: 1px solid var(--chip-brand, #dbeafe); border-radius: 10px; background: var(--surface-tint, #f8fbff); }

@@ -134,7 +134,7 @@ const emit = defineEmits(['toggle-all'])
 }
 .iam-batch-import-table tbody td {
   padding: 10px 12px;
-  border-bottom: 1px solid var(--line-2, #eef2f7);
+  border-bottom: 1px solid var(--line-2);
   color: var(--ink-2, #374151);
   vertical-align: middle;
   overflow-wrap: anywhere;

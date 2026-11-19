@@ -116,7 +116,7 @@
   color: var(--warning-ink, #92400e);
   font-size: 12px;
   line-height: 1.55;
-  border: 1px solid var(--warning-border, #fbd9a8);
+  border: 1px solid var(--warning-border);
   border-radius: 8px;
   background: var(--warning-soft);
 }
@@ -207,7 +207,7 @@
   color: var(--danger-text);
   font-size: 12px;
   line-height: 1.5;
-  border: 1px solid var(--danger-border, #f3b4b4);
+  border: 1px solid var(--danger-border);
   border-radius: 8px;
   background: var(--danger-soft);
 }
