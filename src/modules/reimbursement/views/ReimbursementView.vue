@@ -51,6 +51,7 @@ import { createCommandRunner, createRequestID, formatMinor, toMinor, timeoutSign
 
 import { getReimbursementSession } from '../api/reimbursement.js'
 import { useAuthorizationRefresh } from '@/modules/shared/composables/useAuthorizationRefresh.js'
+import { authorizationScopeKey } from '@/modules/shared/authz/authorizationSnapshot.js'
 import { ensureReimbursementSession, logoutReimbursement, reimbursementAPI as api,
   startReimbursementLogin } from '../api/reimbursement.js'
 import { policyFields, policyFormFrom, policyPayload } from '../policy.js'
@@ -65,7 +66,12 @@ const router = useRouter()
 const session = ref(null)
 // 侧栏与角色卡跟随服务端当前授权：页面重新可见或定时重读，避免历史角色残留。
 if (typeof useAuthorizationRefresh === 'function') useAuthorizationRefresh(async () => {
-  session.value = await getReimbursementSession({ force: true })
+  const next = await getReimbursementSession({ force: true })
+  const changed = authorizationScopeKey(session.value) !== authorizationScopeKey(next)
+  session.value = next
+  if (!changed) return
+  // 授权变化后重读当前分区；否则旧权限导致的加载失败会一直停留在页面。
+  await load()
 })
 const menuOpen = ref(false)
 const loading = ref(false)

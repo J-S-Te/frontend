@@ -125,6 +125,10 @@ async function request(path, options = {}) {
     })
   }
   if (!response.ok) {
+    // 403 可能是岗位模板刚变更但页面仍持旧快照：通知会话刷新立即复核并重读当前工作区。
+    if (response.status === 403 && typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
+      window.dispatchEvent(new Event('dsh:authorization-denied'))
+    }
     const error = projectRequestError(body, response, requestContext, {
       fallback: '项目操作未完成，请稍后重试。',
       outcomeUnknown: isMutation && ([408, 502, 504].includes(response.status)

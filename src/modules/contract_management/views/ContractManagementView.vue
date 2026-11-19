@@ -170,7 +170,13 @@ const router = useRouter()
 const session = ref(null)
 // 侧栏角色跟随服务端当前授权：页面重新可见或定时重读，避免历史角色残留。
 if (typeof useAuthorizationRefresh === 'function') useAuthorizationRefresh(async () => {
-  session.value = await getContractSession({ force: true })
+  const next = await getContractSession({ force: true })
+  const changed = authorizationScopeKey(session.value) !== authorizationScopeKey(next)
+  session.value = next
+  if (!changed) return
+  // 权限范围变化后重读业务数据，清掉因旧快照产生的加载失败，不等用户手动刷新。
+  clearContractAuthorizationData()
+  await loadBusinessData()
 })
 const sessionError = ref('')
 const businessDataErrors = ref({})

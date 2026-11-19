@@ -212,6 +212,9 @@ export async function request(path, options = {}) {
     },
   }, requestContext)
   const body = await readResponse(response, requestContext)
+  if (response.status === 403 && typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
+    window.dispatchEvent(new Event('dsh:authorization-denied'))
+  }
   if (!response.ok) {
     const error = new CRMAPIError(body?.message || `HTTP ${response.status}`, {
       method,

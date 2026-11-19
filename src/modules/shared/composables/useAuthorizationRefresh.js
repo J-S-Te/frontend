@@ -30,9 +30,13 @@ export function useAuthorizationRefresh(refresh, { intervalMs = 15000 } = {}) {
     if (document.visibilityState === 'visible') void run()
   }
 
+  // 业务请求已确认 403 时立即复核会话，不等待下一个定时周期。
+  function onAuthorizationDenied() { void run() }
+
   onMounted(() => {
     document.addEventListener('visibilitychange', onVisible)
     window.addEventListener('focus', onVisible)
+    window.addEventListener('dsh:authorization-denied', onAuthorizationDenied)
     timer = window.setInterval(() => void run(), intervalMs)
   })
 
@@ -40,6 +44,7 @@ export function useAuthorizationRefresh(refresh, { intervalMs = 15000 } = {}) {
     stopped = true
     document.removeEventListener('visibilitychange', onVisible)
     window.removeEventListener('focus', onVisible)
+    window.removeEventListener('dsh:authorization-denied', onAuthorizationDenied)
     window.clearInterval(timer)
   })
 }

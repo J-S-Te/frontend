@@ -190,6 +190,10 @@ async function request(path, options = {}) {
   }
   if (!response.ok) {
     if (response.status === 401) {
+    // 403 可能是岗位模板刚变更但当前页面仍持旧快照：立即触发会话复核，不等定时器。
+    if (response.status === 403 && typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
+      window.dispatchEvent(new Event('dsh:authorization-denied'))
+    }
       const authError = new ContractAuthError(formatUserError(body, { status: response.status, fallback: '合同系统登录状态已失效，请重新登录。' }), {
         status: response.status,
         code: body?.code,
