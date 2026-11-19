@@ -405,7 +405,7 @@
 
 .console-main {
   min-height: 100vh;
-  margin-left: 248px;
+  margin-left: var(--shell-sidebar);
 }
 
 .console-topbar {

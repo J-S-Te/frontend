@@ -10,6 +10,7 @@ const popoverSource = await readFile(new URL('./components/ProjectNotificationPo
 const notificationSource = await readFile(new URL('./composables/useProjectNotifications.js', import.meta.url), 'utf8')
 const displaySource = await readFile(new URL('./projectDisplay.js', import.meta.url), 'utf8')
 const styles = await readFile(new URL('./styles/project-management.css', import.meta.url), 'utf8')
+const globalStyles = await readFile(new URL('../platform/shared/styles/main.css', import.meta.url), 'utf8')
 const pickerSource = await readFile(new URL('./components/ServiceItemPicker.vue', import.meta.url), 'utf8')
 const searchableSelectSource = await readFile(new URL('./components/SearchableSelect.vue', import.meta.url), 'utf8')
 const penetrationWorkPackageSource = await readFile(new URL('./components/PenetrationWorkPackageCard.vue', import.meta.url), 'utf8')
@@ -319,11 +320,11 @@ test('项目管理页面视觉基线对齐 V1.1 SPA 原型（Element Plus 形态
     '--pm-content': '#f0f2f5', '--pm-sunken': '#f5f7fa',
     '--pm-row-hover': '#f5f7fa', '--pm-th-bg': '#fafbfc',
     '--pm-line': '#dcdfe6', '--pm-line-soft': '#ebeef5', '--pm-line-strong': '#c0c4cc', '--pm-card-border': '#f2f6fc',
-    '--pm-sidebar': '#001529', '--pm-sidebar-hover': '#1f2d3d',
-    '--pm-sidebar-text': '#c0c4cc', '--pm-sidebar-dot': '#334155', '--pm-sidebar-badge': '#f56c6c',
-    '--pm-green': '#67c23a', '--pm-green-soft': '#f0f9eb', '--pm-green-border': '#e1f3d8', '--pm-green-text': '#3f7a1f',
-    '--pm-amber': '#e6a23c', '--pm-amber-soft': '#fdf6ec', '--pm-amber-border': '#faecd8', '--pm-amber-text': '#9c5b00',
-    '--pm-red': '#f56c6c', '--pm-red-soft': '#fef0f0', '--pm-red-border': '#fde2e2', '--pm-red-text': '#b3382f',
+    '--pm-sidebar': 'var(--sidebar)', '--pm-sidebar-hover': 'var(--sidebar-hover)',
+    '--pm-sidebar-text': 'var(--text-4)', '--pm-sidebar-dot': '#334155', '--pm-sidebar-badge': '#f56c6c',
+    '--pm-green': 'var(--success)', '--pm-green-soft': 'var(--success-soft)', '--pm-green-border': 'var(--success-border)', '--pm-green-text': 'var(--success-text)',
+    '--pm-amber': 'var(--warning)', '--pm-amber-soft': 'var(--warning-soft)', '--pm-amber-border': 'var(--warning-border)', '--pm-amber-text': 'var(--warning-text)',
+    '--pm-red': 'var(--danger)', '--pm-red-soft': 'var(--danger-soft)', '--pm-red-border': 'var(--danger-border)', '--pm-red-text': 'var(--danger-text)',
     '--pm-sky': '#0ea5e9', '--pm-sky-soft': '#ecf5ff', '--pm-sky-border': '#c6e2ff', '--pm-sky-text': '#0369a1',
     '--pm-violet': '#8b5cf6', '--pm-violet-soft': '#f5f3ff', '--pm-violet-border': '#ddd6fe', '--pm-violet-text': '#6d28d9',
     '--pm-gray': '#909399', '--pm-gray-soft': '#f4f4f5', '--pm-gray-border': '#e9e9eb', '--pm-gray-text': '#606266',
@@ -331,7 +332,7 @@ test('项目管理页面视觉基线对齐 V1.1 SPA 原型（Element Plus 形态
     '--pm-fs-display': '28px', '--pm-fs-title': '20px', '--pm-fs-subtitle': '15px',
     '--pm-fs-card': '15px', '--pm-fs-base': '14px', '--pm-fs-ui': '13px', '--pm-fs-sm': '13px',
     '--pm-fs-label': '12px', '--pm-fs-hint': '12px', '--pm-fs-micro': '11px', '--pm-fs-nano': '11px',
-    '--pm-w-sidebar': '210px', '--pm-h-topbar': '56px',
+    '--pm-w-sidebar': 'var(--shell-sidebar)', '--pm-h-topbar': '56px',
     '--pm-w-drawer': '420px', '--pm-w-modal': '560px',
     '--pm-h-control': '32px', '--pm-h-button': '32px',
     '--pm-r-xs': '4px', '--pm-r-sm': '6px', '--pm-r-md': '8px',
@@ -340,7 +341,7 @@ test('项目管理页面视觉基线对齐 V1.1 SPA 原型（Element Plus 形态
     '--pm-z-drawer': '41', '--pm-z-modal': '50', '--pm-z-toast': '60',
   }
   for (const [token, value] of Object.entries(specTokens)) {
-    assert.match(css, new RegExp(`${token}:\\s*${value};`), `${token} must be ${value}`)
+    assert.match(css, new RegExp(`${token}:\\s*${value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')};`), `${token} must be ${value}`)
   }
   // 侧栏选中态直接引用品牌填充色，深色主题另有第二套取值。
   assert.match(css, /--pm-sidebar-active: var\(--pm-primary\);/)
@@ -693,10 +694,19 @@ test('服务项操作台使用可搜索的服务项卡片选择器而不是原�
 })
 
 test('项目管理系统的文本/底色组合满足 WCAG 2.1 AA 对比度', () => {
+  const tokenValues = new Map([
+    ...globalStyles.matchAll(/(--[\w-]+):\s*([^;]+);/g),
+    ...styles.matchAll(/(--[\w-]+):\s*([^;]+);/g),
+  ].map((match) => [match[1], match[2].trim()]))
   const token = (name) => {
-    const match = styles.match(new RegExp(`${name}:\\s*(#[0-9a-f]{6});`))
-    assert.ok(match, `missing color token ${name}`)
-    return match[1]
+    let value = tokenValues.get(name)
+    for (let depth = 0; depth < 6 && value; depth += 1) {
+      const alias = value.match(/^var\((--[\w-]+)\)$/)
+      if (!alias) break
+      value = tokenValues.get(alias[1])
+    }
+    assert.match(value || '', /^#[0-9a-f]{6}$/i, `missing color token ${name}`)
+    return value
   }
   const luminance = (hex) => {
     const channels = [1, 3, 5].map((offset) => parseInt(hex.slice(offset, offset + 2), 16) / 255)

@@ -5,6 +5,15 @@
   outline-offset: 2px;
 }
 
+/* 焦点环统一：各壳层内部的键盘焦点都用同一宽度与品牌色，模块自己的
+   3px/半透明写法在同等或更低优先级下不再分叉。 */
+:root :is(.console-page, .contract-app, .pm-page, .crm-page, .da-shell,
+  .settlement-page, .expense-canvas, .portal-page)
+  :is(button, a, input, select, textarea, [tabindex]):focus-visible {
+  outline: 2px solid var(--focus-ring, var(--primary));
+  outline-offset: 2px;
+}
+
 :where(h1, h2, h3, h4, section, article) { scroll-margin-top: 72px; }
 
 /* 视觉隐藏但保留在可访问性树中（1px 裁剪盒，不用 display:none / visibility:hidden）。
