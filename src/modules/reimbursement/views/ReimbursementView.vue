@@ -1,4 +1,5 @@
 <script setup>
+import { useNotificationBadge } from '@/modules/shared/composables/useNotificationBadge.js'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { onBeforeRouteLeave, onBeforeRouteUpdate, useRoute, useRouter } from 'vue-router'
 import AppShell from '../../shared/components/AppShell.vue'
@@ -312,6 +313,10 @@ const workspace = computed(() => String(route.params.section || 'dashboard'))
 const section = computed(() => workspaceSection(workspace.value))
 const title = computed(() => sections.find(([key]) => key === workspace.value)?.[1] || '工作台')
 // 页面描述与原型每个页面标题下方的一句话说明对齐；不承载权限或业务结论。
+const notificationUnread = useNotificationBadge({
+  session: () => can('expense.claim.read') ? session.value : null,
+  inboxVisible: () => section.value === 'messages',
+})
 const sectionDescriptions = {
   dashboard: '查看当前账号的待办、关键指标与常用入口。',
   invoices: '查看已上传票据台账；人工复核、生成费用草稿与异常处理都在受控范围内完成。',
@@ -325,7 +330,7 @@ const sectionDescriptions = {
   recovery: '查询失败审批与集成任务，按受控流程恢复。',
   policies: '维护费用标准、审批路由与票据映射等政策版本。',
   analytics: '查看当前范围内的费用、退回率与项目成本统计。',
-  messages: '平台统一收件箱，展示审批待办与业务通知。',
+  messages: '查看审批结果、催办提醒和其他站内通知。',
 }
 const sectionIcons = {
   dashboard: 'nav-overview', invoices: 'nav-invoice', 'invoice-upload': 'nav-upload', 'invoice-abnormal': 'nav-exception',
@@ -2946,6 +2951,10 @@ onBeforeUnmount(() => {
     @logout="logout"
   >
     <template #topbar-actions>
+      <button v-if="can('expense.claim.read')" type="button" class="console-icon-button"
+        aria-label="站内通知" @click="navigate('messages')">
+        <ConsoleIcon name="bell" /><i v-if="notificationUnread"></i>
+      </button>
       <button type="button" class="expense-button" :disabled="loading || saving" @click="load">
         刷新
       </button>
@@ -3079,7 +3088,7 @@ onBeforeUnmount(() => {
         {{ conflictSnapshot.text }}
       </p>
       <RecoveryPanel v-if="section === 'recovery'" :permissions="session?.permissions || []" />
-      <ExpenseInbox v-if="section === 'messages'" />
+      <ExpenseInbox v-if="section === 'messages'" @unread-change="notificationUnread = $event" />
       <ArchiveBorrowPanel v-if="section === 'archives'" :archives="archives" />
       <section v-if="section === 'dashboard'" class="expense-dashboard">
         <article class="expense-role-card">

@@ -1,4 +1,5 @@
 <script setup>
+import { useNotificationBadge } from '@/modules/shared/composables/useNotificationBadge.js'
 import { useLoginUsername } from '@/modules/shared/composables/useLoginUsername.js'
 import { agingDisplayRows } from "../utils/agingDisplay.js";
 import { allowedSections, permissionCheck, canLoad as canLoadKey } from "../utils/capabilities.js";
@@ -129,7 +130,12 @@ function canLoad(loader) {
   return canLoadKey(loaderKeys.get(loader), can);
 }
 const allowed = computed(() => allowedSections(settlementSession.value));
-const showNotifications = ref(false), notificationUnread = ref(0)
+const showNotifications = ref(false)
+const notificationUnread = useNotificationBadge({
+  session: () => settlementSession.value,
+  sourceApplication: 'settlement',
+  inboxVisible: () => showNotifications.value,
+})
 const sections = [
   ["dashboard", "经营看板", "nav-overview"],
   ["receivables", "收款计划", "nav-receivables"],
@@ -1015,7 +1021,7 @@ watch(invoiceDetailID, load);
             <ConsoleIcon name="nav-approval" /><i v-if="taskStatusKnown && taskGroups.some(group => group.items.length)" class="settlement-notification-dot" /><span v-else-if="!taskStatusKnown" aria-hidden="true">?</span>
           </button>
           <div class="settlement-topbar-notifications">
-            <button class="settlement-topbar-icon" type="button" title="站内通知" aria-label="站内通知" @click="showNotifications = !showNotifications">
+            <button class="settlement-topbar-icon" type="button" title="站内通知" aria-label="站内通知" :aria-expanded="showNotifications" @click="showNotifications = !showNotifications">
               <ConsoleIcon name="bell" /><i v-if="notificationUnread" class="settlement-notification-dot" />
             </button>
             <div v-if="showNotifications" class="settlement-notification-popover" role="dialog" aria-label="站内通知">
