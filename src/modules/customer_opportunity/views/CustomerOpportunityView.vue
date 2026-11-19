@@ -2,6 +2,7 @@
 import { useLoginUsername } from '@/modules/shared/composables/useLoginUsername.js'
 import OperationToast from '@/modules/shared/components/OperationToast.vue'
 import ListState from '@/modules/shared/components/ListState.vue'
+import FilterBar from '@/modules/shared/components/FilterBar.vue'
 import PaginationBar from '@/modules/shared/components/PaginationBar.vue'
 import { useConfirmDialog } from '@/modules/shared/composables/useConfirmDialog.js'
 import ConfirmDialog from '@/modules/shared/components/ConfirmDialog.vue'
@@ -314,6 +315,8 @@ const renderedPage = reactive({ number: 1, size: 20, total: 0 })
 const filters = reactive({ keyword: '', status: '', stage: '', overdue: '' })
 const initialPresaleState = presaleStateFromQuery(route.query)
 const presaleFilters = reactive(initialPresaleState.filters)
+const presaleFiltersExpanded = ref(false)
+const customerFiltersExpanded = ref(false)
 presaleView.value = initialPresaleState.view
 presaleColumnLimit.value = initialPresaleState.columnLimit
 const presalePage = reactive({ number: initialPresaleState.page, size: initialPresaleState.pageSize, total: 0 })
@@ -3511,18 +3514,56 @@ onMounted(async () => {
           <small class="crm-stat-hint">{{ card.hint }}</small>
         </article>
       </div>
-      <section v-if="activeSection === 'customers'" class="crm-toolbar crm-customer-filters">
-        <label>客户号 / 名称<input v-model.trim="customerFilters.keyword" @keyup.enter="loadCurrent" maxlength="100"></label>
-        <label>类型<input v-model.trim="customerFilters.type" list="customer-type-options" placeholder="业主 / 三方 等" maxlength="64"></label><datalist id="customer-type-options"><option v-for="item in customerTypeSuggestions" :key="item" :value="item"></option></datalist><label>行业<select v-model="customerFilters.industry"><option value="">全部行业</option><option v-for="item in customerIndustryOptions" :key="item" :value="item">{{ item }}</option></select></label><label>区域<input v-model.trim="customerFilters.region" list="customer-region-options" placeholder="华北 / 华南 等" maxlength="64"></label><datalist id="customer-region-options"><option v-for="item in customerRegionSuggestions" :key="item" :value="item"></option></datalist>
-        <label>信用等级<select v-model="customerFilters.credit_level"><option value="">全部等级</option><option value="A">A · 优秀</option><option value="B">B · 良好</option><option value="C">C · 关注</option><option value="D">D · 差</option></select></label><label>查找负责人<input v-model.trim="customerOwnerKeyword" type="search" placeholder="输入姓名" @keyup.enter.prevent="loadCustomerOwnerOptions" maxlength="100"></label>
-        <label v-if="!customerOwnerOptionsError">负责人<select v-model="customerFilters.owner_id" :disabled="customerOwnerOptionsLoading"><option value="">全部负责人</option><option v-for="user in customerOwnerOptions" :key="user.user_id" :value="user.user_id">{{ platformUserName(user) }}</option></select></label>
-        <p v-else class="crm-note">基础平台负责人目录暂不可用，当前不能按负责人筛选。</p>
-        <label>状态<select v-model="customerFilters.status"><option value="">全部状态</option><option v-for="item in customerStatusOptions" :key="item.value" :value="item.value">{{ item.label }}</option></select></label><label>创建开始<input v-model="customerFilters.created_from" type="date"></label><label>创建结束<input v-model="customerFilters.created_to" type="date"></label><label>最近跟进开始<input v-model="customerFilters.last_followup_from" type="date"></label><label>最近跟进结束<input v-model="customerFilters.last_followup_to" type="date"></label><label>排序<select v-model="customerFilters.sort_by"><option value="updated_at">更新时间</option><option value="created_at">创建时间</option><option value="name">客户名称</option><option value="last_followup_at">最近跟进</option><option value="opportunity_amount_sum">商机金额汇总</option></select></label><label>顺序<select v-model="customerFilters.sort_order"><option value="desc">降序</option><option value="asc">升序</option></select></label>
-        <button type="button" :disabled="customerOwnerOptionsLoading" @click="loadCustomerOwnerOptions">{{ customerOwnerOptionsLoading ? '查找中…' : '查找负责人' }}</button><button @click="page.number = 1; loadCurrent()">查询</button><button @click="customerFilters.view = customerFilters.view === 'table' ? 'cards' : 'table'; syncCustomerURL()">{{ customerFilters.view === 'table' ? '卡片视图' : '列表视图' }}</button>
-      </section>
+      <FilterBar v-if="activeSection === 'customers'" as="section" class="crm-toolbar crm-customer-filters" :field-count="14" v-model:expanded="customerFiltersExpanded" label="客户筛选">
+        <template #fields>
+          <label>客户号 / 名称<input v-model.trim="customerFilters.keyword" @keyup.enter="loadCurrent" maxlength="100"></label>
+          <label>类型<input v-model.trim="customerFilters.type" list="customer-type-options" placeholder="业主 / 三方 等" maxlength="64"></label>
+          <label>行业<select v-model="customerFilters.industry"><option value="">全部行业</option><option v-for="item in customerIndustryOptions" :key="item" :value="item">{{ item }}</option></select></label>
+          <label>区域<input v-model.trim="customerFilters.region" list="customer-region-options" placeholder="华北 / 华南 等" maxlength="64"></label>
+          <label>信用等级<select v-model="customerFilters.credit_level"><option value="">全部等级</option><option value="A">A · 优秀</option><option value="B">B · 良好</option><option value="C">C · 关注</option><option value="D">D · 差</option></select></label>
+          <label>查找负责人<input v-model.trim="customerOwnerKeyword" type="search" placeholder="输入姓名" @keyup.enter.prevent="loadCustomerOwnerOptions" maxlength="100"></label>
+          <label v-if="!customerOwnerOptionsError">负责人<select v-model="customerFilters.owner_id" :disabled="customerOwnerOptionsLoading"><option value="">全部负责人</option><option v-for="user in customerOwnerOptions" :key="user.user_id" :value="user.user_id">{{ platformUserName(user) }}</option></select></label>
+          <label>状态<select v-model="customerFilters.status"><option value="">全部状态</option><option v-for="item in customerStatusOptions" :key="item.value" :value="item.value">{{ item.label }}</option></select></label>
+          <label>创建开始<input v-model="customerFilters.created_from" type="date"></label>
+          <label>创建结束<input v-model="customerFilters.created_to" type="date"></label>
+          <label>最近跟进开始<input v-model="customerFilters.last_followup_from" type="date"></label>
+          <label>最近跟进结束<input v-model="customerFilters.last_followup_to" type="date"></label>
+          <label>排序<select v-model="customerFilters.sort_by"><option value="updated_at">更新时间</option><option value="created_at">创建时间</option><option value="name">客户名称</option><option value="last_followup_at">最近跟进</option><option value="opportunity_amount_sum">商机金额汇总</option></select></label>
+          <label>顺序<select v-model="customerFilters.sort_order"><option value="desc">降序</option><option value="asc">升序</option></select></label>
+        </template>
+        <template #actions>
+          <button type="button" :disabled="customerOwnerOptionsLoading" @click="loadCustomerOwnerOptions">{{ customerOwnerOptionsLoading ? '查找中…' : '查找负责人' }}</button>
+          <button @click="page.number = 1; loadCurrent()">查询</button>
+          <button @click="customerFilters.view = customerFilters.view === 'table' ? 'cards' : 'table'; syncCustomerURL()">{{ customerFilters.view === 'table' ? '卡片视图' : '列表视图' }}</button>
+        </template>
+      </FilterBar>
+      <datalist id="customer-type-options"><option v-for="item in customerTypeSuggestions" :key="item" :value="item"></option></datalist>
+      <datalist id="customer-region-options"><option v-for="item in customerRegionSuggestions" :key="item" :value="item"></option></datalist>
+      <p v-if="activeSection === 'customers' && customerOwnerOptionsError" class="crm-note">基础平台负责人目录暂不可用，当前不能按负责人筛选。</p>
       <p v-if="activeSection === 'customers' && customerOwnerOptionsError" class="crm-alert error" role="alert">{{ customerOwnerOptionsError }} 请在基础平台人员目录恢复后重试负责人筛选。</p>
       <section v-else-if="activeSection === 'opportunities' && canReadOpportunities" class="crm-toolbar crm-opportunity-toolbar"><label>关键词<input v-model.trim="filters.keyword" @keyup.enter="loadCurrent" maxlength="100"></label><label v-if="!boardMode">状态<select v-model="filters.status"><option value="">全部状态</option><option v-for="item in opportunityStatusOptions" :key="item.value" :value="item.value">{{ item.label }}</option></select></label><label v-if="!boardMode">阶段<select v-model="filters.stage"><option value="">全部阶段</option><option v-for="item in opportunityStageOptions" :key="item" :value="item">{{ item }}</option></select></label><button @click="loadCurrent">查询</button><button @click="boardMode = !boardMode; loadCurrent()">{{ boardMode ? '列表视图' : '阶段看板' }}</button></section>
-      <form v-else-if="activeSection === 'presale' && !presaleCreatePage" class="crm-toolbar crm-presale-filters" @submit.prevent="applyPresaleFilters"><label>申请编号<input v-model.trim="presaleFilters.request_no" maxlength="32"></label><label>商机<select v-model="presaleFilters.opportunity_id"><option value="">全部可见商机</option><option v-for="item in presaleFilterOptions.opportunities" :key="item.value" :value="String(item.value)">{{ item.label }}</option></select></label><label>申请人<select v-model="presaleFilters.applicant_id"><option value="">全部可见申请人</option><option v-for="item in presaleFilterOptions.applicants" :key="item.value" :value="item.value">{{ presalePersonOptionLabel(item) }}</option></select></label><label>执行人<select v-model="presaleFilters.assignee_id"><option value="">全部可见执行人</option><option v-for="item in presaleFilterOptions.assignees" :key="item.value" :value="item.value">{{ presalePersonOptionLabel(item) }}</option></select></label><label>状态<select v-model="presaleFilters.status"><option value="">全部可见状态</option><option v-for="item in presaleFilterOptions.statuses" :key="item.value" :value="item.value">{{ presaleOptionText('statuses', item) }}</option></select></label><label>场地<select v-model="presaleFilters.venue"><option value="">全部可见场地</option><option v-for="item in presaleFilterOptions.venues" :key="item.value" :value="item.value">{{ presaleOptionText('venues', item) }}</option></select></label><label>紧急度<select v-model="presaleFilters.urgency"><option value="">全部可见级别</option><option v-for="item in presaleFilterOptions.urgencies" :key="item.value" :value="item.value">{{ presaleOptionText('urgencies', item) }}</option></select></label><label>申请开始<input v-model="presaleFilters.created_from" type="datetime-local"></label><label>申请结束（不含）<input v-model="presaleFilters.created_to" type="datetime-local"></label><label>期望开始<input v-model="presaleFilters.expected_from" type="datetime-local"></label><label>期望结束（不含）<input v-model="presaleFilters.expected_to" type="datetime-local"></label><label>是否超时<select v-model="presaleFilters.overdue"><option value="">全部</option><option value="true">已超时</option><option value="false">未超时</option></select></label><label>排序<select v-model="presaleFilters.sort_by"><option value="created_at">申请时间</option><option value="updated_at">更新时间</option><option value="expected_end">期望结束</option><option value="request_no">申请编号</option></select></label><label>顺序<select v-model="presaleFilters.sort_order"><option value="desc">降序</option><option value="asc">升序</option></select></label><button class="primary">查询</button><button type="button" @click="switchPresaleView(presaleView === 'list' ? 'board' : 'list')">{{ presaleView === 'list' ? '状态看板' : '列表视图' }}</button></form>
+      <FilterBar v-else-if="activeSection === 'presale' && !presaleCreatePage" as="form" class="crm-toolbar crm-presale-filters" :field-count="14" v-model:expanded="presaleFiltersExpanded" label="售前申请筛选" @submit.prevent="applyPresaleFilters">
+        <template #fields>
+          <label>申请编号<input v-model.trim="presaleFilters.request_no" maxlength="32"></label>
+          <label>商机<select v-model="presaleFilters.opportunity_id"><option value="">全部可见商机</option><option v-for="item in presaleFilterOptions.opportunities" :key="item.value" :value="String(item.value)">{{ item.label }}</option></select></label>
+          <label>申请人<select v-model="presaleFilters.applicant_id"><option value="">全部可见申请人</option><option v-for="item in presaleFilterOptions.applicants" :key="item.value" :value="item.value">{{ presalePersonOptionLabel(item) }}</option></select></label>
+          <label>执行人<select v-model="presaleFilters.assignee_id"><option value="">全部可见执行人</option><option v-for="item in presaleFilterOptions.assignees" :key="item.value" :value="item.value">{{ presalePersonOptionLabel(item) }}</option></select></label>
+          <label>状态<select v-model="presaleFilters.status"><option value="">全部可见状态</option><option v-for="item in presaleFilterOptions.statuses" :key="item.value" :value="item.value">{{ presaleOptionText('statuses', item) }}</option></select></label>
+          <label>场地<select v-model="presaleFilters.venue"><option value="">全部可见场地</option><option v-for="item in presaleFilterOptions.venues" :key="item.value" :value="item.value">{{ presaleOptionText('venues', item) }}</option></select></label>
+          <label>紧急度<select v-model="presaleFilters.urgency"><option value="">全部可见级别</option><option v-for="item in presaleFilterOptions.urgencies" :key="item.value" :value="item.value">{{ presaleOptionText('urgencies', item) }}</option></select></label>
+          <label>申请开始<input v-model="presaleFilters.created_from" type="datetime-local"></label>
+          <label>申请结束（不含）<input v-model="presaleFilters.created_to" type="datetime-local"></label>
+          <label>期望开始<input v-model="presaleFilters.expected_from" type="datetime-local"></label>
+          <label>期望结束（不含）<input v-model="presaleFilters.expected_to" type="datetime-local"></label>
+          <label>是否超时<select v-model="presaleFilters.overdue"><option value="">全部</option><option value="true">已超时</option><option value="false">未超时</option></select></label>
+          <label>排序<select v-model="presaleFilters.sort_by"><option value="created_at">申请时间</option><option value="updated_at">更新时间</option><option value="expected_end">期望结束</option><option value="request_no">申请编号</option></select></label>
+          <label>顺序<select v-model="presaleFilters.sort_order"><option value="desc">降序</option><option value="asc">升序</option></select></label>
+        </template>
+        <template #actions>
+          <button class="primary">查询</button>
+          <button type="button" @click="switchPresaleView(presaleView === 'list' ? 'board' : 'list')">{{ presaleView === 'list' ? '状态看板' : '列表视图' }}</button>
+        </template>
+      </FilterBar>
       <div v-if="activeSection === 'presale' && !presaleCreatePage" class="crm-presale-viewbar">
         <div class="crm-tabs" role="group" aria-label="按售前申请状态筛选">
           <button v-for="tab in presaleStatusTabs" :key="tab.value || 'all'" type="button" :class="{ active: presaleFilters.status === tab.value }" :aria-pressed="presaleFilters.status === tab.value" @click="usePresaleStatusFilter(tab.value)">

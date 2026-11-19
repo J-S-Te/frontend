@@ -157,6 +157,17 @@
   font-weight: 500;
 }
 .crm-toolbar > button { align-self: flex-end; }
+/* FilterBar 把字段包进 .ui-filter-fields，保持与直接子 label 相同的 180px 弹性布局。 */
+.crm-toolbar > .ui-filter-fields > label {
+  display: grid;
+  min-width: 0;
+  flex: 1 1 180px;
+  gap: 7px;
+  color: var(--crm-secondary);
+  font-size: var(--fs-xs);
+  font-weight: 500;
+}
+.crm-toolbar > .ui-filter-actions > button { align-self: flex-end; }
 .crm-panel { min-width: 0; padding: 18px; }
 .crm-credit-panel { display: grid; gap: 16px; }
 .crm-credit-summary { display: flex; align-items: center; flex-wrap: wrap; gap: 16px; padding: 16px; border: 1px solid var(--primary-border, #bfdbfe); border-radius: 12px; background: var(--primary-soft, #eff6ff); }
