@@ -13,8 +13,6 @@ const read = (path) => readFile(new URL(path, import.meta.url), 'utf8')
 // guide -> 锚点来源。私有壳层检查三处；AppShell 壳层检查共享外壳 + 返回门户声明。
 const PRIVATE_SHELLS = {
   contract: '../../contract_management/views/ContractManagementView.vue',
-  project: '../../project_management/views/ProjectManagementView.vue',
-  data_analysis: '../../data_analysis/views/DashboardShellView.vue',
 }
 const APP_SHELL_VIEWS = {
   platform: '../views/PlatformConsoleView.vue',
@@ -22,6 +20,8 @@ const APP_SHELL_VIEWS = {
   settlement: '../../settlement/views/SettlementView.vue',
   customer_opportunity: '../../customer_opportunity/views/CustomerOpportunityView.vue',
   customer_portal: '../../customer_portal/views/CustomerPortalView.vue',
+  project: '../../project_management/views/ProjectManagementView.vue',
+  data_analysis: '../../data_analysis/views/DashboardShellView.vue',
 }
 
 test('注册 guide 的每一步锚点都在对应模板中存在', async () => {

@@ -93,7 +93,7 @@ test('系统配置侧边栏合并为一个规则配置中心并保留细粒度�
   assert.match(source, /item\.sectionKeys\?\.find\(\(section\) => allowed\.has\(section\)\)/)
   assert.match(source, /item\.sectionKeys\.some\(\(section\) => allowed\.has\(section\)\)/)
   assert.match(source, /item\.sectionKeys\.includes\(activeSection\.value\)/)
-  assert.match(source, /@click="navigateNavItem\(item\)"/)
+  assert.match(source, /@navigate="onShellNavigate"/)
   // 合同拆解规则仍是独立入口。
   assert.match(source, /\{ key: 'split-rules', label: '合同拆解规则', icon: 'nav-decomposition' \}/)
 })
@@ -180,8 +180,8 @@ test('高密度工作台在桌面与窄屏下保持可导航和可理解', () =>
   // 侧栏默认展开全部业务分组（对齐原型完整导航），分组标题仍是真实按钮并暴露展开状态。
   assert.match(source, /const collapsedNavGroups = ref\(new Set\(\)\)/)
   assert.match(source, /collapsedNavGroups\.value = new Set\(\)/)
-  assert.match(source, /class="pm-nav-label" :aria-expanded="!isNavGroupCollapsed\(group\)" @click="toggleNavGroup\(group\)"/)
-  assert.match(source, /v-show="!isNavGroupCollapsed\(group\)" class="pm-nav-group-items"/)
+  assert.match(source, /collapsible: true/)
+  assert.match(source, /:nav-groups="appShellNavGroups"/)
   assert.match(styles, /\.pm-nav-label\[aria-expanded="false"\] i \{ transform: rotate\(-45deg\); \}/)
 
   // 单面板页面只保留页级标题，工具栏和业务表单不再重复同名 H2。
@@ -227,25 +227,27 @@ test('服务项拆解项目切换器并入合同概览，避免脱离上下文�
 test('项目系统侧边栏返回门户，用户控件负责撤销应用会话', () => {
   assert.match(source, /logoutCurrentSession\(\)/)
   assert.match(source, /router\.replace\(\{ name: 'login', query: \{ reason: 'session-ended' \} \}\)/)
-  assert.equal((source.match(/@click="logoutSystem"/g) || []).length, 1)
-  assert.equal((source.match(/@click="returnToUnifiedPortal"/g) || []).length, 1)
-  assert.match(source, /返回子系统门户/)
+  assert.match(source, /@logout="logoutSystem"/)
+  assert.match(source, /key: '__portal', label: '返回子系统门户'/)
+  assert.match(source, /if \(key === '__portal'\) returnToUnifiedPortal\(\)/)
   assert.match(source, /aria-label="退出应用系统"/)
 })
 
 test('顶栏右上角只剩通知铃铛与账号头像，账号名与退出入口移到侧栏底部', () => {
   // 对齐客户与商机系统：顶栏右上角不再出现账号名、角色列表与退出按钮；
   // 原先那串角色码（admin / business_admin / …）在顶栏横铺一行，既不是导航也不是操作。
-  const topTools = source.match(/<div class="pm-top-tools">([\s\S]*?)<\/div>/)
-  assert.ok(topTools, '顶栏工具区应存在')
-  assert.match(topTools[1], /class="pm-icon-button pm-notification-button"/)
-  assert.match(topTools[1], /class="pm-topbar-avatar" aria-hidden="true">\{\{ currentUserInitial \}\}/)
-  assert.doesNotMatch(topTools[1], /class="pm-user"/)
-  assert.doesNotMatch(topTools[1], /logoutSystem|currentUserName|currentUserRoleLabel/)
-  // 账号行落在侧栏底部，结构与客户与商机系统一致：头像 + 账号名 + 角色名 + 退出按钮。
-  assert.match(source, /<div class="pm-sidebar-user subsystem-sidebar-user">\s*<span class="pm-avatar" aria-hidden="true">\{\{ currentUserInitial \}\}<\/span>\s*<span class="pm-user-copy"><strong :title="currentUserName">\{\{ currentUserName \}\}<\/strong><small :title="currentUserRoleLabel">\{\{ currentUserRoleLabel \}\}<\/small><\/span>\s*<button class="pm-logout" type="button" :disabled="isLoggingOut" aria-label="退出应用系统" @click="logoutSystem"><ConsoleIcon name="logout" \/><\/button>\s*<\/div>/)
-  // 账号行必须是侧栏的最后一个元素（离开侧栏之前），否则又会被顶栏那类信息挤上去。
-  assert.match(source, /<button class="pm-logout"[\s\S]*?<\/div>\s*<\/aside>/)
+  const topActions = source.match(/<template #topbar-actions>([\s\S]*?)<\/template>/)
+  assert.ok(topActions, '顶栏工具区应存在')
+  assert.match(topActions[1], /class="pm-icon-button pm-notification-button"/)
+  assert.match(topActions[1], /class="pm-topbar-avatar" aria-hidden="true">\{\{ currentUserInitial \}\}/)
+  assert.doesNotMatch(topActions[1], /class="pm-user"/)
+  assert.doesNotMatch(topActions[1], /logoutSystem|currentUserName|currentUserRoleLabel/)
+  // 账号行落在侧栏底部插槽：头像 + 账号名 + 角色名 + 退出按钮。
+  const userSlot = source.match(/<template #sidebar-user>([\s\S]*?)<\/template>/)
+  assert.ok(userSlot, '侧栏用户区插槽应存在')
+  assert.match(userSlot[1], /<span class="pm-avatar" aria-hidden="true">\{\{ currentUserInitial \}\}<\/span>/)
+  assert.match(userSlot[1], /<span class="pm-user-copy"><strong :title="currentUserName">\{\{ currentUserName \}\}<\/strong><small :title="currentUserRoleLabel">\{\{ currentUserRoleLabel \}\}<\/small><\/span>/)
+  assert.match(userSlot[1], /<button class="pm-logout" type="button" :disabled="isLoggingOut" aria-label="退出应用系统" @click="logoutSystem">/)
   // 角色名取服务端角色目录（不硬编码角色码），目录未就绪时退回角色码，不出现空白。
   assert.match(source, /const currentUserInitial = computed\(\(\) => \{/)
   assert.match(source, /const currentUserRoleLabel = computed\(\(\) => \{/)

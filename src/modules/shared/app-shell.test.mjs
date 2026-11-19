@@ -280,6 +280,7 @@ const documentedProps = [
   'topbarClass', 'contentClass', 'mainId', 'menuOpen', 'navLabel', 'navGroups', 'navEmpty',
   'brandName', 'brandSubtitle', 'brandIcon', 'crumb', 'topbarAvatar', 'userName', 'userRole',
   'avatarText', 'logoutLabel', 'logoutDisabled', 'sidebarBaseClass', 'mainBaseClass',
+  'navItemClass', 'navLabelClass',
 ]
 
 const documentedSlots = [

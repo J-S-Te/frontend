@@ -415,18 +415,15 @@ test('七个子系统壳层 + 平台控制台补齐统一锚点', () => {
   assert.match(appShell, /:data-first-run-anchor="item\.anchor \|\| undefined"/)
   for (const [name, source] of [
     ['结算', settlementView], ['报销', reimbursementView], ['CRM', crmView], ['客户门户', customerPortalView], ['平台控制台', platformConsoleView],
+    ['项目', projectView], ['数据看板', dataAnalysisView],
   ]) {
     assert.match(source, /anchor: ["']subsystem-portal["']/, `${name} 缺少返回门户锚点声明`)
   }
 
-  // 私有壳层各自声明三处锚点。
-  for (const [name, source] of [
-    ['合同', contractView], ['项目', projectView], ['数据看板', dataAnalysisView],
-  ]) {
-    assert.match(source, /data-first-run-anchor="subsystem-nav"/, `${name} 缺少导航锚点`)
-    assert.match(source, /data-first-run-anchor="subsystem-title"/, `${name} 缺少标题/主操作区锚点`)
-    assert.match(source, /data-first-run-anchor="subsystem-portal"/, `${name} 缺少返回门户锚点`)
-  }
+  // 仅合同仍保留私有壳层，由模板各自声明三处锚点。
+  assert.match(contractView, /data-first-run-anchor="subsystem-nav"/, '合同 缺少导航锚点')
+  assert.match(contractView, /data-first-run-anchor="subsystem-title"/, '合同 缺少标题/主操作区锚点')
+  assert.match(contractView, /data-first-run-anchor="subsystem-portal"/, '合同 缺少返回门户锚点')
   // 不新增导航结构：仍复用既有“返回子系统门户”入口。
   for (const source of [contractView, projectView, dataAnalysisView]) {
     assert.match(source, /返回子系统门户/)
