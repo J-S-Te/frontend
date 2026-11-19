@@ -1023,7 +1023,7 @@ function formatFileSize(bytes) {
   width: min(1040px, 100%);
   max-height: min(900px, calc(100vh - 40px));
   overflow: hidden;
-  border-color: #dce5f1;
+  border-color: var(--line);
   background: var(--surface-card);
 }
 
@@ -1071,7 +1071,7 @@ function formatFileSize(bytes) {
   padding: 20px 28px 18px;
   color: var(--ink-4, #94a3b8);
   font-size: 12.5px;
-  border-bottom: 1px solid var(--line-2, #eef2f7);
+  border-bottom: 1px solid var(--line-2);
   background: var(--surface-card);
 }
 .iam-batch-import-steps li {
@@ -1086,7 +1086,7 @@ function formatFileSize(bytes) {
   height: 1px;
   flex: 1;
   margin: 0 14px 0 6px;
-  background: var(--line-1, #e6e9ef);
+  background: var(--line-1);
 }
 .iam-batch-import-steps li.done:not(:last-child)::after { background: #93b4f8; }
 .iam-batch-import-steps li b {
@@ -1097,7 +1097,7 @@ function formatFileSize(bytes) {
   height: 28px;
   flex: 0 0 auto;
   border-radius: 999px;
-  border: 1px solid var(--line-1, #e6e9ef);
+  border: 1px solid var(--line-1);
   background: var(--bg-soft, #fafbfd);
   color: var(--ink-4, #94a3b8);
   font-size: 12px;
@@ -1184,14 +1184,14 @@ function formatFileSize(bytes) {
 .iam-batch-import-dropzone em { color: var(--ink-4, #94a3b8); font-size: 11.5px; font-style: normal; }
 .iam-batch-import-dropzone code {
   background: var(--surface-card);
-  border: 1px solid #dce5f1;
+  border: 1px solid var(--line);
   border-radius: 6px;
   padding: 0 4px;
   font-size: 11.5px;
 }
 
 .iam-batch-import-error {
-  background: var(--danger-soft, #fee2e2);
+  background: var(--danger-soft);
   border: 1px solid var(--danger-border);
   color: var(--danger);
   padding: 12px 14px;
@@ -1220,12 +1220,12 @@ function formatFileSize(bytes) {
   gap: 6px;
   padding: 6px 9px;
   border-radius: 8px;
-  background: var(--surface-raised, #fff);
-  border: 1px solid var(--danger-border, #f3b4b4);
+  background: var(--surface-raised);
+  border: 1px solid var(--danger-border);
   color: var(--ink-2, #374151);
   font-size: 12px;
 }
-.iam-batch-import-issue-list .issue-row { flex: 0 0 auto; font-weight: 600; color: var(--danger-text, #b91c1c); }
+.iam-batch-import-issue-list .issue-row { flex: 0 0 auto; font-weight: 600; color: var(--danger-text); }
 /* 行号是可点的定位入口：点击后切到该行所在页并高亮原始行（按钮样式贴合文本）。 */
 .iam-batch-import-issue-list button.issue-row {
   padding: 0;
@@ -1233,12 +1233,12 @@ function formatFileSize(bytes) {
   background: none;
   font: inherit;
   font-weight: 600;
-  color: var(--danger-text, #b91c1c);
+  color: var(--danger-text);
   text-decoration: underline dotted;
   cursor: pointer;
 }
 .iam-batch-import-issue-list button.issue-row:hover { text-decoration-style: solid; }
-.iam-batch-import-issue-list button.issue-row:focus-visible { outline: 2px solid var(--danger-text, #b91c1c); outline-offset: 2px; }
+.iam-batch-import-issue-list button.issue-row:focus-visible { outline: 2px solid var(--danger-text); outline-offset: 2px; }
 .iam-batch-import-issue-list .issue-field { flex: 0 0 auto; color: var(--ink-3, #6b7280); }
 .iam-batch-import-issue-list .issue-message { flex: 1 1 220px; min-width: 0; overflow-wrap: anywhere; }
 .iam-batch-import-issue-report small { display: block; margin-top: 6px; color: var(--ink-3, #6b7280); font-size: 11.5px; }
@@ -1251,7 +1251,7 @@ function formatFileSize(bytes) {
   align-items: flex-start;
   padding: 16px 18px;
   background: var(--bg-soft, #fafbfd);
-  border: 1px solid var(--line-1, #e6e9ef);
+  border: 1px solid var(--line-1);
   border-radius: 12px;
 }
 .iam-batch-import-sample-copy { min-width: 0; flex: 1; }
@@ -1278,7 +1278,7 @@ function formatFileSize(bytes) {
   gap: 18px;
   padding: 14px 16px;
   background: linear-gradient(135deg, var(--surface-tint), #f5f8fd);
-  border: 1px solid var(--line-1, #e6e9ef);
+  border: 1px solid var(--line-1);
   border-radius: 12px;
 }
 .iam-batch-import-file { display: flex; align-items: center; gap: 11px; min-width: 0; }
@@ -1314,7 +1314,7 @@ function formatFileSize(bytes) {
   padding: 8px 10px;
   border-radius: 8px;
   background: var(--surface-card);
-  border: 1px solid var(--line-1, #e6e9ef);
+  border: 1px solid var(--line-1);
 }
 .iam-batch-import-stats .stat b { font-size: 16px; line-height: 1; }
 .iam-batch-import-stats .stat small { margin: 0; font-size: 11px; color: var(--ink-3, #6b7280); }
@@ -1371,7 +1371,7 @@ function formatFileSize(bytes) {
   min-height: 32px;
   padding: 4px 30px 4px 9px;
   color: var(--ink-2, #1e293b);
-  border: 1px solid var(--line-1, #e6e9ef);
+  border: 1px solid var(--line-1);
   border-radius: 8px;
   background: var(--surface-card);
 }
@@ -1382,7 +1382,7 @@ function formatFileSize(bytes) {
 }
 
 .iam-batch-import-table-wrap {
-  border: 1px solid var(--line-1, #e6e9ef);
+  border: 1px solid var(--line-1);
   border-radius: 12px;
   overflow: auto;
   max-height: min(480px, calc(100vh - 360px));
@@ -1402,12 +1402,12 @@ function formatFileSize(bytes) {
   font-weight: 600;
   color: var(--ink-2, #374151);
   padding: 11px 12px;
-  border-bottom: 1px solid var(--line-1, #e6e9ef);
+  border-bottom: 1px solid var(--line-1);
   white-space: nowrap;
 }
 .iam-batch-import-table tbody td {
   padding: 10px 12px;
-  border-bottom: 1px solid var(--line-2, #eef2f7);
+  border-bottom: 1px solid var(--line-2);
   color: var(--ink-2, #374151);
   vertical-align: middle;
   overflow-wrap: anywhere;
@@ -1448,11 +1448,11 @@ function formatFileSize(bytes) {
 }
 .iam-batch-import-result-icon svg { width: 28px; height: 28px; }
 .iam-batch-import-result-icon.success { color: var(--ok-1, #047857); background: var(--ok-soft, #ecfdf5); }
-.iam-batch-import-result-icon.danger { color: var(--danger-1, #b91c1c); background: var(--danger-soft, #fee2e2); }
+.iam-batch-import-result-icon.danger { color: var(--danger-1); background: var(--danger-soft); }
 .iam-batch-import-result h4 { margin: 2px 0 6px; color: var(--ink-1, #0a0f1c); font-size: 16px; }
 .iam-batch-credential-actions { display: flex; gap: 10px; flex-wrap: wrap; margin: 12px 0; }
 .iam-batch-import-result .iam-batch-import-table-wrap { width: 100%; }
-.iam-batch-import-result input[readonly] { width: min(260px, 100%); padding: 7px 10px; border: 1px solid var(--line-1, #dce5f1); border-radius: 6px; font-family: monospace; }
+.iam-batch-import-result input[readonly] { width: min(260px, 100%); padding: 7px 10px; border: 1px solid var(--line-1); border-radius: 6px; font-family: monospace; }
 .iam-batch-import-result .iam-form-alert { width: min(620px, 100%); justify-content: center; }
 .iam-batch-import-result .iam-form-alert.success {
   background: #f0fdf4;

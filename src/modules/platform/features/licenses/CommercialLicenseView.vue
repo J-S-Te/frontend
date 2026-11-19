@@ -786,9 +786,9 @@ onBeforeUnmount(() => {
      danger 故障/冲突、neutral 未知/未购买。正文永远带文字，不靠颜色单独表意。
    ========================================================================== */
 .license-page {
-  --license-ink: var(--text, #0f172a);
-  --license-body: var(--text-secondary, #475569);
-  --license-muted: var(--text-muted, #64748b);
+  --license-ink: var(--text);
+  --license-body: var(--text-secondary);
+  --license-muted: var(--text-muted);
   --license-border: var(--border, #e2e8f0);
   display: grid;
   gap: 18px;
@@ -814,8 +814,8 @@ onBeforeUnmount(() => {
 /* 顶部摘要卡 */
 .license-hero {
   --hero-tone: var(--primary);
-  --hero-soft: var(--primary-soft, #eff6ff);
-  --hero-ink: var(--primary-ink, var(--primary-dark, #1d4ed8));
+  --hero-soft: var(--primary-soft);
+  --hero-ink: var(--primary-ink, var(--primary-dark));
   position: relative;
   display: grid;
   gap: 18px;
@@ -823,15 +823,15 @@ onBeforeUnmount(() => {
   overflow: hidden;
   border: 1px solid var(--license-border);
   border-radius: 14px;
-  background: linear-gradient(180deg, var(--hero-soft) 0%, var(--surface-card, #fff) 72%);
+  background: linear-gradient(180deg, var(--hero-soft) 0%, var(--surface-card) 72%);
   box-shadow: var(--shadow-card);
 }
 .license-hero::before { content: ''; position: absolute; inset: 0 auto 0 0; width: 4px; background: var(--hero-tone); }
-.license-hero[data-tone="success"] { --hero-tone: var(--success, #16a34a); --hero-soft: var(--success-soft, #dcfce7); --hero-ink: var(--success-text, #15803d); }
-.license-hero[data-tone="warning"] { --hero-tone: var(--warning, #d97706); --hero-soft: var(--warning-soft); --hero-ink: var(--warning-text, #b45309); }
-.license-hero[data-tone="danger"] { --hero-tone: var(--danger, #dc2626); --hero-soft: var(--danger-soft, #fee2e2); --hero-ink: var(--danger-text, #b91c1c); }
-.license-hero[data-tone="info"] { --hero-tone: var(--primary, #2563eb); --hero-soft: var(--primary-soft, #eff6ff); --hero-ink: var(--primary-ink, var(--primary-dark, #1d4ed8)); }
-.license-hero[data-tone="neutral"] { --hero-tone: var(--text-faint, #94a3b8); --hero-soft: var(--surface-muted, #f8fafc); --hero-ink: var(--text-secondary, #475569); }
+.license-hero[data-tone="success"] { --hero-tone: var(--success); --hero-soft: var(--success-soft); --hero-ink: var(--success-text); }
+.license-hero[data-tone="warning"] { --hero-tone: var(--warning); --hero-soft: var(--warning-soft); --hero-ink: var(--warning-text); }
+.license-hero[data-tone="danger"] { --hero-tone: var(--danger); --hero-soft: var(--danger-soft); --hero-ink: var(--danger-text); }
+.license-hero[data-tone="info"] { --hero-tone: var(--primary); --hero-soft: var(--primary-soft); --hero-ink: var(--primary-ink, var(--primary-dark)); }
+.license-hero[data-tone="neutral"] { --hero-tone: var(--text-faint); --hero-soft: var(--surface-muted); --hero-ink: var(--text-secondary); }
 .license-hero .license-eyebrow { color: var(--hero-ink); }
 .license-hero-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; flex-wrap: wrap; }
 .license-hero-copy { display: grid; gap: 6px; min-width: 0; }
@@ -845,12 +845,12 @@ onBeforeUnmount(() => {
 /* 进度条 */
 .license-steps { display: flex; flex-wrap: wrap; gap: 12px 0; margin: 0; padding: 14px 0 0; border-top: 1px dashed var(--license-border); list-style: none; }
 .license-steps li { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 2px 8px; flex: 1 1 170px; min-width: 0; padding-right: 16px; }
-.license-steps li i { grid-row: span 2; display: grid; place-items: center; width: 22px; height: 22px; border: 1px solid var(--license-border); border-radius: 999px; background: var(--surface-card, #fff); color: var(--license-muted); font-size: 11px; font-style: normal; font-weight: 700; }
-.license-steps li.is-done i { border-color: transparent; background: var(--success-soft, #dcfce7); color: var(--success-text, #15803d); }
-.license-steps li.is-current i { border-color: transparent; background: var(--primary, #2563eb); color: var(--on-primary); }
+.license-steps li i { grid-row: span 2; display: grid; place-items: center; width: 22px; height: 22px; border: 1px solid var(--license-border); border-radius: 999px; background: var(--surface-card); color: var(--license-muted); font-size: 11px; font-style: normal; font-weight: 700; }
+.license-steps li.is-done i { border-color: transparent; background: var(--success-soft); color: var(--success-text); }
+.license-steps li.is-current i { border-color: transparent; background: var(--primary); color: var(--on-primary); }
 .license-step-label { font-size: 12.5px; font-weight: 600; color: var(--license-ink); }
 .license-steps li.is-todo .license-step-label { color: var(--license-muted); font-weight: 500; }
-.license-steps li.is-current .license-step-label { color: var(--primary-ink, var(--primary-dark, #1d4ed8)); }
+.license-steps li.is-current .license-step-label { color: var(--primary-ink, var(--primary-dark)); }
 .license-step-hint { grid-column: 2; color: var(--license-muted); font-size: 11px; line-height: 1.5; }
 
 /* 摘要事实 */
@@ -858,8 +858,8 @@ onBeforeUnmount(() => {
 .license-facts dt { color: var(--license-muted); font-size: 11.5px; }
 .license-facts dd { margin: 4px 0 0; color: var(--license-ink); font-size: 14px; font-weight: 600; overflow-wrap: anywhere; }
 .license-facts dd small { display: block; margin-top: 2px; color: var(--license-muted); font-size: 11px; font-weight: 400; }
-.license-facts dd small[data-tone="expired"] { color: var(--danger-text, #b91c1c); }
-.license-facts dd small[data-tone="soon"] { color: var(--warning-text, #b45309); }
+.license-facts dd small[data-tone="expired"] { color: var(--danger-text); }
+.license-facts dd small[data-tone="soon"] { color: var(--warning-text); }
 
 /* 区块 */
 .license-section { display: grid; gap: 14px; padding: 20px 22px; }
@@ -869,26 +869,26 @@ onBeforeUnmount(() => {
 .license-section-head .license-eyebrow { margin-bottom: 4px; }
 .license-note { max-width: 780px; color: var(--license-muted); font-size: 12.5px; line-height: 1.65; }
 .license-note-strong { color: var(--license-body); }
-.license-note code { padding: 1px 5px; border-radius: 4px; background: var(--surface-muted, #f8fafc); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; }
+.license-note code { padding: 1px 5px; border-radius: 4px; background: var(--surface-muted); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; }
 .license-head-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
 .license-loading { color: var(--license-muted); font-size: 13px; }
 
 /* 状态徽标 */
-.license-badge { display: inline-flex; align-items: center; padding: 2px 9px; border-radius: 999px; font-size: 11.5px; font-weight: 650; white-space: nowrap; color: var(--text-secondary, #475569); background: var(--surface-muted, #f8fafc); }
-.license-badge[data-tone="success"] { color: var(--success-text, #15803d); background: var(--success-soft, #dcfce7); }
-.license-badge[data-tone="info"] { color: var(--primary-ink, var(--primary-dark, #1d4ed8)); background: var(--primary-soft, #eff6ff); }
-.license-badge[data-tone="warning"] { color: var(--warning-text, #b45309); background: var(--warning-soft); }
-.license-badge[data-tone="danger"] { color: var(--danger-text, #b91c1c); background: var(--danger-soft, #fee2e2); }
-.license-badge[data-tone="neutral"] { color: var(--text-secondary, #475569); background: var(--surface-muted, #f8fafc); }
-.license-chip { display: inline-flex; align-items: center; padding: 2px 9px; border: 1px solid var(--license-border); border-radius: 999px; color: var(--license-muted); background: var(--surface-card, #fff); font-size: 11.5px; white-space: nowrap; }
-.license-flag { display: inline-flex; align-items: center; padding: 3px 11px; border-radius: 999px; font-size: 12px; font-weight: 650; white-space: nowrap; color: var(--text-secondary, #475569); background: var(--surface-muted, #f8fafc); }
-.license-flag[data-tone="success"] { color: var(--success-text, #15803d); background: var(--success-soft, #dcfce7); }
-.license-flag[data-tone="info"] { color: var(--primary-ink, var(--primary-dark, #1d4ed8)); background: var(--primary-soft, #eff6ff); }
-.license-flag[data-tone="warning"] { color: var(--warning-text, #b45309); background: var(--warning-soft); }
-.license-flag[data-tone="danger"] { color: var(--danger-text, #b91c1c); background: var(--danger-soft, #fee2e2); }
+.license-badge { display: inline-flex; align-items: center; padding: 2px 9px; border-radius: 999px; font-size: 11.5px; font-weight: 650; white-space: nowrap; color: var(--text-secondary); background: var(--surface-muted); }
+.license-badge[data-tone="success"] { color: var(--success-text); background: var(--success-soft); }
+.license-badge[data-tone="info"] { color: var(--primary-ink, var(--primary-dark)); background: var(--primary-soft); }
+.license-badge[data-tone="warning"] { color: var(--warning-text); background: var(--warning-soft); }
+.license-badge[data-tone="danger"] { color: var(--danger-text); background: var(--danger-soft); }
+.license-badge[data-tone="neutral"] { color: var(--text-secondary); background: var(--surface-muted); }
+.license-chip { display: inline-flex; align-items: center; padding: 2px 9px; border: 1px solid var(--license-border); border-radius: 999px; color: var(--license-muted); background: var(--surface-card); font-size: 11.5px; white-space: nowrap; }
+.license-flag { display: inline-flex; align-items: center; padding: 3px 11px; border-radius: 999px; font-size: 12px; font-weight: 650; white-space: nowrap; color: var(--text-secondary); background: var(--surface-muted); }
+.license-flag[data-tone="success"] { color: var(--success-text); background: var(--success-soft); }
+.license-flag[data-tone="info"] { color: var(--primary-ink, var(--primary-dark)); background: var(--primary-soft); }
+.license-flag[data-tone="warning"] { color: var(--warning-text); background: var(--warning-soft); }
+.license-flag[data-tone="danger"] { color: var(--danger-text); background: var(--danger-soft); }
 
 /* 六类状态说明：文字为主，颜色只是辅助 */
-.license-legend { display: flex; flex-wrap: wrap; gap: 6px 20px; margin: 0; padding: 10px 12px; border: 1px solid var(--license-border); border-radius: 10px; background: var(--surface-muted, #f8fafc); list-style: none; }
+.license-legend { display: flex; flex-wrap: wrap; gap: 6px 20px; margin: 0; padding: 10px 12px; border: 1px solid var(--license-border); border-radius: 10px; background: var(--surface-muted); list-style: none; }
 .license-legend li { display: inline-flex; align-items: center; gap: 7px; color: var(--license-muted); font-size: 11.5px; line-height: 1.6; }
 
 /* 逐应用卡片网格：auto-fit 自然落位（≥1280 四列），卡片近方形，窄屏单列。
@@ -909,27 +909,27 @@ onBeforeUnmount(() => {
 .license-app-meta { color: var(--license-muted); font-size: 11.5px; line-height: 1.55; overflow-wrap: anywhere; }
 
 /* 空状态 */
-.license-empty { display: grid; justify-items: start; gap: 8px; padding: 20px; border: 1px dashed var(--line-strong, #cbd5e1); border-radius: 10px; background: var(--surface-muted, #f8fafc); }
+.license-empty { display: grid; justify-items: start; gap: 8px; padding: 20px; border: 1px dashed var(--line-strong); border-radius: 10px; background: var(--surface-muted); }
 .license-empty p { max-width: 620px; color: var(--license-muted); font-size: 12.5px; line-height: 1.65; }
 
 /* 待生效许可证 */
-.license-pending { border-color: var(--primary-border, #bfdbfe); }
+.license-pending { border-color: var(--primary-border); }
 .license-pending-list { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
-.license-pending-list li { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; padding: 10px 14px; border: 1px solid var(--license-border); border-radius: 8px; background: var(--surface-muted, #f8fafc); }
+.license-pending-list li { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; padding: 10px 14px; border: 1px solid var(--license-border); border-radius: 8px; background: var(--surface-muted); }
 .license-pending-list strong { font-size: 13px; font-weight: 650; }
 
 /* 时钟保护与恢复面板：一次性凭据的写操作，风险说明先于输入框出现 */
-.license-clock { border-color: var(--danger-border, #f3b4b4); }
+.license-clock { border-color: var(--danger-border); }
 .license-clock-body { display: grid; gap: 12px; padding-top: 14px; border-top: 1px dashed var(--license-border); }
-.license-clock-risks { display: grid; gap: 6px; max-width: 760px; margin: 0; padding: 10px 14px 10px 30px; border: 1px solid var(--warning-border, #fbd9a8); border-radius: 10px; background: var(--warning-soft); color: var(--warning-text, #b45309); font-size: 12px; line-height: 1.65; }
-.license-clock-risks li::marker { color: var(--warning, #d97706); }
+.license-clock-risks { display: grid; gap: 6px; max-width: 760px; margin: 0; padding: 10px 14px 10px 30px; border: 1px solid var(--warning-border); border-radius: 10px; background: var(--warning-soft); color: var(--warning-text); font-size: 12px; line-height: 1.65; }
+.license-clock-risks li::marker { color: var(--warning); }
 
 
 /* 导入区 */
 .license-import-body { display: grid; gap: 14px; }
-.license-drop { border: 1px dashed var(--line-strong, #cbd5e1); border-radius: 12px; background: var(--surface-muted, #f8fafc); transition: border-color .15s, background .15s; }
-.license-drop[data-active="true"] { border-color: var(--primary, #2563eb); background: var(--primary-soft, #eff6ff); }
-.license-drop:focus-within { border-color: var(--primary, #2563eb); box-shadow: 0 0 0 3px var(--primary-soft, #eff6ff); }
+.license-drop { border: 1px dashed var(--line-strong); border-radius: 12px; background: var(--surface-muted); transition: border-color .15s, background .15s; }
+.license-drop[data-active="true"] { border-color: var(--primary); background: var(--primary-soft); }
+.license-drop:focus-within { border-color: var(--primary); box-shadow: 0 0 0 3px var(--primary-soft); }
 .license-drop-label { display: grid; justify-items: center; gap: 6px; padding: 20px 16px; color: var(--license-body); font-size: 13px; text-align: center; cursor: pointer; }
 .license-drop-label :deep(svg) { width: 22px; height: 22px; color: var(--primary); }
 .license-drop-label small { color: var(--license-muted); font-size: 11.5px; }
@@ -937,9 +937,9 @@ onBeforeUnmount(() => {
 .license-drop-label input[type="file"] { width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); border: 0; }
 .license-field { display: grid; gap: 6px; color: var(--license-body); font-size: 12.5px; }
 .license-field > span { font-weight: 500; }
-.license-field input:not([type="file"]), .license-field textarea { width: 100%; max-width: 760px; padding: 9px 11px; border: 1px solid var(--license-border); border-radius: 8px; background: var(--surface-card, #fff); color: var(--license-ink); font: inherit; font-size: 13px; box-sizing: border-box; }
+.license-field input:not([type="file"]), .license-field textarea { width: 100%; max-width: 760px; padding: 9px 11px; border: 1px solid var(--license-border); border-radius: 8px; background: var(--surface-card); color: var(--license-ink); font: inherit; font-size: 13px; box-sizing: border-box; }
 .license-field textarea { min-height: 96px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; line-height: 1.6; overflow-wrap: anywhere; resize: vertical; }
-.license-field input:not([type="file"]):focus, .license-field textarea:focus { border-color: var(--primary, #2563eb); box-shadow: 0 0 0 3px var(--primary-soft, #eff6ff); outline: 0; }
+.license-field input:not([type="file"]):focus, .license-field textarea:focus { border-color: var(--primary); box-shadow: 0 0 0 3px var(--primary-soft); outline: 0; }
 .license-field-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr)); gap: 14px; }
 .license-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
 .license-actions .license-note { margin: 0; max-width: 460px; }
@@ -948,16 +948,16 @@ onBeforeUnmount(() => {
 .license-preview { display: grid; gap: 12px; padding-top: 14px; border-top: 1px dashed var(--license-border); }
 .license-preview-head { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
 .license-changes { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
-.license-changes li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 10px; padding: 9px 12px; border: 1px solid var(--license-border); border-radius: 8px; background: var(--surface-muted, #f8fafc); font-size: 12.5px; }
-.license-changes li.risky { border-color: var(--danger-border, #f3b4b4); background: var(--danger-soft, #fee2e2); color: var(--danger-text, #b91c1c); }
-.license-changes em { color: var(--warning-text, #b45309); font-size: 11.5px; font-style: normal; font-weight: 600; }
+.license-changes li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 10px; padding: 9px 12px; border: 1px solid var(--license-border); border-radius: 8px; background: var(--surface-muted); font-size: 12.5px; }
+.license-changes li.risky { border-color: var(--danger-border); background: var(--danger-soft); color: var(--danger-text); }
+.license-changes em { color: var(--warning-text); font-size: 11.5px; font-style: normal; font-weight: 600; }
 .license-check { display: flex; align-items: flex-start; gap: 8px; padding: 10px 12px; border-radius: 8px; color: var(--license-body); font-size: 12.5px; line-height: 1.6; cursor: pointer; }
-.license-check input { flex: 0 0 auto; width: 15px; height: 15px; margin: 2px 0 0; accent-color: var(--primary, #2563eb); }
-.license-check-risk { border: 1px solid var(--danger-border, #f3b4b4); background: var(--danger-soft, #fee2e2); color: var(--danger-text, #b91c1c); }
+.license-check input { flex: 0 0 auto; width: 15px; height: 15px; margin: 2px 0 0; accent-color: var(--primary); }
+.license-check-risk { border: 1px solid var(--danger-border); background: var(--danger-soft); color: var(--danger-text); }
 
 /* 授权事件：页内只留最近几条单行摘要，行本身（LicenseEventRow）自带样式。
    这里不再有 max-height / overflow / 页内分页：完整列表搬到右侧抽屉。 */
-.license-events { background: var(--surface-card, #fff); }
+.license-events { background: var(--surface-card); }
 .license-events h3 { font-size: 15px; }
 .license-event-list { display: grid; margin: 0; padding: 0; list-style: none; }
 .license-event-list[aria-busy="true"] { opacity: .72; }
@@ -967,7 +967,7 @@ onBeforeUnmount(() => {
 /* 运行详情锚点：从“去激活”跳转过来时承接焦点。 */
 .license-runtime-anchor { scroll-margin-top: 12px; outline: none; }
 
-.license-alert { margin: 0; padding: 12px 14px; border: 1px solid var(--danger-border, #f3b4b4); border-radius: 10px; background: var(--danger-soft, #fee2e2); color: var(--danger-text, #b91c1c); font-size: 13px; }
+.license-alert { margin: 0; padding: 12px 14px; border: 1px solid var(--danger-border); border-radius: 10px; background: var(--danger-soft); color: var(--danger-text); font-size: 13px; }
 
 /* 卡片网格自己负责列数，这里只剩顶部摘要卡在中等宽度下的对齐调整。 */
 @media (max-width: 1200px) {
