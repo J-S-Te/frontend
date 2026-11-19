@@ -22,6 +22,10 @@ const pickerStub = {
 // 参数：name 为真实组件文件名；request 为受控目录读取替身。
 // 返回值：保留真实条件、证据按钮和只读状态的Vue组件。
 function component(name = './ClaimEvidenceTravelPanel.vue', request = async () => ({ items: [] })) {
+  // 图标只负责视觉，测试用空 svg 替身避免递归编译图标资源表。
+  if (name.endsWith('ConsoleIcon.vue')) {
+    return { props: ['name'], setup: () => () => Vue.h('svg') }
+  }
   const { descriptor } = parse(readFileSync(new URL(name, import.meta.url), 'utf8'))
   const compiled = compileScript(descriptor, { id: 'claim-tail-travel', inlineTemplate: true })
   const bindings = { approvalNodeLabel, businessReasonLabel, reimbursementAPI: { request } }

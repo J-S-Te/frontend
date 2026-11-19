@@ -280,6 +280,7 @@ const documentedProps = [
   'topbarClass', 'contentClass', 'mainId', 'menuOpen', 'navLabel', 'navGroups', 'navEmpty',
   'brandName', 'brandSubtitle', 'brandIcon', 'crumb', 'topbarAvatar', 'userName', 'userRole',
   'avatarText', 'logoutLabel', 'logoutDisabled', 'sidebarBaseClass', 'mainBaseClass',
+  'navItemClass', 'navLabelClass',
 ]
 
 const documentedSlots = [
@@ -686,27 +687,14 @@ test('迁移后的平台控制台视图不再自建 shell 标记，改用 <AppSh
   assert.match(viewSource, /import AppShell from '@\/modules\/shared\/components\/AppShell\.vue'/)
 })
 
-test('迁移视图保留共享外壳插槽的页面内容（标题层级与隐藏 h2）', () => {
+test('迁移视图的标题层级由模块自身连续，不再用隐藏 h2 补位', () => {
   assert.match(viewSource, /<h1>系统设置<\/h1>/)
   assert.match(viewSource, /<h2>平台基础信息<\/h2>/)
+  assert.doesNotMatch(viewSource, /shared-visually-hidden/, '标题层级应由模块自身 h2/h3 连续表达')
 
-  // 隐藏小节标题只允许一条，且条件必须与 IamSettingsModule 的渲染条件一致，否则标题大纲会重复或断裂。
-  const hiddenHeadings = astElements(viewAst).filter((node) => (
-    node.tag === 'h2' && astClassTokens(node).includes('shared-visually-hidden')
-  ))
-  assert.equal(hiddenHeadings.length, 1, 'shared-visually-hidden 的隐藏 <h2> 只能有一条')
-  const condition = directiveExpression(hiddenHeadings[0], 'if')
-  assert.equal(condition, "hasActiveFilteredSettingsTab && activeSettingsTab === 'iam'")
-
-  const iamModule = astElements(viewAst).find((node) => node.tag === 'IamSettingsModule')
-  assert.ok(iamModule, '视图必须仍然渲染 IamSettingsModule')
-  assert.equal(directiveExpression(iamModule, 'else-if'), condition, '隐藏 h2 的条件必须与 IAM 面板一致')
-  assert.ok(hiddenHeadings[0].loc.start.offset < iamModule.loc.start.offset, '隐藏 h2 必须位于 IAM 面板之前')
-
-  assert.equal(hiddenHeadings[0].children.filter((child) => child.type === 1).length, 0,
-    '隐藏 <h2> 只允许文本插值，不能嵌套其他元素')
-  const interpolation = hiddenHeadings[0].children.find((child) => child.type === 5)
-  assert.equal(interpolation?.content.content.trim(), 'activeSettingsTabLabel')
+  const iamSource = readFileSync(new URL('../platform/iam/components/IamSettingsModule.vue', import.meta.url), 'utf8')
+  assert.match(iamSource, /<h2 id="iam-management-guide-title">按归属、职责和例外分层管理<\/h2>/)
+  assert.doesNotMatch(iamSource, /<h3 id="iam-management-guide-title">/)
 })
 
 // ===========================================================================

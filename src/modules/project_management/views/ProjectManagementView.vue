@@ -2,9 +2,7 @@
 import { useLoginUsername } from '@/modules/shared/composables/useLoginUsername.js'
 import { authorizationScopeKey } from '@/modules/shared/authz/authorizationSnapshot.js'
 import { useDialogFocusTrap } from '@/modules/shared/composables/useDialogFocusTrap.js'
-import ShellPreferences from '@/modules/shared/components/ShellPreferences.vue'
-import { useSidebarNavigation } from '@/modules/shared/composables/useSidebarNavigation.js'
-import { readSidebarCollapsed } from '@/modules/shared/utils/shellPreferences.js'
+import AppShell from '@/modules/shared/components/AppShell.vue'
 import OperationToast from '@/modules/shared/components/OperationToast.vue'
 import ListState from '@/modules/shared/components/ListState.vue'
 import LoadingState from '@/modules/shared/components/LoadingState.vue'
@@ -337,6 +335,31 @@ function isNavItemActive(item) {
 function navigateNavItem(item) {
   navigate(item.targetSection || item.key)
 }
+// AppShell 导航数据：可见分组 + 当前项高亮 + 返回门户。
+const appShellNavGroups = computed(() => [
+  ...visibleNavGroups.value.map((group) => ({
+    label: group.label,
+    collapsible: true,
+    items: group.items.map((item) => ({
+      key: item.key,
+      label: item.label,
+      icon: item.icon,
+      note: item.badge || '',
+      active: isNavItemActive(item),
+    })),
+  })),
+  {
+    label: '平台能力',
+    items: [{ key: '__portal', label: '返回子系统门户', icon: 'nav-portal', anchor: 'subsystem-portal' }],
+  },
+])
+function onShellNavigate(key) {
+  if (key === '__portal') returnToUnifiedPortal()
+  else {
+    const item = visibleNavGroups.value.flatMap((group) => group.items).find((entry) => entry.key === key)
+    if (item) navigateNavItem(item)
+  }
+}
 const collapsedNavGroups = ref(new Set())
 function isNavGroupCollapsed(group) {
   return collapsedNavGroups.value.has(group.label)
@@ -355,14 +378,6 @@ watch([activeSection, () => navigation.value.sections.join('|')], () => {
 }, { immediate: true })
 const currentMeta = computed(() => pageMeta[activeSection.value])
 const mobileMenuOpen = ref(false)
-// 汉堡按钮引用：抽屉用 Escape 收起后焦点交还给它，键盘用户不会掉进已隐藏的侧栏。
-const mobileMenuButton = ref(null)
-const sidebarElement = ref(null)
-const desktopSidebarCollapsed = ref(readSidebarCollapsed())
-const { hidden: sidebarHidden } = useSidebarNavigation({
-  open: mobileMenuOpen, container: sidebarElement, trigger: mobileMenuButton,
-  breakpoint: 900, collapsed: desktopSidebarCollapsed,
-})
 const keyword = ref('')
 const statusFilter = ref('')
 const reportStageFilter = ref('')
@@ -3763,8 +3778,7 @@ function closeActiveOverlay() {
   if (createOpen.value) { createOpen.value = false; return true }
   if (notificationOpen.value) { closeNotifications(); return true }
   if (kpiSettingsOpen.value) { dismissKpiSettings({ restoreFocus: true }); return true }
-  // 收起抽屉后把焦点交还汉堡按钮（与共享外壳一致），否则焦点会留在已隐藏的侧栏里。
-  if (mobileMenuOpen.value) { mobileMenuOpen.value = false; mobileMenuButton.value?.focus?.(); return true }
+  // 抽屉的 Escape 与焦点返还由共享 AppShell 统一处理。
   return false
 }
 
@@ -4005,68 +4019,62 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="pm-shell" :class="{ 'is-sidebar-collapsed': desktopSidebarCollapsed }">
-    <aside ref="sidebarElement" :inert="sidebarHidden" :aria-hidden="sidebarHidden ? 'true' : undefined" tabindex="-1" id="pm-sidebar" class="pm-sidebar" :class="{ open: mobileMenuOpen }">
-      <div class="pm-brand">
-        <span class="pm-brand-mark">PS</span>
-        <span><b>项目服务管理</b><small>PROJECT SERVICE</small></span>
-        <!-- P2-2：移动抽屉必须有可见关闭按钮；桌面隐藏，打开抽屉时才能点。 -->
-        <button class="pm-close-menu" type="button" aria-label="关闭菜单" @click="mobileMenuOpen = false"><ConsoleIcon name="close" /></button>
-      </div>
-      <nav class="pm-nav" aria-label="项目管理导航" data-first-run-anchor="subsystem-nav">
-        <div v-for="group in visibleNavGroups" :key="group.label" class="pm-nav-group">
-          <button type="button" class="pm-nav-label" :aria-expanded="!isNavGroupCollapsed(group)" @click="toggleNavGroup(group)"><span>{{ group.label }}</span><i aria-hidden="true"></i></button>
-          <div v-show="!isNavGroupCollapsed(group)" class="pm-nav-group-items">
-            <button v-for="item in group.items" :key="item.key" class="pm-nav-item" :class="{ active: isNavItemActive(item) }" :aria-current="isNavItemActive(item) ? 'page' : undefined" @click="navigateNavItem(item)">
-              <ConsoleIcon :name="item.icon" /><span>{{ item.label }}</span><em v-if="item.badge">{{ item.badge }}</em>
-            </button>
-          </div>
-        </div>
-        <div class="pm-nav-group">
-          <div class="pm-nav-label">平台能力</div>
-          <button class="pm-nav-item" type="button" data-first-run-anchor="subsystem-portal" @click="returnToUnifiedPortal"><ConsoleIcon name="nav-portal" /><span>返回子系统门户</span></button>
-        </div>
-      </nav>
-      <div class="pm-sidebar-user subsystem-sidebar-user">
-        <span class="pm-avatar" aria-hidden="true">{{ currentUserInitial }}</span>
-        <span class="pm-user-copy"><strong :title="currentUserName">{{ currentUserName }}</strong><small :title="currentUserRoleLabel">{{ currentUserRoleLabel }}</small></span>
-        <button class="pm-logout" type="button" :disabled="isLoggingOut" aria-label="退出应用系统" @click="logoutSystem"><ConsoleIcon name="logout" /></button>
-      </div>
-    </aside>
-    <div v-if="mobileMenuOpen" class="pm-menu-mask" @click="mobileMenuOpen = false"></div>
+<AppShell
+    page-class="pm-shell"
+    sidebar-base-class="console-sidebar pm-sidebar"
+    main-base-class="console-main pm-main"
+    brand-class="pm-brand"
+    sidebar-user-class="pm-sidebar-user subsystem-sidebar-user"
+    content-class="pm-shell-content"
+    topbar-class="pm-topbar"
+    nav-item-class="pm-nav-item"
+    nav-label-class="pm-nav-label"
+    nav-label="项目管理导航"
+    :nav-groups="appShellNavGroups"
+    :menu-open="mobileMenuOpen"
+    @update:menu-open="mobileMenuOpen = $event"
+    @navigate="onShellNavigate"
+    @logout="logoutSystem"
+  >
+    <template #brand>
+      <span class="pm-brand-mark">PS</span>
+      <span><b>项目服务管理</b><small>PROJECT SERVICE</small></span>
+      <button class="pm-close-menu" type="button" aria-label="关闭菜单" @click="mobileMenuOpen = false"><ConsoleIcon name="close" /></button>
+    </template>
+    <template #sidebar-user>
+      <span class="pm-avatar" aria-hidden="true">{{ currentUserInitial }}</span>
+      <span class="pm-user-copy"><strong :title="currentUserName">{{ currentUserName }}</strong><small :title="currentUserRoleLabel">{{ currentUserRoleLabel }}</small></span>
+      <button class="pm-logout" type="button" :disabled="isLoggingOut" aria-label="退出应用系统" @click="logoutSystem"><ConsoleIcon name="logout" /></button>
+    </template>
+    <template #breadcrumb>
+      <div class="pm-breadcrumb"><span>项目服务管理</span><b>/</b><template v-if="activeSection === 'project_detail'"><button type="button" class="pm-crumb-link" @click="navigate('projects')">项目列表</button><b>/</b><strong>{{ detailProject?.id || '项目详情' }}</strong></template><strong v-else>{{ currentMeta[0] }}</strong></div>
+    </template>
+    <template #topbar-actions>
+      <button class="pm-icon-button pm-notification-button" aria-label="通知" aria-controls="project-notifications" :aria-expanded="notificationOpen" @click="toggleNotifications"><ConsoleIcon name="bell" /><em v-if="notificationCount">{{ notificationCount }}</em></button>
+      <span class="pm-topbar-avatar" aria-hidden="true">{{ currentUserInitial }}</span>
+      <Transition name="pm-notification-pop">
+        <ProjectNotificationPopover
+          v-if="notificationOpen"
+          :count="notificationCount"
+          :loading="notificationLoading"
+          :error="notificationError"
+          :items="notificationItems"
+          :action-id="notificationActionID"
+          :approvals="approvalItems"
+          :approval-loading="approvalLoading"
+          :approval-error="approvalError"
+          :approval-action-id="approvalActionID"
+          :show-view-all="navigation.sections.includes('notifications')"
+          :show-approval-all="navigation.sections.includes('approvals')"
+          @open-item="openNotification"
+          @view-all="closeNotifications(); navigate('notifications')"
+          @open-approval="openApprovalItem"
+          @view-all-approvals="closeNotifications(); navigate('approvals')"
+        />
+      </Transition>
+    </template>
 
-    <main id="main-content" class="pm-main" tabindex="-1">
-      <header class="pm-topbar">
-        <button ref="mobileMenuButton" class="pm-icon-button pm-menu-button" aria-label="打开菜单" :aria-expanded="mobileMenuOpen ? 'true' : 'false'" aria-controls="pm-sidebar" @click="mobileMenuOpen = true"><ConsoleIcon name="menu" /></button>
-        <div class="pm-breadcrumb"><span>项目服务管理</span><b>/</b><template v-if="activeSection === 'project_detail'"><button type="button" class="pm-crumb-link" @click="navigate('projects')">项目列表</button><b>/</b><strong>{{ detailProject?.id || '项目详情' }}</strong></template><strong v-else>{{ currentMeta[0] }}</strong></div>
-        <div class="pm-top-tools">
-          <ShellPreferences sidebar-id="pm-sidebar" @collapse-change="desktopSidebarCollapsed = $event" />
-          <button class="pm-icon-button pm-notification-button" aria-label="通知" aria-controls="project-notifications" :aria-expanded="notificationOpen" @click="toggleNotifications"><ConsoleIcon name="bell" /><em v-if="notificationCount">{{ notificationCount }}</em></button>
-          <span class="pm-topbar-avatar" aria-hidden="true">{{ currentUserInitial }}</span>
-        </div>
-        <Transition name="pm-notification-pop">
-          <ProjectNotificationPopover
-            v-if="notificationOpen"
-            :count="notificationCount"
-            :loading="notificationLoading"
-            :error="notificationError"
-            :items="notificationItems"
-            :action-id="notificationActionID"
-            :approvals="approvalItems"
-            :approval-loading="approvalLoading"
-            :approval-error="approvalError"
-            :approval-action-id="approvalActionID"
-            :show-view-all="navigation.sections.includes('notifications')"
-            :show-approval-all="navigation.sections.includes('approvals')"
-            @open-item="openNotification"
-            @view-all="closeNotifications(); navigate('notifications')"
-            @open-approval="openApprovalItem"
-            @view-all-approvals="closeNotifications(); navigate('approvals')"
-          />
-        </Transition>
-      </header>
-
-      <div class="pm-page">
+    <div class="pm-page">
         <PageHead eyebrow="项目运营" data-first-run-anchor="subsystem-title" :title="activeSection === 'project_detail' && detailProject ? `${detailProject.id} · ${detailProject.customer}` : currentMeta[0]" :description="activeSection === 'notifications' ? currentMeta[1] : activeSection === 'project_detail' && detailProject ? `${currentMeta[1]} · 进度 ${detailProject.progress ?? 0}% · 计划完成 ${detailProject.due || '待排期'} · 更新于 ${lastUpdatedLabel}` : `${currentMeta[1]} · 数据更新于 ${lastUpdatedLabel}`">
           <template #actions>
             <button v-if="!['notifications', 'approvals'].includes(activeSection)" class="pm-button" :disabled="loading || refreshing" @click="refreshWorkspace"><ConsoleIcon name="reset" />{{ loading ? '加载中' : (refreshing ? '同步中' : '刷新') }}</button><span v-if="refreshing" class="pm-sync-status" role="status">正在同步最新状态…</span>
@@ -4952,8 +4960,9 @@ onBeforeUnmount(() => {
             <button v-if="navigation.sections.includes('resource-usage')" type="button" class="pm-button" @click="openResourceMetricCenter">进入工时与设备用量</button>
           </div>
         </section>
-      </div>
-    </main>
+    </div>
+
+    <template #overlay>
     <div v-if="resourceUsageDialog" class="pm-overlay" @click.self="closeResourceUsage">
       <section class="pm-dialog pm-dialog-wide pm-resource-review" role="dialog" aria-modal="true" aria-labelledby="pm-resource-review-title">
         <header><div><h2 id="pm-resource-review-title">{{ resourceUsageDialog.finish ? '现场结束前核对用量' : resourceUsageDialog.initialTab === 'capacity' ? '当前服务项资源容量' : '当前服务项实际用量' }}</h2>
@@ -5122,7 +5131,8 @@ onBeforeUnmount(() => {
       @confirm="acceptPrompt" @cancel="cancelPrompt"
     />
     <OperationToast :message="toastMessage" :tone="toastType" />
-  </div>
+    </template>
+  </AppShell>
 </template>
 
 <style scoped>
@@ -5133,8 +5143,5 @@ onBeforeUnmount(() => {
 @media (max-width: 640px) {
   .pm-resource-review-body { max-height: 70vh; padding-inline: 8px; }
 }
-@media (min-width: 901px) {
-  .is-sidebar-collapsed > .pm-sidebar { transform: translateX(-100%); visibility: hidden; }
-  .is-sidebar-collapsed > .pm-main { margin-left: 0; }
-}
+.pm-shell-content { max-width: none; padding: 0; }
 </style>

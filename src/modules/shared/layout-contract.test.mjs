@@ -36,6 +36,28 @@ test('内容宽度与页面标题收敛到统一契约', () => {
   assert.match(daCss, /font-size:\s*var\(--fs-title\)/)
 })
 
+test('项目管理与数据看板统一使用 AppShell，折叠为 64px 图标栏', () => {
+  const daView = read('../data_analysis/views/DashboardShellView.vue')
+  const pmView = read('../project_management/views/ProjectManagementView.vue')
+  assert.match(daView, /<AppShell\b/)
+  assert.match(pmView, /<AppShell\b/)
+  assert.doesNotMatch(daView, /desktopSidebarCollapsed|useSidebarNavigation/)
+  assert.doesNotMatch(pmView, /desktopSidebarCollapsed|useSidebarNavigation/)
+  assert.match(consoleCss, /width: var\(--shell-collapsed, 64px\)/)
+  assert.match(consoleCss, /margin-left: var\(--shell-collapsed, 64px\)/)
+  assert.doesNotMatch(consoleCss, /is-sidebar-collapsed[^}]*translateX/)
+})
+
+test('高密度筛选条使用共享 FilterBar 并默认收起', () => {
+  const crmView = read('../customer_opportunity/views/CustomerOpportunityView.vue')
+  assert.equal((crmView.match(/<FilterBar\b/g) ?? []).length, 2)
+  assert.match(crmView, /v-model:expanded="customerFiltersExpanded"/)
+  assert.match(crmView, /v-model:expanded="presaleFiltersExpanded"/)
+  assert.match(crmView, /:field-count="14"/)
+  assert.match(crmView, /const customerFiltersExpanded = ref\(false\)/)
+  assert.match(crmView, /const presaleFiltersExpanded = ref\(false\)/)
+})
+
 test('项目管理语义色复用全局状态色，登录页页脚达到可读对比', () => {
   assert.match(pmCss, /--pm-green:\s*var\(--success\)/)
   assert.match(pmCss, /--pm-amber:\s*var\(--warning\)/)
