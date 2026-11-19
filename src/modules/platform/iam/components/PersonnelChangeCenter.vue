@@ -707,7 +707,7 @@ onBeforeUnmount(() => { requestReferenceSeq++ })
 .personnel-summary-card strong { color: var(--text-1); font-size: 22px; line-height: 1.1; }
 .personnel-summary-card.tone-violet .personnel-summary-icon { color: #6e52c7; background: #eee9ff; }
 .personnel-summary-card.tone-orange .personnel-summary-icon { color: #bd6b19; background: #fff0dc; }
-.personnel-summary-card.tone-blue .personnel-summary-icon { color: #3c70c9; background: #e4efff; }
+.personnel-summary-card.tone-blue .personnel-summary-icon { color: var(--primary); background: #e4efff; }
 .personnel-summary-card.tone-green .personnel-summary-icon { color: #25835a; background: #e2f6eb; }
 .personnel-change-flow { margin: 0 1.9rem 1.2rem; padding: 1rem 1.1rem; border: 1px solid var(--line); border-radius: .8rem; background: var(--sunken, #f8fafc); }
 .personnel-flow-title { display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; margin-bottom: .8rem; }
@@ -729,7 +729,7 @@ onBeforeUnmount(() => { requestReferenceSeq++ })
 .personnel-change-toolbar .console-button { min-height: 2.25rem; white-space: nowrap; }
 .personnel-change-loading { display: flex; align-items: center; justify-content: center; gap: .55rem; min-height: 12rem; margin: 0 1.9rem 1.9rem; color: var(--muted, #71829b); }
 .personnel-loading-dot { width: .55rem; height: .55rem; border-radius: var(--radius-pill); background: #6e91dc; box-shadow: .85rem 0 #b8c9ea, 1.7rem 0 #e0e8f7; margin-right: 1.7rem; }
-.personnel-change-center > .console-card-body > .settings-empty { margin: 0 1.9rem 1.9rem; border: 1px dashed #ccd8e8; border-radius: .8rem; }
+.personnel-change-center > .console-card-body > .settings-empty { margin: 0 1.9rem 1.9rem; border: 1px dashed var(--line); border-radius: .8rem; }
 .personnel-change-table-shell { margin: 0 1.9rem 1.9rem; overflow: hidden; border: 1px solid var(--line); border-radius: .8rem; background: var(--card, #fff); }
 .personnel-change-table { overflow-x: auto; }
 .personnel-change-row { display: grid; grid-template-columns: 1.25fr .95fr 1.55fr .85fr 1.1fr 1.55fr; gap: .8rem; align-items: center; min-width: 920px; padding: .85rem 1rem; border-top: 1px solid var(--line); }
@@ -750,7 +750,7 @@ onBeforeUnmount(() => { requestReferenceSeq++ })
 .console-badge.status-handover { color: #7351a9; background: #f0e9ff; }
 .console-badge.status-scheduled { color: #2f65b4; background: #e6f0ff; }
 .console-badge.status-executed { color: #20764e; background: #e0f5e9; }
-.console-badge.status-rejected { color: #b34a4a; background: #ffebeb; }
+.console-badge.status-rejected { color: var(--danger-text); background: #ffebeb; }
 .personnel-change-modal { display: flex; width: min(860px, 100%); max-height: min(820px, calc(100vh - 40px)); flex-direction: column; overflow: hidden; border: 1px solid #dce7f5; box-shadow: 0 24px 70px rgba(28, 54, 98, .2); }
 .personnel-change-modal-header { position: relative; display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; overflow: hidden; padding: 1.45rem 1.75rem 1.25rem; background: linear-gradient(135deg, var(--surface-tint) 0%, #edf4ff 100%); border-bottom: 1px solid var(--line); }
 .personnel-change-modal-header::after { position: absolute; right: -4rem; bottom: -6rem; width: 15rem; height: 15rem; pointer-events: none; content: ''; border: 1.5rem solid rgba(110, 145, 220, .08); border-radius: var(--radius-pill); }
@@ -788,9 +788,9 @@ onBeforeUnmount(() => { requestReferenceSeq++ })
 .personnel-preview-grid .preview-added { border-top: 3px solid #49a978; }
 .personnel-preview-grid .preview-added strong { color: #25835a; }
 .personnel-preview-grid .preview-removed { border-top: 3px solid #db7777; }
-.personnel-preview-grid .preview-removed strong { color: #b34a4a; }
+.personnel-preview-grid .preview-removed strong { color: var(--danger-text); }
 .personnel-preview-grid .preview-kept { border-top: 3px solid #7094d6; }
-.personnel-preview-grid .preview-kept strong { color: #3c70c9; }
+.personnel-preview-grid .preview-kept strong { color: var(--primary); }
 .personnel-change-modal > .console-form-actions { position: relative; z-index: 2; flex: 0 0 auto; margin: 0; padding: .9rem 1.75rem; border-top: 1px solid var(--line); background: rgba(255, 255, 255, .98); box-shadow: 0 -4px 14px rgba(28, 54, 98, .06); }
 .personnel-authorization-modal { max-width: 900px; }
 .personnel-authorization-user { position: relative; display: inline-flex; align-items: center; cursor: help; border-bottom: 1px dashed var(--border-strong, #cbd5e1); outline: none; }
@@ -968,7 +968,7 @@ onBeforeUnmount(() => { requestReferenceSeq++ })
    --------------------------------------------------------------------------
    --text 的浅色是 var(--text-1)、--line-soft 的浅色是 #edf0f5、--line-strong 的浅色
    是 var(--text-4)，而本组件正文/描边的浅色原值是 var(--text-1) / var(--text-1) / var(--text-2) /
-   var(--line) / var(--line) / var(--line) / var(--line) / #ccd8e8。写成 var(--token, 字面量)
+   var(--line) / var(--line) / var(--line) / var(--line) / var(--line)。写成 var(--token, 字面量)
    时 token 在浅色已定义、回退不生效，浅色会被 token 顶掉。所以浅色恢复原字面量，
    深色在这里补同名覆盖，取值仍是原来的深色 token（深色渲染不变）。
    ========================================================================== */
