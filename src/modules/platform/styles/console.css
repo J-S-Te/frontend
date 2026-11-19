@@ -16,7 +16,7 @@
   --sky: #0ea5e9;
   --sky-text: var(--sky-ink, #0369a1);
   --sky-bg: var(--sky-soft, #e0f2fe);
-  --purple: #8b5cf6;
+  --purple: var(--violet);
   --purple-text: var(--violet-ink, #6d28d9);
   --purple-bg: var(--violet-soft, #f5f3ff);
   --secondary: var(--text-secondary);
@@ -196,7 +196,7 @@
 .console-nav-note {
   padding: 2px 7px;
   margin-left: auto;
-  color: #93c5fd;
+  color: var(--primary-border);
   font-size: var(--fs-xs);
   border-radius: 999px;
   background: rgba(37, 99, 235, .18);
@@ -254,7 +254,7 @@
   width: 15px;
   height: 15px;
 }
-.console-nav-item--child.active>svg { color: #93c5fd; }
+.console-nav-item--child.active>svg { color: var(--primary-border); }
 
 .console-nav-empty {
   margin: 4px 12px 8px;
@@ -1061,7 +1061,7 @@
   width: 17px;
   height: 17px;
   margin-top: 1px;
-  color: #93c5fd;
+  color: var(--primary-border);
 }
 
 /* 顶部提示按原路进出：进场 180ms 强 ease-out，退场 120ms 对称回位。 */

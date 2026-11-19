@@ -1131,7 +1131,7 @@ function formatFileSize(bytes) {
   padding: 12px 14px;
   color: #3f5574;
   border-color: #dbe7f7;
-  background: #f6f9fe;
+  background: var(--surface-tint);
 }
 
 .iam-batch-import-guide code { white-space: nowrap; }
@@ -1345,7 +1345,7 @@ function formatFileSize(bytes) {
   border: 1px solid #dbe7f7;
   border-radius: 10px;
   color: #3f5574;
-  background: #f6f9fe;
+  background: var(--surface-tint);
   font-size: 12px;
 }
 .iam-batch-import-role-notice-icon {

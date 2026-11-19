@@ -3083,7 +3083,7 @@
   --danger-soft: #2c1418;
 
   /* 个人例外授权面板里一批“只有 fallback、没有定义”的模块 token：浅色靠 fallback
-     画出 #fff1f1 / #fff8e6 / #eef7ff 这类浅底，深色下会变成白块。这里只补深色
+     画出 var(--danger-soft) / var(--warning-soft) / #eef7ff 这类浅底，深色下会变成白块。这里只补深色
      取值，浅色仍走 fallback，渲染不变。 */
   --danger-bg: var(--danger-soft);
   --warning-bg: var(--warning-soft);
