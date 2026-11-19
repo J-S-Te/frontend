@@ -1,4 +1,5 @@
 <script setup>
+import { useNotificationStream } from '@/modules/shared/composables/notificationStream.js'
 import { onMounted,ref,computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { openNotificationTarget, notificationTarget } from '../../shared/utils/notificationNavigation.js'
@@ -69,6 +70,7 @@ async function deleteRead(){
 }
 function changeTab(next){tab.value=next;page.value=1;detail.value=null;load()}
 onMounted(load)
+useNotificationStream(load)
 </script>
 <template>
  <section class="expense-panel">

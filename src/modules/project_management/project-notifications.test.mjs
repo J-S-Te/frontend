@@ -18,7 +18,7 @@ function mountInbox(api) {
   const emitted = []
   let cleanup = () => {}
   const context = { formatUserError, projectApprovalTarget, ref, computed, onMounted: () => {},
-    onBeforeUnmount: callback => { cleanup = callback },
+    onBeforeUnmount: callback => { cleanup = callback }, useNotificationStream: () => {},
     window: { location: { origin: 'http://localhost:8081' } },
     defineEmits: () => (event, value) => emitted.push({ event, value }), useConfirmDialog: () => ({
       dialog: ref(null), askConfirm: async () => true, accept() {}, cancel() {},
