@@ -119,7 +119,7 @@ test('前后缀字符集提示与本地拦截：非法字符不发请求，也�
     assert.match(panelSource, new RegExp(`:class="\\{ 'is-invalid': affixInvalidFields\\.includes\\('${field}'\\) \\}"`))
     assert.match(panelSource, new RegExp(`:aria-invalid="affixInvalidFields\\.includes\\('${field}'\\)"`))
   }
-  assert.match(css, /\.contract-number-rule-form input\.is-invalid \{ border-color: #fecaca; background: #fef2f2; \}/)
+  assert.match(css, /\.contract-number-rule-form input\.is-invalid \{ border-color: var\(--danger-border\); background: #fef2f2; \}/)
   // 本地校验必须在调用保存接口之前返回，这样被本地拦下时不会同时显示后端通用错误。
   const saveBlock = panelSource.match(/async function saveRule\(\)[\s\S]*?\n\}/)?.[0] || ''
   assert.match(saveBlock, /submitAttempted\.value = true[\s\S]*const invalid = contractNumberRuleFormError\(form\.value\)[\s\S]*saveError\.value = invalid\s*\n\s*return\s*\n\s*\}[\s\S]*await updateContractNumberRule/)
@@ -137,7 +137,7 @@ test('规则未初始化或流水耗尽时面板显示后端给出的原因，�
 test('编号规则面板沿用合同管理既有样式语言，没有引入新的设计体系', () => {
   assert.match(css, /\.contract-number-rule-body \{ display: grid;/)
   assert.match(css, /\.contract-number-rule-preview > strong \{[^}]*font-family: ui-monospace/)
-  assert.match(css, /\.contract-number-rule-warning \{[^}]*#fffbeb/)
+  assert.match(css, /\.contract-number-rule-warning \{[^}]*var\(--warning-soft-strong\)/)
   assert.match(css, /@media \(max-width: 900px\) \{ \.contract-number-rule-body \{ grid-template-columns: 1fr; \} \}/)
   assert.doesNotMatch(panelSource, /<style/)
 })

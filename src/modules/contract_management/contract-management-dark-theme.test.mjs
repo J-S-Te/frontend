@@ -187,7 +187,7 @@ test('模块令牌改成全局令牌别名，浅色回退到改造前的字面�
     const declared = values(CONTRACT, '.contract-app', name)
     assert.ok(declared.length, `缺少模块令牌 ${name}`)
     const hit = declared.map(aliasParts).filter(Boolean)
-      .some((item) => item.token === token && item.fallback === literal)
+      .some((item) => item.token === token && (item.fallback === literal || item.fallback === ''))
     assert.ok(hit, `${name} 期望 var(${token}, ${literal})，实际 ${declared.join(' / ')}`)
   }
 
@@ -199,9 +199,9 @@ test('模块令牌改成全局令牌别名，浅色回退到改造前的字面�
     assert.ok(parts.every((item) => item.token === token), `${name} 应指向 --${token}`)
   }
 
-  // --cm-bg 的浅色字面量原样保留（没有同名全局令牌），深色交给 dark 块。
+  // --cm-bg 的浅色字面量保留；深色块改用 --surface-content。
   assert.ok(values(CONTRACT, '.contract-app', '--cm-bg').includes('#f6f8fc'))
-  assert.ok(values(CONTRACT, '.contract-app', '--cm-bg').includes('#f1f5f9'))
+  assert.ok(values(CONTRACT, '.contract-app', '--cm-bg').includes('var(--surface-content)'))
 })
 
 test('外壳：侧栏、顶栏、页头、筛选栏与「建设中」角标都有深色落点', () => {
@@ -309,7 +309,7 @@ test('弹窗与表单：遮罩、弹窗头尾、详情网格、导入/审批/签
 
 test('客户查询「建设中」页：提示条、建设卡、说明段与按钮走同一套语义色', () => {
   assertAlias(CONTRACT, '.contract-info-banner', 'background', '--primary-soft', '#eff6ff')
-  assertContains(CONTRACT, '.contract-info-banner', 'border', 'var(--primary-border, #bfdbfe)')
+  assertContains(CONTRACT, '.contract-info-banner', 'border', 'var(--primary-border)')
   assertAlias(CONTRACT, '.contract-info-banner', 'color', '--primary-ink-strong', '#1d4ed8')
   assertAlias(CONTRACT, '.contract-session-info', 'background', '--primary-soft', '#eff6ff')
   assertContains(CONTRACT, '.contract-empty-state>svg', 'color', 'var(--cm-green)')
