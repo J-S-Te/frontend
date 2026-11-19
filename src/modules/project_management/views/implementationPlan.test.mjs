@@ -4,7 +4,7 @@ import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import test from 'node:test'
 import vm from 'node:vm'
-import { ref } from 'vue'
+import { effectScope, ref, watch } from 'vue'
 import { formatUserError } from '../../shared/utils/userError.js'
 import { formatBusinessDate } from '../../shared/utils/businessTime.js'
 import { attachStructuredContext } from '../../platform/shared/api/requestContext.js'
@@ -31,7 +31,7 @@ function workspace({ status = 200 } = {}) {
   let refreshes = 0
   const context = {
     createAuthorizationSnapshotReader, AUTHORIZATION_REFRESH_HEADERS,
-    ref, FormData, Response, formatUserError, attachStructuredContext,
+    ref, watch, FormData, Response, formatUserError, attachStructuredContext,
     normalizeAuthorizationSession, principalIdentityID, shouldStartSubsystemLogin,
     selectedServiceItem: ref(null), selectedServiceItems: ref([]),
     planningBlocked: ref(null), signaturePadKey: ref(0), saving: ref(false),
@@ -51,15 +51,16 @@ function workspace({ status = 200 } = {}) {
     },
   }
   // 执行真实组件状态、回填和提交函数，保留真实 API 序列化；只替换网络与工作区刷新。
-  const initStart = view.indexOf('const operationForm = ref(')
-  const init = view.slice(initStart, view.indexOf('\n', initStart))
-  vm.runInNewContext([
+  const init = section('const operationForm = ref(', 'const pendingFieldSyncCount = ref(')
+  const scope = effectScope()
+  scope.run(() => vm.runInNewContext([
     api, init,
     section('function fillOperationForm(item)', 'function updatePenetrationPackage('),
     section('async function runOperation(kind)', 'async function revokeSelectedAssignment('),
     'this.form = operationForm; this.fill = fillOperationForm; this.run = runOperation;',
-  ].join('\n'), context)
-  return { context, requests, toasts, get refreshes() { return refreshes } }
+    'this.editPersonnelDate = typeof editPlanPersonnelDate === "function" ? editPlanPersonnelDate : null;',
+  ].join('\n'), context))
+  return { context, requests, toasts, stop: () => scope.stop(), get refreshes() { return refreshes } }
 }
 
 function select(w, item = {}) {
@@ -119,12 +120,53 @@ test('发布普通实施计划的实际 JSON 包含现场计划及原有版本�
   // datetime-local 里的 09:00 是北京墙钟，等价 UTC 01:00；不能按宿主机本地时区解释。
   assert.equal(request.payload.planned_start, '2026-10-22T01:00:00.000Z')
   assert.deepEqual(request.payload.personnel, [
-    { resource_type: 'PERSON', resource_id: 'lead-1', window_start: '', window_end: '', note: '' },
-    { resource_type: 'PERSON', resource_id: 'manager-1', window_start: '', window_end: '', note: '' },
-    { resource_type: 'PERSON', resource_id: 'engineer-1', window_start: '', window_end: '', note: '' },
+    { resource_type: 'PERSON', resource_id: 'lead-1', window_start: '2026-10-22', window_end: '2026-10-22', note: '' },
+    { resource_type: 'PERSON', resource_id: 'manager-1', window_start: '2026-10-22', window_end: '2026-10-22', note: '' },
+    { resource_type: 'PERSON', resource_id: 'engineer-1', window_start: '2026-10-22', window_end: '2026-10-22', note: '' },
   ])
   assert.equal(w.refreshes, 1)
   assert.ok(w.toasts.some((toast) => toast.message === '实施计划已发布'))
+})
+
+test('已有计划按北京时间回显缺省人员日期，并保留已保存的个人时段', (t) => {
+  const w = workspace()
+  t.after(w.stop)
+  w.context.fill({
+    planned_start: '2026-10-21T17:30:00Z',
+    planned_end: '2026-10-25T02:00:00Z',
+    implementation_plan: { personnel: [
+      { resource_id: 'lead-1' },
+      { resource_id: 'engineer-1', window_start: '2026-10-23', window_end: '2026-10-24' },
+    ] },
+  })
+  const form = w.context.form.value
+  assert.equal(form.personnel[0].windowStart, '2026-10-22')
+  assert.equal(form.personnel[0].windowEnd, '2026-10-25')
+  form.plannedEnd = '2026-10-26T18:00'
+  assert.equal(form.personnel[0].windowEnd, '2026-10-26')
+  assert.equal(form.personnel[1].windowStart, '2026-10-23')
+  assert.equal(form.personnel[1].windowEnd, '2026-10-24')
+})
+
+test('各人各端独立跟随计划，发布保留手动日期和全程留空', async (t) => {
+  const w = workspace()
+  t.after(w.stop)
+  select(w)
+  const form = w.context.form.value
+  const [lead, manager, engineer] = form.personnel
+  assert.equal(lead.windowStart, '2026-10-22')
+  form.plannedEnd = '2026-10-25T18:00'
+  w.context.editPersonnelDate(lead, 'windowStart', '2026-10-23')
+  w.context.editPersonnelDate(manager, 'windowStart', '')
+  w.context.editPersonnelDate(manager, 'windowEnd', '')
+  form.plannedStart = '2026-10-21T09:00'
+  form.plannedEnd = '2026-10-26T18:00'
+  assert.equal(engineer.windowStart, '2026-10-21')
+  assert.equal(engineer.windowEnd, '2026-10-26')
+  await w.context.run('planning')
+  assert.deepEqual(w.requests[0].payload.personnel.map((row) => [
+    row.window_start, row.window_end,
+  ]), [['2026-10-23', '2026-10-26'], ['', ''], ['2026-10-21', '2026-10-26']])
 })
 
 test('现场计划在既有 5000 字上限内不截断', async () => {
