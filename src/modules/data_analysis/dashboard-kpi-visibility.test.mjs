@@ -161,7 +161,7 @@ test('隐藏后网格列数随可见卡重算，窄屏不溢出，开关有可�
   assert.match(styles, /\.da-native-metrics \{ --da-metric-columns: 6; display: grid; grid-template-columns: repeat\(var\(--da-metric-columns\), minmax\(0, 1fr\)\)/)
   assert.match(styles, /@media \(min-width: 1201px\) \{[\s\S]*?\.da-native-metrics-cols-1 \{ --da-metric-columns: 1; \}/)
   assert.match(styles, /\.da-native-metrics-cols-5 \{ --da-metric-columns: 5; \}/)
-  assert.match(styles, /\.da-native-card-switch\[aria-checked="true"\] \.da-native-card-switch-track \{ background: #2563eb; \}/)
+  assert.match(styles, /\.da-native-card-switch\[aria-checked="true"\] \.da-native-card-switch-track \{ background: var\(--primary\); \}/)
   assert.match(styles, /\.da-native-metric\.warn strong \{ color: var\(--da-amber-text[^)]*\); \}/)
   assert.match(styles, /\.da-native-card-settings-panel \{[\s\S]*?width: min\(300px, calc\(100vw - 32px\)\);/)
 })
