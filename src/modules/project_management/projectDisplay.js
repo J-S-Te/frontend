@@ -6,6 +6,7 @@
 import { normalizeStatusTone } from '../shared/theme/statusCatalog.js'
 import { businessWallClockToInstant, formatBusinessDateTime, instantToBusinessWallClock } from '../shared/utils/businessTime.js'
 import { escapeCsvCell } from '../platform/iam/utils/csvExport.js'
+import { REPORT_STAGE_LABELS } from '../shared/utils/reportStage.js'
 
 // 用途：以项目和系统名称标识服务项，统一工作台的主展示口径。
 // 参数：item 为服务项快照；project 为对应的已授权项目快照。
@@ -110,14 +111,7 @@ export function statusTone(status) {
 
 // 报告阶段（项目级 report_stage）与服务项报告状态共用同一套码值，
 // 中文词表只维护这一份，页面不再各自复制。
-export const reportStageLabel = Object.freeze({
-  NONE: '待整改',
-  RECTIFYING: '整改中',
-  COMPILING: '编制中',
-  REVIEWED: '已审核',
-  ISSUED: '已签发',
-  ARCHIVED: '已归档',
-})
+export const reportStageLabel = REPORT_STAGE_LABELS
 
 // 仅用于展示服务项自身进度，口径对应服务端 domain/project_status.go；
 // 不由服务项推导项目状态，也不用于放行任何写操作。

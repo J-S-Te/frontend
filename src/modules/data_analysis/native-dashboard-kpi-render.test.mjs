@@ -9,6 +9,7 @@ import { parse, compileScript, compileTemplate } from '@vue/compiler-sfc'
 import { renderToString } from '@vue/server-renderer'
 import { renderMetricFacts } from './metric-facts-render-harness.mjs'
 import { dashboardFreshnessItems, dashboardFreshnessStatus } from './utils/freshness.js'
+import { reportStageLabel } from '../shared/utils/reportStage.js'
 import {
   PROJECT_CARD_KEYS,
   cardHiddenStorageKey,
@@ -95,6 +96,7 @@ async function mount(props, storage = memoryStorage()) {
     PaginationBar: { render: () => null },
     dashboardFreshnessItems,
     dashboardFreshnessStatus,
+    reportStageLabel,
     PROJECT_CARD_KEYS,
     cardHiddenStorageKey,
     metricColumnCount,
@@ -248,9 +250,18 @@ test('项目明细真实分页数据保持项目口径，不重复旧指标占�
   const { html } = await mount({ section: 'project', projectSummary: collectedProject,
     projectDetails: { available: true, total: 25, page: 2, page_size: 20, items: [
       { project_id: 'p21', name: '真实项目21', status: '实施中', manager: '经理甲', owner_org_id: 'org1', service_items: 3, report_stage: 'RECTIFYING', risk: false },
+      { project_id: 'p22', name: '明细项目22', status: '报告编制', manager: '经理乙', owner_org_id: 'org1', service_items: 1, report_stage: 'COMPILING', risk: false },
+      { project_id: 'p23', name: '明细项目23', status: '已完成', manager: '经理丙', owner_org_id: 'org1', service_items: 1, report_stage: 'ISSUED', risk: false },
+      { project_id: 'p24', name: '明细项目24', status: '已完成', manager: '经理丁', owner_org_id: 'org1', service_items: 1, report_stage: 'ARCHIVED', risk: false },
+      { project_id: 'p25', name: '明细项目25', status: '现场实施完成', manager: '经理戊', owner_org_id: 'org1', service_items: 1, report_stage: 'NONE', risk: false },
+      { project_id: 'p26', name: '明细项目26', status: '实施中', manager: '经理己', owner_org_id: 'org1', service_items: 1, report_stage: '', risk: false },
     ] } })
   assert.match(html, /真实项目21/)
   assert.match(html, /经理甲/)
+  for (const label of ['整改中', '编制中', '已签发', '已归档', '待整改', '未采集']) {
+    assert.match(html, new RegExp(label), `报告阶段应显示中文「${label}」`)
+  }
+  assert.doesNotMatch(html, /RECTIFYING|COMPILING|ISSUED|ARCHIVED/)
   assert.doesNotMatch(html, /缺少权威工时|缺少完整报告退回及现场重测事实/)
   const facts = await renderMetricFacts({ section: 'project', summary: {
     available: true,

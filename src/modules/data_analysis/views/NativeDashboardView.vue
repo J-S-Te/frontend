@@ -4,6 +4,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue"
 import PaginationBar from "@/modules/shared/components/PaginationBar.vue"
 import ConsoleIcon from "@/modules/shared/components/ConsoleIcon.vue"
 import { dashboardFreshnessItems, dashboardFreshnessStatus } from "../utils/freshness.js"
+import { reportStageLabel } from "@/modules/shared/utils/reportStage.js"
 import {
   PROJECT_CARD_KEYS,
   cardHiddenStorageKey,
@@ -856,7 +857,7 @@ const metricsColumnsClass = computed(() => {
       <p v-if="detailError" class="da-native-inline-error" role="alert">{{ detailError }}<button type="button" class="da-button" @click="emit('detail-page', activeDetails.page || 1)">重试明细</button></p>
       <div v-if="!detailError && activeDetails.items?.length && (section !== 'contract' || summaryAvailable)" class="da-native-detail-table">
         <table v-if="section === 'contract'" class="da-table"><thead><tr><th scope="col">合同编号</th><th scope="col">名称</th><th scope="col">状态</th><th scope="col">金额</th><th scope="col">到期日</th></tr></thead><tbody><tr v-for="item in contractDetails.items" :key="item.contract_number" :class="{ risk: String(item.status).toUpperCase() === 'EXPIRED' }"><td class="mono">{{ item.contract_number }}</td><td>{{ item.title }}</td><td><span class="da-badge" :class="contractStatusTone(item.status)">{{ contractStatusLabel(item.status) }}</span></td><td>{{ formatAmountMinor(item.amount_minor) }} 万{{ item.currency }}</td><td>{{ item.end_date || '—' }}</td></tr></tbody></table>
-        <table v-else class="da-table"><thead><tr><th scope="col">项目</th><th scope="col">状态</th><th scope="col">经理</th><th scope="col">归属组织ID</th><th scope="col">服务项</th><th scope="col">报告阶段</th><th scope="col">风险</th></tr></thead><tbody><tr v-for="item in projectDetails.items" :key="item.project_id" :class="{ risk: item.risk }"><td>{{ item.name }}</td><td>{{ item.status }}</td><td>{{ item.manager || '—' }}</td><td>{{ item.owner_org_id || '—' }}</td><td>{{ item.service_items }}</td><td>{{ item.report_stage || '未采集' }}</td><td>{{ item.risk ? '风险' : '正常' }}</td></tr></tbody></table>
+        <table v-else class="da-table"><thead><tr><th scope="col">项目</th><th scope="col">状态</th><th scope="col">经理</th><th scope="col">归属组织ID</th><th scope="col">服务项</th><th scope="col">报告阶段</th><th scope="col">风险</th></tr></thead><tbody><tr v-for="item in projectDetails.items" :key="item.project_id" :class="{ risk: item.risk }"><td>{{ item.name }}</td><td>{{ item.status }}</td><td>{{ item.manager || '—' }}</td><td>{{ item.owner_org_id || '—' }}</td><td>{{ item.service_items }}</td><td>{{ reportStageLabel(item.report_stage, '未采集') }}</td><td>{{ item.risk ? '风险' : '正常' }}</td></tr></tbody></table>
       </div>
       <div v-else-if="!detailLoading && !detailError" class="da-native-empty"><b>{{ section === 'project' && !projectDetails.available ? '尚无可用项目投影' : section === 'contract' && !summaryAvailable ? '尚无可用合同快照' : '当前范围内暂无明细' }}</b><p>{{ section === 'project' && !projectDetails.available ? '等待首次完整项目投影成功发布；无可用范围也不可读取明细。' : section === 'contract' && !summaryAvailable ? '等待首次合同来源同步成功后核对明细。' : '当前成功来源在授权范围内没有记录。' }}</p></div>
       <p v-if="section === 'contract'" class="da-native-note">排除项：不展示合同脱敏字段（如成本价）；草稿/审批中/作废不计。明细不提供导出。</p>
