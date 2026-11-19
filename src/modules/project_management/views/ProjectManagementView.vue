@@ -223,6 +223,7 @@ import {
   closeSupplement,
   getApprovedContractServiceItems,
 } from '@/modules/project_management/api/projectManagement'
+import '@/modules/platform/styles/console.css'
 import '@/modules/project_management/styles/project-management.css'
 
 const { dialog: confirmDialog, askConfirm, accept: acceptConfirm, cancel: cancelConfirm } = useConfirmDialog()
@@ -4068,8 +4069,7 @@ onBeforeUnmount(() => {
   >
     <template #brand>
       <span class="pm-brand-mark">PS</span>
-      <span><b>项目服务管理</b><small>PROJECT SERVICE</small></span>
-      <button class="pm-close-menu" type="button" aria-label="关闭菜单" @click="mobileMenuOpen = false"><ConsoleIcon name="close" /></button>
+      <span class="console-brand-copy"><b>项目服务管理</b><small>PROJECT SERVICE</small></span>
     </template>
     <template #sidebar-user>
       <span class="pm-avatar" aria-hidden="true">{{ currentUserInitial }}</span>

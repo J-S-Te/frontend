@@ -1721,9 +1721,7 @@ test('现场缺项判定由服务端证据接口驱动（BIZ-PROJECT-06）', () 
 })
 
 // P2-2：移动抽屉必须有可见关闭按钮；桌面侧栏常驻时隐藏，避免多一个无意义按钮。
-test('项目移动抽屉提供可见关闭按钮并可收起菜单', () => {
-  assert.match(source, /<button class="pm-close-menu" type="button" aria-label="关闭菜单" @click="mobileMenuOpen = false"><ConsoleIcon name="close" \/><\/button>/)
-  assert.match(styles, /\.pm-close-menu \{[^}]*display: none/)
-  const narrow = styles.slice(styles.indexOf('@media (max-width: 900px)'))
-  assert.match(narrow, /\.pm-close-menu \{ display: grid; \}/, '抽屉断点内关闭按钮必须可见')
+test('项目移动抽屉由 AppShell 的关闭按钮更新菜单状态', () => {
+  assert.match(source, /<AppShell\b[^>]*:menu-open="mobileMenuOpen"\s+@update:menu-open="mobileMenuOpen = \$event"/)
+  assert.doesNotMatch(source, /class="pm-close-menu"/)
 })
