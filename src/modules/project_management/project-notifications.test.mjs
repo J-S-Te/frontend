@@ -5,6 +5,8 @@ import { formatUserError } from '../shared/utils/userError.js'
 import { notificationTarget, openNotificationTarget } from '../shared/utils/notificationNavigation.js'
 import { projectApprovalTarget } from './approvalTasks.js'
 
+import { dedupeNotificationItems } from './composables/useProjectNotifications.js'
+
 const view = await readFile(new URL('./views/ProjectManagementView.vue', import.meta.url), 'utf8')
 const inbox = await readFile(new URL('./components/ProjectNotificationCenter.vue', import.meta.url), 'utf8')
 const popover = await readFile(new URL('./components/ProjectNotificationPopover.vue', import.meta.url), 'utf8')
@@ -156,4 +158,19 @@ test('个人中心审批入口以详情为准，读取失败或卸载后不沿�
   finish(current)
   await pending
   assert.deepEqual(late.emitted, [])
+})
+
+test('同一业务事件的多通道未读通知只展示一次，点击铃铛外自动收起', async () => {
+  const items = [
+    { delivery_id: 'a', title: '回退申请待核对', content: '同一正文', reference_type: 'service_item', reference_id: 'S-1' },
+    { delivery_id: 'b', title: '回退申请待核对', content: '同一正文', reference_type: 'service_item', reference_id: 'S-1' },
+    { delivery_id: 'c', title: '回退申请待核对', content: '另一正文', reference_type: 'service_item', reference_id: 'S-1' },
+  ]
+  assert.deepEqual(dedupeNotificationItems(items).map(item => item.delivery_id), ['a', 'c'])
+  assert.match(view, /function onNotificationOutsideClick/)
+  assert.match(view, /addEventListener\('click', onNotificationOutsideClick\)/)
+  assert.match(view, /removeEventListener\('click', onNotificationOutsideClick\)/)
+  const styles = await readFile(new URL('./styles/project-management.css', import.meta.url), 'utf8')
+  assert.match(styles, /\.pm-notification-group > button\.pm-notification-view-all \{/)
+  assert.match(styles, /\.pm-notifications \{[^}]*width: 360px/)
 })

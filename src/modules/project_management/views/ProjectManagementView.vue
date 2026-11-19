@@ -1337,6 +1337,12 @@ function toggleMulti(kind) { openMulti.value = openMulti.value === kind ? '' : k
 function closeMultiOnOutsideClick(event) {
   if (!(event.target instanceof Element) || !event.target.closest('.pm-multi-dropdown')) openMulti.value = ''
 }
+// 通知弹层不是 modal：点击顶栏铃铛和弹层内部保留，点击页面其他区域即时收起。
+function onNotificationOutsideClick(event) {
+  if (!notificationOpen.value || !(event.target instanceof Element)) return
+  if (event.target.closest('#project-notifications') || event.target.closest('.pm-notification-button')) return
+  closeNotifications()
+}
 // 键盘可达的多选下拉统一走这里：↑↓ 移动高亮、Enter 勾选、Esc 关闭；人员选择器与
 // 设备维护和检测规则的旧式多选共用同一套交互基线；字段级权限角色已统一迁移到
 // SearchableSelect，由组件处理点击触发、模糊搜索、键盘导航和视口动态定位。
@@ -3998,6 +4004,7 @@ watch(() => fieldQueueOwner(), (ownerKey) => {
 onMounted(() => {
   document.addEventListener('click', closeMultiOnOutsideClick)
   document.addEventListener('click', onKpiSettingsOutsideClick)
+  document.addEventListener('click', onNotificationOutsideClick)
   document.addEventListener('keydown', onGlobalKeydown)
   window.addEventListener('online', onFieldOnline)
 })
@@ -4228,6 +4235,7 @@ onBeforeUnmount(() => {
   disposeNotifications()
   document.removeEventListener('click', closeMultiOnOutsideClick)
   document.removeEventListener('click', onKpiSettingsOutsideClick)
+  document.removeEventListener('click', onNotificationOutsideClick)
   document.removeEventListener('keydown', onGlobalKeydown)
   window.removeEventListener('online', onFieldOnline)
 })
