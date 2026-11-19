@@ -474,6 +474,7 @@ const opportunityMemberTerms = ref([])
 const opportunityMemberTermsLoading = ref(false)
 const opportunityMemberTermsError = ref('')
 const opportunityMemberTermsPage = reactive({ number: 1, size: 10, total: 0 })
+const opportunityTermsOpen = ref(false)
 const opportunityMemberTermLoads = createMemberTermLoadState()
 const opportunityPresales = ref([])
 const opportunityPresaleLoading = ref(false)
@@ -866,6 +867,12 @@ function ownerLabel(owner) {
   const userId = typeof owner === 'object' ? owner?.owner_user_id : owner
   const displayName = typeof owner === 'object' ? owner?.owner_display_name : ''
   return String(displayName || '').trim() || ownerDirectoryNames.value[userId] || '负责人账号已失效'
+}
+function opportunityCustomerText(item) {
+  return String(item?.customer_name || '').trim() || '客户信息缺失'
+}
+function opportunityOwnerUnavailable(item) {
+  return ownerLabel(item?.owner_user_id) === '负责人账号已失效'
 }
 function operationUserLabel(item) { return usableOperationName(item?.actor_name, item?.actor_id) || ownerLabel(item?.actor_id) }
 function followupTypeText(value) { return ({ PHONE: '电话', VISIT: '拜访', EMAIL: '邮件', OTHER: '其他' })[value] || value || '跟进' }
@@ -1940,6 +1947,7 @@ async function submitCustomerMerge() {
 async function openOpportunity(id) {
   const loadSequence = ++opportunityDetailLoadSequence.value
   opportunityDetailTab.value = 'overview'
+  opportunityTermsOpen.value = false
   selectedOpportunity.value = null
   selectedOpportunityCustomerCredit.value = null
   selectedOpportunityOwnerOrgID.value = ''
@@ -4111,9 +4119,9 @@ onMounted(async () => {
     <p class="crm-opportunity-meta-line">
       <span>{{ selectedOpportunity.opportunity_no }}</span>
       <span aria-hidden="true">·</span>
-      <span>{{ selectedOpportunity.customer_name || ('客户 #' + selectedOpportunity.customer_id) }}</span>
+      <span>{{ opportunityCustomerText(selectedOpportunity) }}</span>
       <span aria-hidden="true">·</span>
-      <span>负责人 {{ ownerLabel(selectedOpportunity.owner_user_id) }}</span>
+      <span>负责人 {{ ownerLabel(selectedOpportunity.owner_user_id) }}<em v-if="opportunityOwnerUnavailable(selectedOpportunity)" class="crm-owner-warning">账号已失效</em></span>
     </p>
   </div>
   <div class="crm-detail-head-actions crm-opportunity-head-actions">
@@ -4124,7 +4132,6 @@ onMounted(async () => {
     <button type="button" class="crm-opportunity-close" aria-label="关闭商机详情" @click="selectedOpportunity = null"><ConsoleIcon name="close" /></button>
   </div>
 </header>
-<div class="crm-opportunity-main">
   <section class="crm-opportunity-metrics" aria-label="商机核心指标">
     <div class="crm-opportunity-metric crm-opportunity-metric--primary">
       <span>预计金额</span>
@@ -4164,6 +4171,8 @@ onMounted(async () => {
       </div>
     </div>
   </section>
+  <div class="crm-opportunity-workspace">
+    <div class="crm-opportunity-main">
   <div class="crm-opportunity-tabs" role="tablist" aria-label="商机详情分区">
     <button type="button" role="tab" :aria-selected="opportunityDetailTab === 'overview'" :class="{ active: opportunityDetailTab === 'overview' }" @click="opportunityDetailTab = 'overview'">概览</button>
     <button type="button" role="tab" :aria-selected="opportunityDetailTab === 'presale'" :class="{ active: opportunityDetailTab === 'presale' }" @click="opportunityDetailTab = 'presale'">售前任务 <span class="crm-opportunity-tab-count">{{ opportunityPresaleCount }}</span></button>
@@ -4178,7 +4187,7 @@ onMounted(async () => {
         </div>
         <dl class="crm-opportunity-facts">
           <div><dt>商机编号</dt><dd>{{ selectedOpportunity.opportunity_no }}</dd></div>
-          <div><dt>客户</dt><dd>{{ selectedOpportunity.customer_name || ('客户 #' + selectedOpportunity.customer_id) }}</dd></div>
+          <div><dt>客户</dt><dd>{{ opportunityCustomerText(selectedOpportunity) }}</dd></div>
           <div><dt>负责人</dt><dd>{{ ownerLabel(selectedOpportunity.owner_user_id) }}</dd></div>
           <div><dt>预计签单</dt><dd>{{ formatDate(selectedOpportunity.expected_sign_date) }}</dd></div>
           <div><dt>系统数量</dt><dd>{{ selectedOpportunity.system_count || 0 }}</dd></div>
@@ -4215,6 +4224,23 @@ onMounted(async () => {
         </div>
       </div>
     </section>
+    <section class="crm-detail-card crm-opportunity-recent">
+      <div class="crm-opportunity-card-head">
+        <h3>最近跟进</h3>
+        <button v-if="followups.length" type="button" class="crm-table-link" @click="opportunityDetailTab = 'activity'">查看全部</button>
+      </div>
+      <p v-if="!followups.length" class="crm-empty compact">暂无跟进记录。</p>
+      <ol v-else class="crm-opportunity-timeline">
+        <li v-for="item in followups.slice(0, 2)" :key="item.id">
+          <span class="crm-opportunity-timeline-dot" aria-hidden="true"></span>
+          <div class="crm-opportunity-timeline-body">
+            <header><strong>{{ followupTypeText(item.type) }}</strong><time>{{ formatDate(item.followed_at) }}</time></header>
+            <p>{{ item.content }}</p>
+            <small><span v-if="item.followed_by">由 {{ ownerLabel(item.followed_by) }} 记录</span></small>
+          </div>
+        </li>
+      </ol>
+    </section>
   </section>
   <section v-else class="crm-opportunity-tab-panel" role="tabpanel" aria-label="跟进与阶段历史">
     <div class="crm-opportunity-activity-grid">
@@ -4249,31 +4275,35 @@ onMounted(async () => {
     </div>
   </section>
 </div>
-<div class="crm-opportunity-actions crm-actions">
-  <button type="button" @click="selectedOpportunity = null">关闭</button>
-  <template v-if="selectedOpportunity.opp_status !== 'VOID'">
-    <button type="button" class="primary" @click="followupDialog = true"><ConsoleIcon name="plus" />添加跟进</button>
-    <button type="button" @click="openOwnerEditor">变更负责人</button>
-    <button v-if="canManageOpportunityTeam && opportunityTeamDirectoryAvailable" type="button" @click="openTeamEditor">维护团队</button>
-    <button v-if="selectedOpportunity.terminal_pending_type && selectedOpportunity.terminal_pending_type !== 'NONE'" type="button" class="primary" @click="terminalDialog = true">补全终态待办</button>
-    <button type="button" class="danger" @click="changeOpportunityStatus('void')">作废</button>
-  </template>
-  <button v-else type="button" class="primary" @click="changeOpportunityStatus('restore')">恢复</button>
-</div>
+
       <div v-if="selectedOpportunity" class="crm-opportunity-side-rail" aria-label="商机补充信息">
     <aside class="crm-opportunity-attachment-panel crm-opportunity-team-panel" aria-label="商机团队">
-<h3>商机团队</h3><p class="crm-note">人员用户名与有效组织实时取自基础平台权威目录。</p><p v-if="!opportunityTeamDirectoryAvailable" class="crm-alert warning" role="status">基础平台人员目录暂不可用；团队维护已安全关闭。</p><p v-if="!opportunityTeam.length">当前无辅助团队成员</p><ul class="crm-team-summary"><li v-for="member in opportunityTeam" :key="member.user_id"><strong>{{ platformUserName(member) }}</strong> · {{ teamRoleText(member.role) }}<br><small>{{ teamMemberOrganizations(member) }}</small><em v-if="member.directory_status === 'NOT_AVAILABLE'">已停用或不再具有本应用授权</em></li></ul>
+      <div class="crm-opportunity-rail-head">
+        <h3>商机团队</h3>
+        <button v-if="canManageOpportunityTeam && opportunityTeamDirectoryAvailable && selectedOpportunity.opp_status !== 'VOID'" type="button" @click="openTeamEditor">维护团队</button>
+      </div>
+      <p class="crm-note">人员用户名与有效组织实时取自基础平台权威目录。</p>
+      <p v-if="!opportunityTeamDirectoryAvailable" class="crm-alert warning" role="status">基础平台人员目录暂不可用；团队维护已安全关闭。</p>
+      <div v-if="!opportunityTeam.length" class="crm-opportunity-team-empty">
+        <span class="crm-avatar" aria-hidden="true">人</span>
+        <span>当前无辅助团队成员<br>来自基础平台权威目录</span>
+      </div>
+      <ul v-else class="crm-team-summary">
+        <li v-for="member in opportunityTeam.slice(0, 3)" :key="member.user_id">
+          <strong>{{ platformUserName(member) }}</strong> · {{ teamRoleText(member.role) }}
+          <br><small>{{ teamMemberOrganizations(member) }}</small>
+          <em v-if="member.directory_status === 'NOT_AVAILABLE'">已停用或不再具有本应用授权</em>
+        </li>
+      </ul>
+      <p v-if="opportunityTeam.length > 3" class="crm-note">另有 {{ opportunityTeam.length - 3 }} 名成员，维护团队中可查看全部。</p>
     </aside>
     <!-- 三个 .crm-opportunity-attachment-panel 共享 .crm-opportunity-side-rail 宿主，
          一对渐隐伪元素只能对齐一个矩形；这里只标记真正含宽表格、会横向滚动的任期明细。 -->
-    <aside v-if="selectedOpportunity" class="crm-opportunity-attachment-panel" data-table-scroll aria-label="商机团队任期明细">
-      <h3>团队任期明细</h3>
-      <p class="crm-note">每次加入、移出、重新加入和角色变化独立记录；“迁移快照”仅代表账本启用时观察到的状态，加入和移出时间未知，不推测更早历史。</p>
-      <ListState v-if="opportunityMemberTermsLoading || opportunityMemberTermsError || !opportunityMemberTerms.length" :loading="opportunityMemberTermsLoading" :error="opportunityMemberTermsError" error-title="团队任期明细加载失败" empty-title="暂无任期明细" compact @retry="loadOpportunityMemberTerms()" />
-      <template v-else>
-        <table><thead><tr><th scope="col">成员</th><th scope="col">角色</th><th scope="col">开始 / 快照</th><th scope="col">结束</th><th scope="col">操作人</th><th scope="col">来源</th></tr></thead><tbody><tr v-for="term in opportunityMemberTerms" :key="term.id"><td>{{ ownerLabel(term.user_id) }}</td><td>{{ teamRoleText(term.role) }}</td><td>{{ term.source_kind === 'LEGACY_SNAPSHOT' ? `快照于 ${formatDate(term.snapshot_at)}` : formatDate(term.started_at) }}</td><td>{{ term.source_kind === 'LEGACY_SNAPSHOT' ? (term.ended_at ? formatDate(term.ended_at) : (term.active_at_snapshot ? '尚在团队' : '迁移前未知')) : formatDate(term.ended_at) }}</td><td>{{ term.source_kind === 'LEGACY_SNAPSHOT' ? '迁移程序观察' : ownerLabel(term.started_by) }}<template v-if="term.ended_by"> → {{ ownerLabel(term.ended_by) }}</template></td><td>{{ term.source_kind === 'LEGACY_SNAPSHOT' ? (term.active_at_snapshot ? '迁移快照（当时在组）' : '迁移快照（当时已移出）') : '完整记录' }}</td></tr></tbody></table>
-        <PaginationBar class="crm-pagination" label="团队任期明细分页" :page="opportunityMemberTermsPage.number" :total="opportunityMemberTermsPage.total" :page-size="opportunityMemberTermsPage.size" :loading="opportunityMemberTermsLoading" @change="page => loadOpportunityMemberTerms(undefined, page)" />
-      </template>
+    <aside v-if="selectedOpportunity" class="crm-opportunity-attachment-panel crm-opportunity-terms-entry" aria-label="团队任期明细入口">
+      <button type="button" @click="opportunityTermsOpen = true">
+        <span><strong>团队任期明细</strong><small>{{ opportunityMemberTermsPage.total }} 条记录</small></span>
+        <span aria-hidden="true">›</span>
+      </button>
     </aside>
     <aside v-if="selectedOpportunity && canReadOpportunityAttachments" class="crm-opportunity-attachment-panel" aria-label="商机可信附件">
       <h3>可信附件</h3>
@@ -4285,7 +4315,12 @@ onMounted(async () => {
       </ul>
       <p v-else-if="!opportunityAttachmentLoading" class="crm-note">暂无附件。</p>
       <div v-if="canUploadOpportunityAttachments" class="crm-attachment-upload">
-        <input type="file" accept=".pdf,.png,.jpg,.jpeg,.docx,.xlsx,application/pdf,image/png,image/jpeg,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" :disabled="!opportunityAttachmentCapabilities?.upload_available || opportunityAttachmentLoading" @change="selectOpportunityAttachment">
+        <div class="crm-opportunity-dropzone" :class="{ 'is-disabled': !opportunityAttachmentCapabilities?.upload_available || opportunityAttachmentLoading }">
+          <strong>拖拽文件到这里，或点击选择</strong>
+          <small>上传后自动送检，CLEAN 后才可下载</small>
+          <input type="file" accept=".pdf,.png,.jpg,.jpeg,.docx,.xlsx,application/pdf,image/png,image/jpeg,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" :disabled="!opportunityAttachmentCapabilities?.upload_available || opportunityAttachmentLoading" @change="selectOpportunityAttachment">
+          <div class="crm-opportunity-formats" aria-hidden="true"><span>PDF</span><span>PNG</span><span>JPG</span><span>DOCX</span><span>XLSX</span></div>
+        </div>
         <button type="button" :disabled="!opportunityAttachmentFile || !opportunityAttachmentCapabilities?.upload_available || opportunityAttachmentLoading" @click="uploadOpportunityAttachment">上传并校验</button>
       </div>
     </aside>
@@ -4337,6 +4372,45 @@ onMounted(async () => {
       >{{ contractTransferLoading ? '正在受理…' : '转交合同系统' }}</button>
       <p v-else-if="canTransferOpportunity && selectedOpportunity.current_stage === '已签约' && !contractTransferAvailable" class="crm-note">转合同能力未启用或尚未就绪，未产生转交任务。</p>
       <p v-else-if="canTransferOpportunity && winConfirmationMode === 'contract' && selectedOpportunity.current_stage === '已签约' && !selectedOpportunity.contract_ref" class="crm-note">请先补全并验证合同，再转交合同系统。</p>
+    </aside>
+    </div>
+  </div>
+  <div class="crm-opportunity-actionbar">
+    <div class="crm-opportunity-action-meta">
+      <span>负责人 <strong>{{ ownerLabel(selectedOpportunity.owner_user_id) }}</strong><em v-if="opportunityOwnerUnavailable(selectedOpportunity)" class="crm-owner-warning">账号已失效</em></span>
+      <span>最近更新 {{ formatDate(selectedOpportunity.updated_at) }}</span>
+    </div>
+    <div class="crm-opportunity-action-buttons">
+      <button type="button" @click="selectedOpportunity = null">关闭</button>
+      <details class="crm-opportunity-more">
+        <summary>更多操作</summary>
+        <div class="crm-opportunity-more-menu">
+          <button v-if="selectedOpportunity.opp_status !== 'VOID'" type="button" @click="openOwnerEditor">变更负责人</button>
+          <button v-if="selectedOpportunity.opp_status !== 'VOID' && canManageOpportunityTeam && opportunityTeamDirectoryAvailable" type="button" @click="openTeamEditor">维护团队</button>
+          <button v-if="selectedOpportunity.opp_status !== 'VOID' && selectedOpportunity.terminal_pending_type && selectedOpportunity.terminal_pending_type !== 'NONE'" type="button" @click="terminalDialog = true">补全终态待办</button>
+          <button v-if="selectedOpportunity.opp_status !== 'VOID'" type="button" class="danger" @click="changeOpportunityStatus('void')">作废</button>
+        </div>
+      </details>
+      <button v-if="selectedOpportunity.opp_status !== 'VOID'" type="button" class="primary" @click="followupDialog = true"><ConsoleIcon name="plus" />添加跟进</button>
+      <button v-else type="button" class="primary" @click="changeOpportunityStatus('restore')">恢复</button>
+    </div>
+  </div>
+  <div v-if="opportunityTermsOpen" class="crm-opportunity-terms-backdrop" @click.self="opportunityTermsOpen = false">
+    <aside class="crm-opportunity-terms-drawer" role="dialog" aria-modal="true" aria-labelledby="opportunity-terms-title">
+      <header>
+        <div><p>关键资料</p><h2 id="opportunity-terms-title">团队任期明细</h2></div>
+        <button type="button" aria-label="关闭团队任期明细" @click="opportunityTermsOpen = false"><ConsoleIcon name="close" /></button>
+      </header>
+      <div class="crm-opportunity-terms-body">
+        <p class="crm-note">每次加入、移出、重新加入和角色变化独立记录；“迁移快照”仅代表账本启用时观察到的状态，加入和移出时间未知，不推测更早历史。</p>
+        <ListState v-if="opportunityMemberTermsLoading || opportunityMemberTermsError || !opportunityMemberTerms.length" :loading="opportunityMemberTermsLoading" :error="opportunityMemberTermsError" error-title="团队任期明细加载失败" empty-title="暂无任期明细" compact @retry="loadOpportunityMemberTerms()" />
+        <template v-else>
+          <div class="crm-opportunity-terms-table" data-table-scroll>
+            <table><thead><tr><th scope="col">成员</th><th scope="col">角色</th><th scope="col">开始 / 快照</th><th scope="col">结束</th><th scope="col">操作人</th><th scope="col">来源</th></tr></thead><tbody><tr v-for="term in opportunityMemberTerms" :key="term.id"><td>{{ ownerLabel(term.user_id) }}</td><td>{{ teamRoleText(term.role) }}</td><td>{{ term.source_kind === 'LEGACY_SNAPSHOT' ? `快照于 ${formatDate(term.snapshot_at)}` : formatDate(term.started_at) }}</td><td>{{ term.source_kind === 'LEGACY_SNAPSHOT' ? (term.ended_at ? formatDate(term.ended_at) : (term.active_at_snapshot ? '尚在团队' : '迁移前未知')) : formatDate(term.ended_at) }}</td><td>{{ term.source_kind === 'LEGACY_SNAPSHOT' ? '迁移程序观察' : ownerLabel(term.started_by) }}<template v-if="term.ended_by"> → {{ ownerLabel(term.ended_by) }}</template></td><td>{{ term.source_kind === 'LEGACY_SNAPSHOT' ? (term.active_at_snapshot ? '迁移快照（当时在组）' : '迁移快照（当时已移出）') : '完整记录' }}</td></tr></tbody></table>
+          </div>
+          <PaginationBar class="crm-pagination" label="团队任期明细分页" :page="opportunityMemberTermsPage.number" :total="opportunityMemberTermsPage.total" :page-size="opportunityMemberTermsPage.size" :loading="opportunityMemberTermsLoading" @change="page => loadOpportunityMemberTerms(undefined, page)" />
+        </template>
+      </div>
     </aside>
   </div>
   </article></div>

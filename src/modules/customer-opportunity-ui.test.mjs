@@ -315,6 +315,24 @@ test('商机团队从基础平台真实人员目录选择并展示姓名与组�
   assert.match(style, /\.crm-team-summary/)
 })
 
+test('商机详情工作台：指标通栏、340px 关键资料栏、底部操作条与任期抽屉', () => {
+  const headerEnd = view.indexOf('</header>')
+  const metricsAt = view.indexOf('class="crm-opportunity-metrics"')
+  const mainAt = view.indexOf('class="crm-opportunity-main"')
+  assert.ok(headerEnd >= 0 && metricsAt > headerEnd, '指标必须位于头部之后')
+  assert.ok(metricsAt < mainAt, '指标必须移出主栏，位于工作区之前')
+  assert.match(style, /\.crm-opportunity-workspace \{[^}]*grid-template-columns: minmax\(0, 1fr\) 340px/)
+  assert.match(style, /\.crm-opportunity-metric > strong \{[^}]*white-space: nowrap/)
+  assert.match(view, /class="crm-opportunity-actionbar"/)
+  assert.match(view, /class="crm-opportunity-more"/)
+  assert.match(view, /class="crm-detail-card crm-opportunity-recent"/)
+  assert.match(view, /followups\.slice\(0, 2\)/)
+  assert.match(view, /团队任期明细/)
+  assert.match(style, /\.crm-opportunity-terms-drawer/)
+  assert.match(view, /opportunityCustomerText\(selectedOpportunity\)/)
+  assert.doesNotMatch(view, /'客户 #' \+ selectedOpportunity\.customer_id/)
+})
+
 test('商机详情看板先展示核心指标，再按概览/售前/跟进分区，不铺成长字段表', () => {
   assert.match(view, /class="crm-opportunity-metrics" aria-label="商机核心指标"/)
   assert.match(view, /预计金额[\s\S]*formatAmount\(selectedOpportunity\.expected_amount\)/)
@@ -326,17 +344,18 @@ test('商机详情看板先展示核心指标，再按概览/售前/跟进分区
   assert.match(view, /暂无阶段变更记录/)
   assert.match(style, /\.crm-opportunity-metrics \{[^}]*grid-template-columns: repeat\(4/)
   assert.match(style, /\.crm-opportunity-tabs \{[^}]*border-bottom: 1px solid/)
-  assert.match(style, /\.crm-opportunity-overview-grid \{[^}]*grid-template-columns: minmax\(0, 1\.15fr\)/)
+  assert.match(style, /\.crm-opportunity-overview-grid \{[^}]*grid-template-columns: minmax\(0, 1\.35fr\)/)
 })
 
-test('商机补充信息使用统一滚动轨道，避免团队任期、附件和外部状态浮层重叠', () => {
+test('商机关键资料栏不再承载任期宽表，任期明细进入抽屉', () => {
   assert.match(view, /class="crm-opportunity-side-rail"/)
-  assert.match(style, /\.crm-opportunity-side-rail\s*\{/)
-  assert.match(style, /\.crm-opportunity-attachment-panel,[\s\S]*\.crm-opportunity-external-panel\s*\{[\s\S]*position:\s*static/)
-  assert.match(style, /\.crm-opportunity-detail\s*\{[\s\S]*max-height:\s*calc\(100vh - 48px\)[\s\S]*overflow:\s*hidden/)
-  assert.match(style, /\.crm-opportunity-main\s*\{[\s\S]*min-height:\s*0[\s\S]*overflow:\s*auto/)
-  assert.match(style, /\.crm-opportunity-actions\s*\{[\s\S]*justify-content:\s*flex-start/)
-  assert.match(style, /\.crm-opportunity-actions > button\s*\{[\s\S]*max-width:\s*100%[\s\S]*flex:\s*0 1 auto/)
+  assert.match(view, /class="[^"]*crm-opportunity-terms-entry/)
+  assert.match(view, /opportunityTermsOpen = true/)
+  assert.match(view, /teamRoleText\(term\.role\)/)
+  assert.match(view, /data-table-scroll/)
+  assert.match(style, /\.crm-opportunity-terms-drawer\s*\{/)
+  assert.match(style, /\.crm-opportunity-terms-table\s*\{[^}]*overflow-x:\s*auto/)
+  assert.doesNotMatch(view, /crm-opportunity-side-rail[\s\S]{0,400}<table>/)
 })
 
 test('售前预警仅使用当前基础平台用户身份', () => {

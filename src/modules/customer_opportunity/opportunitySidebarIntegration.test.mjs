@@ -38,7 +38,7 @@ test('打开另一商机时清除上一个商机已选择但尚未上传的文�
     'opportunityMemberTermsError', 'opportunityMemberTermsLoading', 'opportunityExternalStatus',
     'opportunityQuoteAmountCheck', 'opportunityExternalStatusError', 'opportunityPresales',
     'opportunityPresaleError', 'opportunityAttachments', 'opportunityAttachmentCapabilities',
-    'opportunityAttachmentError', 'opportunityAttachmentLoading', 'error',
+    'opportunityAttachmentError', 'opportunityAttachmentLoading', 'opportunityTermsOpen', 'error',
   ].map(name => [name, ref(name === 'opportunityDetailLoadSequence' ? 1 : null)]))
   const oldFile = { name: 'A报价.pdf' }
   Object.assign(dependencies, {
