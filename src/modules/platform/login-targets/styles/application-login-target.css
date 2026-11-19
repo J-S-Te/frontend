@@ -34,7 +34,7 @@
 }
 
 .login-target-module__eyebrow {
-  color: var(--primary-ink, var(--primary));
+  color: var(--primary-ink);
   font-size: 12px;
   font-weight: 800;
   letter-spacing: .1em;

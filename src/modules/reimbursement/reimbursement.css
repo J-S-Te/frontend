@@ -7,7 +7,7 @@
   --exp-bg: var(--surface-muted);
   --exp-card: var(--surface-card);
   --exp-inset: var(--surface-muted);
-  --exp-inset-strong: var(--surface-hover, var(--border));
+  --exp-inset-strong: var(--surface-hover);
   --exp-line: var(--border);
   --exp-line-soft: var(--line-soft);
   --exp-ink: var(--text);
@@ -1274,7 +1274,7 @@
 .expense-invoice-line .expense-invoice-line-remove { align-self: end; margin-bottom: 8px; }
 .expense-control-actions .expense-button.active {
   border-color: var(--exp-accent);
-  color: var(--primary-ink, var(--exp-accent));
+  color: var(--primary-ink);
   background: var(--exp-accent-soft);
 }
 .expense-control-form { margin-top: 16px; max-width: 1080px; }
@@ -2235,7 +2235,7 @@
   margin: 0;
   border: 0;
   background: transparent;
-  color: var(--text-faint, #94a3b8);
+  color: var(--text-faint);
   font-size: var(--fs-xs, 12px);
   font-weight: 600;
   letter-spacing: 1px;
@@ -2246,7 +2246,7 @@
 }
 
 .console-sidebar .console-nav-label--toggle:hover {
-  color: var(--sidebar-text, #cbd5e1);
+  color: var(--sidebar-text);
 }
 
 .console-sidebar .console-nav-label--toggle::after {

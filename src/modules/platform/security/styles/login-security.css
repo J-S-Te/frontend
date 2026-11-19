@@ -6,7 +6,7 @@
 .so-summary-card small { display: block; color: var(--so-muted); font-size: 12px; }
 .so-summary-card strong { display: block; margin-top: 2px; color: var(--so-ink); font-size: 22px; line-height: 1.05; }
 .so-summary-card p { margin: 3px 0 0; overflow: hidden; color: var(--text-muted); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
-.so-summary-card.blue > span { color: var(--primary-ink, var(--primary)); background: var(--chip-brand, #dbeafe); }
+.so-summary-card.blue > span { color: var(--primary-ink); background: var(--chip-brand, #dbeafe); }
 .so-summary-card.violet > span { color: var(--violet-ink, #8b5cf6); background: var(--violet-soft, #f5f3ff); }
 .so-summary-card.orange > span { color: var(--warning-text); background: var(--warning-soft); }
 .so-summary-card.green > span { color: var(--success-text); background: var(--success-soft); }

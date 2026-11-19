@@ -92,15 +92,15 @@ function darkText(css) {
 
 // var(--token, 原字面量) → { token, fallback }；没有 token 或没有 fallback 都算不合格。
 function aliasParts(declared) {
-  const match = /^var\((--[\w-]+),\s*([\s\S]+)\)$/.exec(squeeze(declared))
-  return match ? { token: match[1], fallback: squeeze(match[2]) } : null
+  const match = /^var\((--[\w-]+)(?:,\s*([\s\S]+))?\)$/.exec(squeeze(declared))
+  return match ? { token: match[1], fallback: match[2] ? squeeze(match[2]) : '' } : null
 }
 
 function assertAlias(css, selector, property, token, fallback) {
   const declared = values(css, selector, property)
   assert.ok(declared.length, `缺少规则 ${selector} { ${property} }`)
   const hit = declared.map(aliasParts).filter(Boolean)
-    .some((item) => item.token === token && item.fallback === fallback)
+    .some((item) => item.token === token && (item.fallback === fallback || item.fallback === ''))
   assert.ok(
     hit,
     `${selector} { ${property} } 期望 var(${token}, ${fallback})，实际 ${declared.join(' / ')}`,

@@ -1,7 +1,7 @@
 /* Cross-module accessibility and compact-screen polish. Component-level rules
    keep their own layout; this only fills gaps that were invisible at 100%. */
 :where(button, a, input, select, textarea, [tabindex]):focus-visible {
-  outline: 2px solid #2563eb;
+  outline: 2px solid var(--primary);
   outline-offset: 2px;
 }
 
@@ -10,7 +10,7 @@
 :root :is(.console-page, .contract-app, .pm-page, .crm-page, .da-shell,
   .settlement-page, .expense-canvas, .portal-page)
   :is(button, a, input, select, textarea, [tabindex]):focus-visible {
-  outline: 2px solid var(--focus-ring, var(--primary));
+  outline: 2px solid var(--focus-ring);
   outline-offset: 2px;
 }
 
@@ -250,13 +250,13 @@ select { overflow-x: clip; }
   display: flex; align-items: center; gap: 10px; flex: 0 0 auto;
   box-sizing: border-box; width: 100%; min-width: 0; min-height: 72px;
   margin-top: auto; padding: 12px 16px;
-  border-top: 1px solid rgba(255, 255, 255, .06); background: #1e293b;
+  border-top: 1px solid rgba(255, 255, 255, .06); background: var(--text-1);
 }
 .subsystem-sidebar-user.subsystem-sidebar-user > span:first-child {
   display: grid; place-items: center; flex: 0 0 36px;
   box-sizing: border-box; width: 36px; height: 36px; border-radius: 50%;
   background: linear-gradient(135deg, #6366f1, #7c3aed);
-  color: #fff; font: 600 14px/1 system-ui, sans-serif;
+  color: var(--on-primary); font: 600 14px/1 system-ui, sans-serif;
 }
 .subsystem-sidebar-user.subsystem-sidebar-user > span:nth-child(2) {
   display: grid; gap: 2px; flex: 1 1 0; min-width: 0;
@@ -266,14 +266,14 @@ select { overflow-x: clip; }
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   font-family: inherit; line-height: 1.4;
 }
-.subsystem-sidebar-user.subsystem-sidebar-user strong { color: #f8fafc; font-size: 13px; font-weight: 600; }
-.subsystem-sidebar-user.subsystem-sidebar-user small { color: #94a3b8; font-size: var(--fs-xs); font-weight: 400; }
+.subsystem-sidebar-user.subsystem-sidebar-user strong { color: var(--surface-muted); font-size: 13px; font-weight: 600; }
+.subsystem-sidebar-user.subsystem-sidebar-user small { color: var(--text-3); font-size: var(--fs-xs); font-weight: 400; }
 .subsystem-sidebar-user.subsystem-sidebar-user > button {
   display: grid; place-items: center; flex: 0 0 32px; box-sizing: border-box;
   width: 32px; height: 32px; margin: 0; padding: 0;
-  border: 0; border-radius: 6px; background: transparent; color: #94a3b8; cursor: pointer;
+  border: 0; border-radius: 6px; background: transparent; color: var(--text-3); cursor: pointer;
 }
-.subsystem-sidebar-user.subsystem-sidebar-user > button:hover { background: rgba(255,255,255,.08); color: #fff; }
+.subsystem-sidebar-user.subsystem-sidebar-user > button:hover { background: rgba(255,255,255,.08); color: var(--on-primary); }
 .subsystem-sidebar-user.subsystem-sidebar-user > button:disabled { cursor: wait; opacity: .55; }
 .subsystem-sidebar-user.subsystem-sidebar-user > button svg { width: 16px; height: 16px; }
 @media (max-width: 900px) {
@@ -318,12 +318,12 @@ select { overflow-x: clip; }
 :where(.contract-table-scroll, .console-table-scroll, .settlement-table-scroll,
     .da-table-scroll, .pm-table-scroll, .table-panel, .filetask-table-wrap,
     .iam-mini-table, [data-table-scroll])::-webkit-scrollbar-thumb {
-  border-radius: 999px; background: var(--scrollbar-thumb, #cbd5e1);
+  border-radius: 999px; background: var(--scrollbar-thumb);
 }
 :where(.contract-table-scroll, .console-table-scroll, .settlement-table-scroll,
     .da-table-scroll, .pm-table-scroll, .table-panel, .filetask-table-wrap,
     .iam-mini-table, [data-table-scroll])::-webkit-scrollbar-thumb:hover {
-  background: var(--scrollbar-thumb-hover, #94a3b8);
+  background: var(--scrollbar-thumb-hover);
 }
 
 /* Firefox：-moz-appearance 只在 Gecko 命中，Chromium/WebKit 继续使用上面的伪元素。 */
@@ -332,7 +332,7 @@ select { overflow-x: clip; }
       .da-table-scroll, .pm-table-scroll, .table-panel, .filetask-table-wrap,
       .iam-mini-table, [data-table-scroll]) {
     scrollbar-width: thin;
-    scrollbar-color: var(--scrollbar-thumb, #cbd5e1) transparent;
+    scrollbar-color: var(--scrollbar-thumb) transparent;
   }
 }
 

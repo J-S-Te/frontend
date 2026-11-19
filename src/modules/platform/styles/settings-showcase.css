@@ -78,7 +78,7 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  color: var(--primary-ink, var(--primary));
+  color: var(--primary-ink);
   font-size: var(--settings-fs-meta);
   font-weight: 700;
   letter-spacing: .1em;
@@ -189,13 +189,13 @@
   line-height: 1;
   border: 0;
   border-radius: var(--radius-pill);
-  background: var(--chip-neutral, var(--surface-content));
+  background: var(--chip-neutral);
   cursor: pointer;
 }
 
 .settings-tab-search-clear:hover {
   color: var(--text);
-  background: var(--chip-neutral-strong, var(--border));
+  background: var(--chip-neutral-strong);
 }
 
 .settings-tab-count {
@@ -285,7 +285,7 @@
 }
 
 .settings-tab.active {
-  color: var(--primary-ink, var(--primary-dark));
+  color: var(--primary-ink);
   border-color: var(--primary-border);
   background: var(--primary-soft);
 }
@@ -594,7 +594,7 @@
   border: 1px solid var(--border-brand);
   border-left: 3px solid var(--primary);
   border-radius: 8px;
-  background: var(--surface-tint, var(--primary-soft));
+  background: var(--surface-tint);
 }
 
 .settings-active-summary-icon {
@@ -605,7 +605,7 @@
   place-items: center;
   color: var(--primary);
   border-radius: 8px;
-  background: var(--chip-brand, var(--primary-soft));
+  background: var(--chip-brand);
 }
 
 .settings-active-summary-icon svg {
@@ -639,7 +639,7 @@
 
 .settings-active-summary.violet .settings-active-summary-icon {
   color: var(--violet-ink);
-  background: var(--surface-tint, var(--violet-soft));
+  background: var(--surface-tint);
 }
 
 .settings-active-summary.cyan {
@@ -650,7 +650,7 @@
 
 .settings-active-summary.cyan .settings-active-summary-icon {
   color: var(--sky-ink);
-  background: var(--surface-tint, var(--sky-soft));
+  background: var(--surface-tint);
 }
 
 .settings-active-summary.orange {
@@ -661,18 +661,18 @@
 
 .settings-active-summary.orange .settings-active-summary-icon {
   color: var(--warning-text);
-  background: var(--surface-tint, var(--warning-soft));
+  background: var(--surface-tint);
 }
 
 .settings-active-summary.red {
   border-color: var(--danger-border);
-  border-left-color: var(--danger-ink, var(--danger));
+  border-left-color: var(--danger-ink);
   background: var(--danger-soft);
 }
 
 .settings-active-summary.red .settings-active-summary-icon {
-  color: var(--danger-ink, var(--danger));
-  background: var(--surface-tint, var(--danger-soft));
+  color: var(--danger-ink);
+  background: var(--surface-tint);
 }
 
 .settings-active-summary.green {
@@ -683,7 +683,7 @@
 
 .settings-active-summary.green .settings-active-summary-icon {
   color: var(--success-text);
-  background: var(--surface-tint, var(--success-soft));
+  background: var(--surface-tint);
 }
 
 .settings-active-summary.slate {
@@ -694,7 +694,7 @@
 
 .settings-active-summary.slate .settings-active-summary-icon {
   color: var(--text-secondary);
-  background: var(--chip-neutral, var(--surface-content));
+  background: var(--chip-neutral);
 }
 
 @media (max-width: 900px) {
