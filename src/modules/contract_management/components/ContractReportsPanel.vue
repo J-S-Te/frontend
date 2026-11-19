@@ -273,7 +273,7 @@ function statusTone(status) {
   margin-left: auto
 }
 
-@media(max-width:720px) {
+@media(max-width:640px) {
   .contract-report-breakdowns {
     grid-template-columns: 1fr
   }

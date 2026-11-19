@@ -229,5 +229,5 @@ onBeforeUnmount(() => { generation++; activationURL.value = ''; selectedFile.val
 .portal-local-admin li { padding: .4rem 0; overflow-wrap: anywhere; }
 .portal-local-admin code { overflow-wrap: anywhere; }
 .local-error { color: #9f2222; }
-@media (max-width: 620px) { .local-form, .portal-local-admin label { display: grid; width: 100%; min-width: 0; } }
+@media (max-width: 640px) { .local-form, .portal-local-admin label { display: grid; width: 100%; min-width: 0; } }
 </style>

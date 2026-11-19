@@ -273,7 +273,7 @@ test('上手清单入口只在页头保留一份，未就绪 loading/disabled、
   assert.match(portal, /function resetFirstRunChecklist\(\)/)
   assert.match(portalStyles, /\.subsystem-portal__guide-entry \{[^}]*var\(--portal-text-secondary\)/)
   assert.match(portalStyles, /\.subsystem-portal__guide-entry:disabled \{[^}]*cursor: progress/)
-  assert.match(portalStyles, /@media \(max-width: 650px\) \{[\s\S]{0,500}\.subsystem-portal__guide-entry \{ width: 100%; justify-content: center; \}/)
+  assert.match(portalStyles, /@media \(max-width: 640px\) \{[\s\S]{0,500}\.subsystem-portal__guide-entry \{ width: 100%; justify-content: center; \}/)
 })
 
 test('页头清单入口用清单/任务语义图标，而不是保存/下载形状', () => {

@@ -668,7 +668,7 @@ const alertTitle = computed(() => {
 }
 
 /* 窄屏：事实卡从"三格并排"改成"标签 + 取值"的紧凑键值行，少占纵向空间。 */
-@media (max-width: 520px) {
+@media (max-width: 480px) {
   .subsystem-access-progress__head { padding: 10px 12px; }
   .subsystem-access-progress__body { padding: 11px 12px 12px; }
   .subsystem-access-progress__facts { grid-template-columns: minmax(0, 1fr); }

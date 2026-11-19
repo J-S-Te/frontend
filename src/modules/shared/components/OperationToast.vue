@@ -78,6 +78,6 @@ watch(
 .shared-operation-toast.success .shared-operation-toast-icon { color: #86efac; }
 .operation-toast-enter-active, .operation-toast-leave-active { transition: opacity .15s ease, transform .15s ease; }
 .operation-toast-enter-from, .operation-toast-leave-to { opacity: 0; transform: translateY(-8px); }
-@media (max-width: 560px) { .shared-operation-toast { top: 68px; right: 16px; } }
+@media (max-width: 480px) { .shared-operation-toast { top: 68px; right: 16px; } }
 @media (prefers-reduced-motion: reduce) { .operation-toast-enter-active, .operation-toast-leave-active { transition: none; } }
 </style>

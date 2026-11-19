@@ -106,7 +106,7 @@ onBeforeUnmount(() => {
 .operation-inbox-panel dl div { display: flex; gap: 6px; }
 .operation-inbox-panel dt { flex: 0 0 auto; color: #64748b; font-size: 11px; }
 .operation-inbox-panel dd { margin: 0; color: #334155; font-size: 11px; overflow-wrap: anywhere; }
-@media (max-width: 560px) { .operation-inbox-panel { position: fixed; top: 64px; right: 12px; left: 12px; width: auto; } }
+@media (max-width: 480px) { .operation-inbox-panel { position: fixed; top: 64px; right: 12px; left: 12px; width: auto; } }
 
 /* 深色主题：顶栏通知抽屉的白底、浅描边与墨色；浅色声明未改。
    hover 颜色由根上的别名给出，深色下与平台全局 token 同源（与改前取值一致）。 */

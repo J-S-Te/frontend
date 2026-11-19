@@ -289,7 +289,7 @@ tbody tr:hover { background: var(--surface-hover, #fafbfc); }
 .runtime-services-empty { border-top: 1px solid var(--runtime-border); }
 .runtime-readonly { padding: 0 4px; }
 .runtime-sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
-@media (max-width: 1000px) {
+@media (max-width: 1200px) {
   .runtime-header { align-items: flex-start; }
   .runtime-toolbar { width: 100%; }
   .runtime-select { flex: 1; }
@@ -299,7 +299,7 @@ tbody tr:hover { background: var(--surface-hover, #fafbfc); }
   .runtime-fact + .runtime-fact { padding-top: 18px; border-top: 1px dashed var(--runtime-border); }
   th, td { padding-left: 12px; padding-right: 12px; }
 }
-@media (max-width: 680px) {
+@media (max-width: 640px) {
   .runtime-enforcement { padding-top: 22px; gap: 12px; }
   .runtime-heading-icon { flex-basis: 36px; width: 36px; height: 36px; border-radius: 10px; }
   .runtime-heading p { max-width: 250px; }

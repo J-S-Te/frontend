@@ -2804,7 +2804,7 @@ onBeforeUnmount(() => { disposed = true; generation++; documentGeneration++; exc
 .contract-import-error-code code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 
 /* ── 响应式：窄屏改单列，不产生横向滚动、不叠字 ─────────────────────── */
-@media (min-width: 900px) {
+@media (min-width: 901px) {
   .contract-import-batch-item { grid-template-columns: minmax(170px, 250px) minmax(0, 1fr); }
   .contract-import-batch-item-issues { grid-column: 1 / -1; }
   /* 行卡片：标题与客户各占半行，金额/币种/起止日期四种短字段排成一行。 */
@@ -2813,7 +2813,7 @@ onBeforeUnmount(() => { disposed = true; generation++; documentGeneration++; exc
   .contract-import-row .contract-import-fact-party { grid-column: span 2; }
 }
 
-@media (max-width: 768px) {
+@media (max-width: 640px) {
   .contract-import-body { gap: 14px; padding: 0 14px 14px; }
   .contract-import-panel > summary { padding: 13px 14px; }
   .contract-import-block { padding: 14px; }
@@ -2836,7 +2836,7 @@ onBeforeUnmount(() => { disposed = true; generation++; documentGeneration++; exc
   .contract-import-steps { font-size: 11.5px; }
 }
 
-@media (max-width: 720px) {
+@media (max-width: 640px) {
   .contract-import-drawer { width: 100%; }
   .contract-import-mode, .contract-import-normal-modes { flex-direction: column; align-items: stretch; }
   .contract-import-mode label, .contract-import-normal-modes label { justify-content: flex-start; border-radius: 8px; }

@@ -12,10 +12,14 @@ function zTokens(css) {
 }
 
 function narrowScreenBlock(css) {
-  const start = css.indexOf('@media (max-width: 900px)')
-  assert.ok(start >= 0, '缺少窄屏媒体查询')
-  const next = css.indexOf('\n@media ', start + 1)
-  return css.slice(start, next === -1 ? undefined : next)
+  // 断点收敛后同一宽度可能有多个 @media 块；取真正包含 .pm-sidebar 的那一块。
+  for (const match of css.matchAll(/@media \(max-width: 900px\) \{/g)) {
+    const start = match.index
+    const next = css.indexOf('\n@media ', start + 1)
+    const block = css.slice(start, next === -1 ? undefined : next)
+    if (block.includes('.pm-sidebar')) return block
+  }
+  assert.fail('缺少包含 .pm-sidebar 的窄屏媒体查询')
 }
 
 // 回归锁定：窄屏侧栏是抽屉，与遮罩同处一层。遮罩按 DOM 顺序后渲染，
@@ -67,7 +71,7 @@ test('资质与能力筛选行在窄屏换行 / 纵向排列', () => {
   assert.ok(filter, '缺少 .pm-qualification-filter 规则')
   assert.match(filter[1], /flex-wrap:\s*wrap/, '筛选行必须允许换行')
 
-  const start = css.indexOf('@media (max-width: 700px)')
+  const start = css.indexOf('@media (max-width: 900px)')
   assert.ok(start >= 0, '缺少 ≤700px 媒体查询')
   const next = css.indexOf('\n@media ', start + 1)
   const block = css.slice(start, next === -1 ? undefined : next)

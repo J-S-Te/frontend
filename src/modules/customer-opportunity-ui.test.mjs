@@ -64,7 +64,7 @@ test('信用规则管理使用状态摘要、参数卡和响应式配置操作�
   assert.match(creditRuleSettings, /role="switch" :aria-checked="form\.enabled"/)
   assert.match(creditRuleSettings, /class="crm-credit-rule-footer"/)
   assert.match(style, /\.crm-credit-rule-settings \{ width: min\(100%, 1120px\)/)
-  assert.match(style, /@media \(max-width: 760px\)[\s\S]*\.crm-credit-rule-grid \{ grid-template-columns: 1fr; \}/)
+  assert.match(style, /@media \(max-width: 640px\)[\s\S]*\.crm-credit-rule-grid \{ grid-template-columns: 1fr; \}/)
 })
 
 test('售前审批规则支持规则列表和编辑区折叠', () => {
@@ -110,7 +110,7 @@ test('售前审批规则的列表与编辑器拆成并列卡片，空态/加载�
   assert.match(approvalPanel, /:disabled="saving \|\| form\.nodes\.length >= 10"/)
   assert.match(approvalPanel, /:disabled="saving \|\| deletingRuleId === String\(rule\.id\)"/)
   assert.match(style, /\.crm-approval-rules-layout \{\s*display: grid;\s*grid-template-columns: minmax\(0, 360px\)/)
-  assert.match(style, /@media \(max-width: 1100px\) \{\s*\.crm-approval-rules-layout \{ grid-template-columns: minmax\(0, 1fr\); \}/)
+  assert.match(style, /@media \(max-width: 1200px\) \{\s*\.crm-approval-rules-layout \{ grid-template-columns: minmax\(0, 1fr\); \}/)
   assert.match(style, /\.crm-approval-node-head \{\s*display: grid;/)
 })
 
@@ -189,8 +189,8 @@ test('客户与商机管理复用基础平台壳层、图标导航和响应式�
   // 导航项权限从手写 v-if 改成外壳的 visible 标记，语义不变：无权限不渲染。
   assert.match(view, /visible: canReadNotifications\.value/)
   assert.match(view, /mobileMenuOpen/)
-  assert.match(style, /@media \(max-width: 820px\)/)
-  assert.match(style, /@media \(max-width: 620px\)/)
+  assert.match(style, /@media \(max-width: 900px\)/)
+  assert.match(style, /@media \(max-width: 640px\)/)
 })
 
 test('商机列表、七阶段看板和详情统一展示已签约合同数量', () => {
@@ -241,7 +241,7 @@ test('售前申请详情使用摘要与双栏工作区并在窄屏回退单列',
   assert.match(view, /class="crm-presale-detail-activity" aria-label="流程与工时记录"/)
   assert.match(style, /\.crm-presale-detail-workspace \{ display: grid; grid-template-columns: minmax\(0, 1\.08fr\) minmax\(420px, \.92fr\)/)
   assert.match(style, /\.crm-presale-detail-activity \{ position: sticky; top: 94px; \}/)
-  assert.match(style, /@media \(max-width: 820px\)[\s\S]*\.crm-presale-detail-workspace \{ grid-template-columns: 1fr;/)
+  assert.match(style, /@media \(max-width: 900px\)[\s\S]*\.crm-presale-detail-workspace \{ grid-template-columns: 1fr;/)
 })
 
 test('售前申请详情标题展示售前名称且摘要区按被支持单位/联系方式/支持内容重排', () => {
@@ -822,7 +822,7 @@ test('商机类型和来源使用租户目录、结构化 ID 与安全删除', a
   assert.match(opportunityCatalogDialog, /统一维护商机创建时可选择的类型和来源/)
   assert.match(style, /\.crm-catalog-tabs \{ display: grid; grid-template-columns: repeat\(2/)
   assert.match(style, /\.crm-catalog-item:hover/)
-  assert.match(style, /@media \(max-width: 520px\)[\s\S]*\.crm-catalog-dialog/)
+  assert.match(style, /@media \(max-width: 480px\)[\s\S]*\.crm-catalog-dialog/)
 
   const originalFetch = globalThis.fetch
   t.after(() => { globalThis.fetch = originalFetch })
@@ -1714,8 +1714,8 @@ test('新建售前申请使用分区式响应布局并保留完整提交动作',
   assert.match(style, /\.crm-presale-create-steps \{\n  display: flex;\n  align-items: center;\n  gap: 16px;/)
   assert.match(style, /\.crm-presale-create-steps li b \{[^}]*background: var\(--primary, #2563eb\)/)
   assert.doesNotMatch(style, /\.crm-presale-create-hero/)
-  assert.match(style, /@media \(max-width: 620px\)[\s\S]*\.crm-presale-create-fields \{ grid-template-columns: 1fr; \}/)
-  assert.match(style, /@media \(max-width: 620px\)[\s\S]*\.crm-presale-create-steps ol \{ display: grid;/)
+  assert.match(style, /@media \(max-width: 640px\)[\s\S]*\.crm-presale-create-fields \{ grid-template-columns: 1fr; \}/)
+  assert.match(style, /@media \(max-width: 640px\)[\s\S]*\.crm-presale-create-steps ol \{ display: grid;/)
 })
 
 test('负责人列表与详情会按需补全人员目录名字', () => {
@@ -1809,6 +1809,6 @@ test('CRM 工具条筛选行不再写对 flex 元素无效的 grid-template-colu
   assert.deepEqual(offenders, [], `flex 工具条上仍留有无效栅格规则：\n${offenders.join('\n')}`)
 
   assert.match(style, /\.crm-report-filters\s*\{[\s\S]*?grid-template-columns:\s*repeat\(3/, '真正的网格筛选行应保留列定义')
-  assert.match(style, /@media \(max-width: 820px\)[\s\S]*?\.crm-report-filters\s*\{[\s\S]*?grid-template-columns:\s*repeat\(2/, '≤820px 网格筛选应降为两列')
-  assert.match(style, /@media \(max-width: 620px\)[\s\S]*?\.crm-report-filters\s*\{[\s\S]*?grid-template-columns:\s*1fr/, '≤620px 网格筛选应降为单列')
+  assert.match(style, /@media \(max-width: 900px\)[\s\S]*?\.crm-report-filters\s*\{[\s\S]*?grid-template-columns:\s*repeat\(2/, '≤820px 网格筛选应降为两列')
+  assert.match(style, /@media \(max-width: 640px\)[\s\S]*?\.crm-report-filters\s*\{[\s\S]*?grid-template-columns:\s*1fr/, '≤620px 网格筛选应降为单列')
 })

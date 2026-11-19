@@ -438,7 +438,7 @@
       「页头 + 搜索」一行、吸顶分区条一行，内容区恢复整宽；
       数据表不再因为左侧导航被挤成卡片态，长页面滚动时仍能切换分区。
    2) ≥1800px：左侧分组导航（宽屏）。 */
-@media (max-width: 1799px) {
+@media (max-width: 1200px) {
   .settings-view {
     grid-template-columns: minmax(0, 1fr) minmax(200px, 300px);
     grid-template-rows: auto auto 1fr;
@@ -549,7 +549,7 @@
   }
 }
 
-@media (max-width: 820px) {
+@media (max-width: 900px) {
   .settings-view {
     grid-template-columns: minmax(0, 1fr);
   }
@@ -697,14 +697,14 @@
   background: var(--chip-neutral, var(--surface-content));
 }
 
-@media (max-width: 760px) {
+@media (max-width: 900px) {
   .settings-active-summary {
     align-items: flex-start;
     flex-wrap: wrap;
   }
 }
 
-@media (max-width: 460px) {
+@media (max-width: 480px) {
   .settings-active-summary {
     gap: 9px;
     padding: 10px;

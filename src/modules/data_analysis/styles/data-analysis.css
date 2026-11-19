@@ -268,7 +268,7 @@
 .da-native-card-settings-reset:disabled { color: var(--text-faint, #94a3b8); border-color: var(--border, #e2e8f0); background: var(--surface-muted, #f8fafc); cursor: default; }
 .da-native-metrics-empty { display: flex; align-items: center; justify-content: center; gap: 10px; margin-bottom: 12px; padding: 22px 16px; color: var(--da-muted, #64748b); font-size: 12px; border: 1px dashed #d7e3f6; border-radius: 12px; background: var(--surface-tint, #fbfdff); }
 /* 列数跟随可见卡片：桌面端最多 6 列，窄屏沿用既有 3/2 列断点，不挤出视口。 */
-@media (min-width: 1101px) {
+@media (min-width: 1201px) {
   .da-native-metrics-cols-1 { --da-metric-columns: 1; }
   .da-native-metrics-cols-2 { --da-metric-columns: 2; }
   .da-native-metrics-cols-3 { --da-metric-columns: 3; }
@@ -333,8 +333,8 @@
 .da-page-filters { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; margin-top: 14px; }
 .da-page-filters label { display: flex; align-items: center; gap: 5px; color: var(--da-muted, #64748b); font-size: var(--fs-xs); }
 .da-page-filters select { height: 30px; padding: 0 8px; border: 1px solid var(--da-line, #e4ecfc); border-radius: 7px; color: var(--da-ink, #0f172a); background: var(--surface-card, #fff); font-size: 12px; }
-@media (max-width: 1100px) { .da-native-metrics { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
-@media (max-width: 720px) { .da-native-heading, .da-native-columns { grid-template-columns: 1fr; display: grid; } .da-native-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); } .da-page-filters { justify-content: flex-start; } .da-native-card-settings-panel { right: 0; } }
+@media (max-width: 1200px) { .da-native-metrics { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 900px) { .da-native-heading, .da-native-columns { grid-template-columns: 1fr; display: grid; } .da-native-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); } .da-page-filters { justify-content: flex-start; } .da-native-card-settings-panel { right: 0; } }
 
 /* ==========================================================================
    深色主题
@@ -643,7 +643,7 @@
 .da-alert-card { border-radius: 12px; box-shadow: 0 1px 3px var(--da-shadow-card); }
 .da-alert-card:hover { box-shadow: 0 2px 6px var(--da-shadow-soft); }
 
-@media (min-width: 1101px) {
+@media (min-width: 1201px) {
   .da-native-metrics-cols-3 { --da-metric-columns: 3; }
 }
 
@@ -655,7 +655,7 @@
   .da-page { padding: 22px 16px 32px; }
 }
 
-@media (max-width: 720px) {
+@media (max-width: 900px) {
   .da-native-columns, .da-native-columns.da-native-columns-even { grid-template-columns: 1fr; }
   .da-donut-wrap { flex-direction: column; align-items: flex-start; }
   .da-donut { width: 180px; }

@@ -58,6 +58,6 @@ function dismiss(id) {
 .global-error-toast__close:focus-visible { outline: 2px solid var(--primary); outline-offset: 1px; }
 .global-error-toast-enter-active, .global-error-toast-leave-active { transition: opacity var(--duration-fast) ease, transform var(--duration-fast) ease; }
 .global-error-toast-enter-from, .global-error-toast-leave-to { opacity: 0; transform: translateY(-6px); }
-@media (max-width: 560px) { .global-error-toasts { top: var(--space-4); right: var(--space-4); } }
+@media (max-width: 480px) { .global-error-toasts { top: var(--space-4); right: var(--space-4); } }
 @media (prefers-reduced-motion: reduce) { .global-error-toast-enter-active, .global-error-toast-leave-active { transition: none; } }
 </style>

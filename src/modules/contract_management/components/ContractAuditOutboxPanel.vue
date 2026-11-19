@@ -285,7 +285,7 @@ onMounted(load)
   min-width: 1080px;
 }
 
-@media (max-width: 720px) {
+@media (max-width: 640px) {
   .contract-audit-outbox__toolbar {
     align-items: stretch;
     flex-direction: column;

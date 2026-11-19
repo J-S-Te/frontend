@@ -24,6 +24,6 @@ test('审批规则使用统一 console 遮罩/关闭按钮的右侧抽屉', () =
   assert.match(css, /\.console-modal-backdrop\.crm-rule-drawer-backdrop \{ display: flex;/)
   assert.match(css, /\.crm-rule-drawer \{/)
   assert.match(css, /\.crm-rule-drawer \.crm-approval-rules-panel\.crm-panel \{/)
-  assert.match(css, /@media \(max-width: 720px\) \{\s*\.crm-rule-drawer \{ width: 100%; \}/)
+  assert.match(css, /@media \(max-width: 640px\) \{\s*\.crm-rule-drawer \{ width: 100%; \}/)
   assert.match(css, /@media \(prefers-reduced-motion: reduce\) \{ \.crm-rule-drawer \{ animation: none; \} \}/)
 })

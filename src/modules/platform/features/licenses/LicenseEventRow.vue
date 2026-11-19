@@ -272,7 +272,7 @@ onBeforeUnmount(() => clearTimeout(feedbackTimer))
 }
 
 /* 窄屏：摘要行变两行（名+版本修订 / 时间），行高 64px；详情字段改上下堆叠。 */
-@media (max-width: 720px) {
+@media (max-width: 640px) {
   .license-event-summary {
     grid-template-areas:
       "name meta chevron"

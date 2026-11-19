@@ -20,5 +20,5 @@
 .filetask-table__actions { display: flex; flex-wrap: wrap; gap: 6px; min-width: 155px; }
 /* 分页统一交给 shared/components/PaginationBar.vue（.ui-pager）：这里只保留页脚对齐，不再自绘按钮。 */
 .filetask-pagination { display: flex; align-items: center; justify-content: flex-end; color: var(--text-muted); font-size: var(--fs-sm); }
-@media (max-width: 1080px) {.filetask-form-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-@media (max-width: 680px) { .filetask-module__header, .filetask-jobs__header { flex-direction: column; }.filetask-guide { grid-template-columns: 1fr; }.filetask-jobs__filters { width: 100%; flex-wrap: wrap; }.filetask-jobs__filters input, .filetask-jobs__filters select { flex: 1 1 130px; }.filetask-form-grid { grid-template-columns: 1fr; }.filetask-card { padding: 14px; }.filetask-pagination { justify-content: flex-start; } }
+@media (max-width: 1200px) {.filetask-form-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 640px) { .filetask-module__header, .filetask-jobs__header { flex-direction: column; }.filetask-guide { grid-template-columns: 1fr; }.filetask-jobs__filters { width: 100%; flex-wrap: wrap; }.filetask-jobs__filters input, .filetask-jobs__filters select { flex: 1 1 130px; }.filetask-form-grid { grid-template-columns: 1fr; }.filetask-card { padding: 14px; }.filetask-pagination { justify-content: flex-start; } }

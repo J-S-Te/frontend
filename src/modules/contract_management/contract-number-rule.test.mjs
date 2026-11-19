@@ -138,6 +138,6 @@ test('编号规则面板沿用合同管理既有样式语言，没有引入新�
   assert.match(css, /\.contract-number-rule-body \{ display: grid;/)
   assert.match(css, /\.contract-number-rule-preview > strong \{[^}]*font-family: ui-monospace/)
   assert.match(css, /\.contract-number-rule-warning \{[^}]*#fffbeb/)
-  assert.match(css, /@media \(max-width: 980px\) \{ \.contract-number-rule-body \{ grid-template-columns: 1fr; \} \}/)
+  assert.match(css, /@media \(max-width: 900px\) \{ \.contract-number-rule-body \{ grid-template-columns: 1fr; \} \}/)
   assert.doesNotMatch(panelSource, /<style/)
 })

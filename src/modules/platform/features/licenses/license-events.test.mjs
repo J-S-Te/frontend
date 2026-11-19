@@ -94,7 +94,7 @@ test('known event codes have readable names and unknown codes remain identifiabl
 // ===========================================================================
 
 test('页内摘要最多 5 行（≤720px 3 行），条数由 matchMedia 派生而不是 CSS 隐藏', () => {
-  assert.match(viewSource, /matchMedia\('\(max-width:720px\)'\)/)
+  assert.match(viewSource, /matchMedia\('\(max-width:640px\)'\)/)
   assert.match(viewSource, /const narrowViewport = ref\(Boolean\(narrowMedia\?\.matches\)\)/)
   assert.match(viewSource, /const recentLimit = computed\(\(\) => \(narrowViewport\.value \? 3 : 5\)\)/)
   assert.match(viewSource, /events\.value\.items\.slice\(0, recentLimit\.value\)/)

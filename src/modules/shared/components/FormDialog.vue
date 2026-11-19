@@ -272,7 +272,7 @@ onBeforeUnmount(deactivate)
   opacity: 0;
   transform: scale(.99);
 }
-@media (max-width: 520px) {
+@media (max-width: 480px) {
   .ui-form-dialog { padding: 10px; }
   .ui-form-dialog__panel { max-height: calc(100dvh - 20px); }
   .ui-form-dialog__header { padding: 16px 16px 0; }

@@ -905,7 +905,7 @@
 .pm-qualification-filter label { display: flex; align-items: center; gap: var(--pm-sp-2); min-width: 0; }
 .pm-qualification-filter span { flex: 0 0 auto; color: var(--pm-muted); font-size: var(--pm-fs-hint); white-space: nowrap; }
 .pm-qualification-filter select { height: var(--pm-h-control); max-width: 100%; min-width: min(140px, 100%); padding: 0 10px; border: 1px solid var(--pm-line); border-radius: var(--pm-r-sm); background: var(--pm-card); color: var(--pm-body); font-size: var(--pm-fs-sm); }
-@media (max-width: 700px) {
+@media (max-width: 900px) {
   .pm-qualification-filter { align-items: stretch; flex-direction: column; }
   .pm-qualification-filter label { justify-content: space-between; }
   .pm-qualification-filter select { flex: 1 1 auto; }
@@ -1489,7 +1489,7 @@
 .pm-supplement-closure-notice b { display: block; margin-bottom: 4px; color: var(--pm-amber-text); font-size: var(--pm-fs-sm); }
 .pm-supplement-closure-notice p { margin: 0; color: var(--pm-amber-text); font-size: var(--pm-fs-hint); line-height: var(--pm-lh-loose); }
 
-@media (max-width: 700px) {
+@media (max-width: 900px) {
   .pm-supplement-closure { flex-wrap: wrap; }
   .pm-supplement-closure > div { flex-basis: calc(100% - 32px); }
   .pm-supplement-closure > .pm-button { width: 100%; }
@@ -1608,11 +1608,11 @@
 /* ==========================================================================
    §17 窄屏适配
    ========================================================================== */
-@media (max-width: 1280px) {
+@media (max-width: 1200px) {
   .pm-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
-@media (max-width: 1180px) {
+@media (max-width: 1200px) {
   .pm-dashboard-grid,
   .pm-dashboard-grid-3 { grid-template-columns: 1fr; }
   .pm-kanban { grid-template-columns: repeat(5, 210px); }
@@ -1645,7 +1645,7 @@
   .pm-equipment-form { grid-template-columns: 1fr; }
 }
 
-@media (max-width: 760px) {
+@media (max-width: 900px) {
   .pm-responsive-list { min-width: 0; border-collapse: separate; }
   .pm-responsive-list thead { display: none; }
   .pm-responsive-list tbody { display: grid; gap: var(--pm-sp-3); padding: var(--pm-sp-3); }
@@ -1674,7 +1674,7 @@
   .pm-responsive-list tbody .pm-card-title { grid-column: auto; }
 }
 
-@media (max-width: 560px) {
+@media (max-width: 480px) {
   .pm-page-head { flex-direction: column; }
   .pm-actions { justify-content: flex-start; }
   .pm-kpis { grid-template-columns: 1fr; }
@@ -1694,7 +1694,7 @@
   .pm-table-footer { flex-direction: column; align-items: flex-start; }
 }
 
-@media (max-width: 420px) {
+@media (max-width: 480px) {
   .pm-kpis { grid-template-columns: 1fr; }
 }
 
@@ -1790,7 +1790,7 @@
 .pm-travel-route-preview > small { grid-column: 1 / -1; color: var(--pm-muted); font-size: var(--pm-fs-hint); font-weight: var(--pm-fw-regular); }
 @keyframes pm-travel-detail-in { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: translateY(0); } }
 
-@media (max-width: 700px) {
+@media (max-width: 900px) {
   .pm-travel-mode,
   .pm-travel-grid { grid-template-columns: 1fr; }
   .pm-travel-head-status { display: none; }
@@ -1933,11 +1933,11 @@
 .pm-kpi-hidden-empty svg { width: 16px; height: 16px; flex: none; }
 .pm-kpi-hidden-empty span { margin-right: auto; }
 
-@media (max-width: 1280px) {
+@media (max-width: 1200px) {
   .pm-project-kpi-columns-5 > .pm-kpi { flex-basis: calc(33.333333% - 10.666667px); }
 }
 
-@media (max-width: 760px) {
+@media (max-width: 900px) {
   .pm-project-kpi-grid > .pm-kpi { flex-basis: calc(50% - 8px); }
   /* 窄屏设置面板改为整行宽度，不再贴右绝对定位，避免超出视口。 */
   .pm-kpi-settings { justify-content: stretch; }
@@ -1945,7 +1945,7 @@
   .pm-kpi-settings-panel { left: 0; right: 0; width: auto; max-height: 50vh; }
 }
 
-@media (max-width: 520px) {
+@media (max-width: 480px) {
   .pm-project-kpi-grid > .pm-kpi { flex-basis: 100%; }
 }
 
@@ -2009,7 +2009,7 @@
 .pm-statusbar-legend span { display: inline-flex; align-items: center; gap: 6px; color: var(--pm-body); font-size: var(--pm-fs-hint); }
 .pm-statusbar-legend i { width: 10px; height: 10px; border-radius: 3px; }
 
-@media (max-width: 680px) {
+@media (max-width: 640px) {
   .pm-monitoring-snapshot > header { min-height: 0; }
   .pm-monitoring-empty-state { align-items: flex-start; margin-left: var(--pm-sp-3); margin-right: var(--pm-sp-3); }
   .pm-monitoring-empty-state small { display: none; }
@@ -2152,12 +2152,12 @@
 .pm-split-savebar > span { color: var(--pm-muted); font-size: var(--pm-fs-hint); }
 .pm-split-savebar > div { display: flex; flex-wrap: wrap; gap: var(--pm-sp-2); }
 
-@media (max-width: 1100px) {
+@media (max-width: 1200px) {
   .pm-split-guide { grid-template-columns: 1fr; }
   .pm-split-flow { grid-column: 1; grid-row: auto; }
 }
 
-@media (max-width: 700px) {
+@media (max-width: 900px) {
   .pm-split-guide { padding: var(--pm-sp-4); }
   .pm-split-flow { flex-direction: column; }
   .pm-split-flow > i { transform: rotate(90deg); }
@@ -2202,7 +2202,7 @@
 .pm-signature-pad small { color: var(--pm-muted); line-height: 1.45; }
 .pm-field-incomplete { display: grid; gap: var(--pm-sp-2); margin-top: var(--pm-sp-3); max-width: 720px; color: var(--pm-text-secondary); }
 .pm-field-incomplete textarea { min-height: 68px; }
-@media(max-width:1100px){.pm-field-workflow{grid-template-columns:1fr}.pm-field-checkin{grid-template-columns:1fr}.pm-field-checkin > .pm-button{width:100%}.pm-field-finish{grid-template-columns:1fr}.pm-field-complete{width:100%}.pm-signature-pad canvas{height:150px}}
+@media(max-width:1200px){.pm-field-workflow{grid-template-columns:1fr}.pm-field-checkin{grid-template-columns:1fr}.pm-field-checkin > .pm-button{width:100%}.pm-field-finish{grid-template-columns:1fr}.pm-field-complete{width:100%}.pm-signature-pad canvas{height:150px}}
 
 
 /* ==========================================================================
@@ -2436,7 +2436,7 @@
 /* 19.8 窄屏（原型侧栏在 ≤900 收起为抽屉；顶栏工具保持右对齐） */
 /* 761–1100px：项目表列数多，保持可读最小宽度并交给 .pm-table-scroll 横向滚动，
    不把项目编号、团队与状态挤成逐字换行；≤760px 仍走既有卡片式响应表。 */
-@media (min-width: 761px) { .pm-responsive-list { min-width: 1080px; } }
+@media (min-width: 901px) { .pm-responsive-list { min-width: 1080px; } }
 @media (max-width: 900px) {
   .pm-topbar { padding-inline: var(--pm-sp-4); }
   .pm-nav-item { padding: 9px 16px; }
@@ -2619,7 +2619,7 @@
 }
 .pm-report-side-head b { color: var(--pm-ink); font-size: var(--pm-fs-label); }
 .pm-report-side-head span { color: var(--pm-muted); font-size: var(--pm-fs-hint); }
-@media (max-width: 1100px) {
+@media (max-width: 1200px) {
   .pm-report-workspace { grid-template-columns: minmax(0, 1fr); }
   .pm-report-workspace > .pm-metric-review { grid-column: 1; grid-row: auto; }
   .pm-report-workspace > .pm-report-form,
@@ -2691,12 +2691,12 @@
 .pm-operation-form .pm-stepper-panel,
 .pm-operation-form .pm-blocker,
 .pm-operation-form .pm-span-full { grid-column: 1 / -1; }
-@media (max-width: 1100px) {
+@media (max-width: 1200px) {
   .pm-operation-workspace { grid-template-columns: minmax(0, 1fr); }
   .pm-operation-queue { position: static; }
   .pm-operation-queue .pm-picker-list { max-height: 320px; }
 }
-@media (max-width: 720px) {
+@media (max-width: 900px) {
   .pm-operation-summary { flex-direction: column; }
   .pm-operation-summary-meta { grid-template-columns: repeat(2, minmax(0, 1fr)); min-width: 0; width: 100%; }
 }
@@ -2796,10 +2796,10 @@
 .pm-detail-attention-item { padding: 2px 8px; color: var(--pm-body); font-size: var(--pm-fs-hint); font-weight: 600; border-radius: 999px; background: var(--pm-card); border: 1px solid var(--pm-line); cursor: pointer; }
 .pm-detail-attention-item:hover { border-color: var(--pm-primary); color: var(--pm-primary); }
 .pm-shell .pm-page .pm-detail-items th { height: 40px; padding: 8px 12px; font-size: var(--pm-fs-hint); }
-@media (max-width: 1180px) {
+@media (max-width: 1200px) {
   .pm-detail-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
-@media (max-width: 760px) {
+@media (max-width: 900px) {
   .pm-detail-items { min-width: 0; }
   .pm-detail-items thead { display: none; }
   .pm-detail-items, .pm-detail-items tbody, .pm-detail-items tr, .pm-detail-items td { display: block; }

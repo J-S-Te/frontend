@@ -191,7 +191,7 @@ const emit = defineEmits(['toggle-all'])
 .iam-batch-import-table .badge.bad { background: #fee2e2; color: #b91c1c; }
 .iam-batch-import-table .badge small { font-weight: 500; opacity: 0.85; margin-left: 2px; }
 
-@media (max-width: 760px) {
+@media (max-width: 640px) {
   .iam-batch-import-table .col-status { width: auto; }
 }
 

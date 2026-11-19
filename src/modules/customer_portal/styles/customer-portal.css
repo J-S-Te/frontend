@@ -799,7 +799,7 @@
 .filing-workspace .portal-error button { min-height: 30px; margin-left: 12px; padding: 5px 8px; color: var(--danger-text, #b91c1c); border: 1px solid currentColor; border-radius: 5px; background: var(--surface-card, #fff); }
 
 /* ===== 响应式 ===== */
-@media (max-width: 1000px) {
+@media (max-width: 1200px) {
   .filing-steps { grid-template-columns: repeat(2, 1fr); }
   .filing-steps::before { display: none; }
   .filing-fields { grid-template-columns: 1fr; }
@@ -812,13 +812,13 @@
   .project-milestones { grid-template-columns: 1fr; }
   .project-team { grid-template-columns: 1fr; }
 }
-@media (max-width: 800px) {
+@media (max-width: 900px) {
   .portal-columns { grid-template-columns: 1fr; }
   .project-list { grid-template-columns: 1fr; }
   .report-summary { grid-template-columns: 1fr; }
   .project-export-actions { left: 16px; right: 16px; bottom: 16px; display: grid; }
 }
-@media (max-width: 650px) {
+@media (max-width: 640px) {
   .filing-toolbar,
   .filing-step-panel > header { align-items: flex-start; flex-direction: column; }
   .filing-steps { grid-template-columns: 1fr; }
