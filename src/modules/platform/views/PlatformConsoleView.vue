@@ -1,4 +1,5 @@
 <script setup>
+import { useNotificationStream } from '@/modules/shared/composables/notificationStream.js'
 import { computed, defineAsyncComponent, h, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { AuthError, logoutCurrentSession } from '@/modules/platform/auth/api/auth'
@@ -214,6 +215,7 @@ const notificationMenuLoading = ref(false)
 // 顶栏未读通知弹层：失败原因单独留存，弹层用三态闸门展示，不再吞成「暂无未读通知」。
 const topbarNotificationsError = ref('')
 const topbarNotifications = ref([])
+let topbarNotificationSequence = 0
 const topbarUnreadCount = ref(0)
 // 筛选器会在用户连续操作时触发多次请求；序号和 AbortController 共同保证旧响应
 // 不会覆盖最后一次查询结果，也避免无效请求继续占用浏览器与 API 连接。
@@ -976,19 +978,27 @@ async function downloadAuditExport() {
   finally { auditDownloading.value = false }
 }
 
-async function loadTopbarNotifications() {
-  notificationMenuLoading.value = true
+/**
+ * 用途：重新读取当前用户未读数，按需刷新已打开的通知弹层。
+ * 参数：includeItems 表示是否读取弹层通知列表。
+ * 返回值：加载后的 Promise；查询故障由弹层提示。
+ */
+async function loadTopbarNotifications(includeItems = true) {
+  const sequence = ++topbarNotificationSequence
+  if (includeItems) notificationMenuLoading.value = true
   topbarNotificationsError.value = ''
   try {
-    const [count, page] = await Promise.all([getUnreadCount(), listInbox({ pageSize: 8, unreadOnly: true })])
+    const [count, page] = await Promise.all([getUnreadCount(), includeItems ? listInbox({ pageSize: 8, unreadOnly: true }) : null])
+    if (sequence !== topbarNotificationSequence) return
     topbarUnreadCount.value = Number(count?.unread_count || 0)
-    topbarNotifications.value = page?.items || []
+    if (includeItems) topbarNotifications.value = page?.items || []
   } catch (error) {
+    if (sequence !== topbarNotificationSequence) return
     topbarUnreadCount.value = 0
-    topbarNotifications.value = []
+    if (includeItems) topbarNotifications.value = []
     // 读取失败不能显示成「暂无未读通知」：交给列表三态给出可重试的错误。
     topbarNotificationsError.value = formatUserError(error, { fallback: '未读通知读取失败，请稍后重试。' })
-  } finally { notificationMenuLoading.value = false }
+  } finally { if (sequence === topbarNotificationSequence) notificationMenuLoading.value = false }
 }
 
 async function toggleNotificationMenu() {
@@ -1148,6 +1158,8 @@ function refreshOnboardingReferencesOnFocus() {
   if (!hasPermission(IAM_PERMISSIONS.userCreate)) return
   loadOnboardingReferences().catch(() => {})
 }
+
+useNotificationStream(() => loadTopbarNotifications(notificationMenuOpen.value))
 
 onMounted(async () => {
   // 拉取 principal，让 IAM 操作按钮的权限判断立即生效；后端仍执行最终鉴权。

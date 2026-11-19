@@ -1,4 +1,5 @@
 <script setup>
+import { useNotificationStream } from '@/modules/shared/composables/notificationStream.js'
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { openNotificationTarget, notificationTarget } from '../../../shared/utils/notificationNavigation.js'
@@ -129,6 +130,7 @@ async function retryFailed() {
 }
 async function saveSettings() { await runAction(async () => { Object.assign(settings, await updateNotificationSettings({ inboxEnabled: settings.inbox_enabled, reminderFrequency: settings.reminder_frequency, version: settings.version })) }, '通知设置已保存。') }
 onMounted(refresh)
+useNotificationStream(() => tab.value === 'inbox' ? refresh() : undefined)
 watch(() => route.query.notification_id, (id) => {
   if (typeof id === 'string' && id) open({ delivery_id: id })
 }, { immediate: true })

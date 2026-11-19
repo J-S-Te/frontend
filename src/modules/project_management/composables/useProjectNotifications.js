@@ -1,3 +1,4 @@
+import { useNotificationStream } from '../../shared/composables/notificationStream.js'
 import { onBeforeUnmount, ref } from 'vue'
 import { projectApprovalTarget } from '../approvalTasks.js'
 
@@ -215,6 +216,8 @@ function toggleNotifications() {
   function disposeNotifications() {
     disposed = true
   }
+
+  useNotificationStream(() => notificationOpen.value ? loadUnreadNotifications() : refreshNotificationCount())
 
   onBeforeUnmount(() => {
     disposeNotifications()

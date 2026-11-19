@@ -1,4 +1,5 @@
 <script setup>
+import { useNotificationStream } from '@/modules/shared/composables/notificationStream.js'
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { openNotificationTarget, notificationTarget } from '../../shared/utils/notificationNavigation.js'
@@ -127,6 +128,7 @@ async function deleteRead() {
   } finally { loading.value = false }
 }
 onMounted(load)
+useNotificationStream(load)
 onBeforeUnmount(() => { disposed = true; loadSequence += 1 })
 </script>
 

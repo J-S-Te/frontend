@@ -1,4 +1,5 @@
 <script setup>
+import { useNotificationStream } from '@/modules/shared/composables/notificationStream.js'
 import { computed, onMounted, ref } from 'vue'
 import { deleteReadNotifications, getNotification, getUnreadCount, listInbox, markNotificationRead } from '@/modules/platform/notifications/api/notifications'
 import { notificationTargetPath } from '@/modules/platform/notifications/target.js'
@@ -36,7 +37,15 @@ function scopeParams() {
   return {}
 }
 
+let loadSequence = 0
+
+/**
+ * 用途：读取当前页面与来源筛选的收件箱，屏蔽旧查询的结果。
+ * 参数：无。
+ * 返回值：加载后的 Promise；查询故障由页面提示。
+ */
 async function load() {
+  const sequence = ++loadSequence
   loading.value = true
   error.value = ''
   try {
@@ -47,15 +56,17 @@ async function load() {
       listInbox(params),
       getUnreadCount(scopeParams()),
     ])
+    if (sequence !== loadSequence) return
     items.value = result?.items || []
     total.value = Number(result?.total || 0)
     unread.value = Number(unreadResult?.unread_count || 0)
     emit('unread-change', unread.value)
     if (page.value > pages.value) { page.value = pages.value; await load() }
   } catch (e) {
+    if (sequence !== loadSequence) return
     items.value = []
     error.value = formatUserError(e, { fallback: '站内通知加载失败，请重试。' })
-  } finally { loading.value = false }
+  } finally { if (sequence === loadSequence) loading.value = false }
 }
 
 function changeTab(next) {
@@ -117,6 +128,7 @@ async function deleteRead() {
 }
 
 onMounted(load)
+useNotificationStream(load)
 </script>
 
 <template>
