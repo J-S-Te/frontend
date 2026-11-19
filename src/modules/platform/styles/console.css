@@ -478,11 +478,28 @@
 
 @media (min-width: 821px) {
   .console-page.is-sidebar-collapsed .console-sidebar {
-    transform: translateX(-100%);
-    visibility: hidden;
+    width: var(--shell-collapsed, 64px);
+    transform: none;
+    visibility: visible;
   }
 
-  .console-page.is-sidebar-collapsed .console-main { margin-left: 0; }
+  .console-page.is-sidebar-collapsed .console-main { margin-left: var(--shell-collapsed, 64px); }
+
+  /* 折叠为图标栏：保留品牌标记、菜单图标与头像，隐藏文字，避免整栏消失。 */
+  .console-page.is-sidebar-collapsed .console-brand-copy,
+  .console-page.is-sidebar-collapsed .console-nav-label,
+  .console-page.is-sidebar-collapsed .console-nav-item > span,
+  .console-page.is-sidebar-collapsed .console-user-copy,
+  .console-page.is-sidebar-collapsed .console-logout,
+  .console-page.is-sidebar-collapsed .console-close-menu { display: none; }
+
+  .console-page.is-sidebar-collapsed .console-brand,
+  .console-page.is-sidebar-collapsed .console-sidebar-user { justify-content: center; padding-inline: 0; }
+
+  .console-page.is-sidebar-collapsed .console-nav-item {
+    justify-content: center;
+    padding-inline: 0;
+  }
 }
 
 /* 主题切换：三段式控件，尺寸与顶栏图标按钮接近；

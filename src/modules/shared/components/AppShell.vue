@@ -66,6 +66,8 @@ const props = defineProps({
   // 提供这两个 prop 时用它替换内层写死的 console-sidebar / console-main 基类（缺省行为不变）。
   sidebarBaseClass: { type: String, default: 'console-sidebar' },
   mainBaseClass: { type: String, default: 'console-main' },
+  navItemClass: { type: String, default: '' },
+  navLabelClass: { type: String, default: '' },
 })
 
 // navGroups 结构：
@@ -308,16 +310,17 @@ function toggleItem(item) {
             <button
               v-if="group.collapsible"
               class="console-nav-label console-nav-label--toggle"
+              :class="navLabelClass"
               type="button"
               :aria-expanded="isGroupCollapsed(group.key) ? 'false' : 'true'"
               @click="toggleGroup(group.key)"
             ><span>{{ group.label }}</span></button>
-            <p v-else-if="group.label" class="console-nav-label">{{ group.label }}</p>
+            <p v-else-if="group.label" class="console-nav-label" :class="navLabelClass">{{ group.label }}</p>
             <template v-if="!group.collapsible || !isGroupCollapsed(group.key)">
               <template v-for="item in group.items" :key="item.key">
                 <button
                   class="console-nav-item"
-                  :class="[item.itemClass, { active: Boolean(item.active), 'has-children': item.children.length > 0, 'is-expanded': isItemExpanded(item) }]"
+                  :class="[navItemClass, item.itemClass, { active: Boolean(item.active), 'has-children': item.children.length > 0, 'is-expanded': isItemExpanded(item) }]"
                   type="button"
                   :title="item.title || undefined"
                   :aria-current="item.active && !item.children.some((child) => child.active) ? 'page' : undefined"

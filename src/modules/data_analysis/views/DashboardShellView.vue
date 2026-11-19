@@ -1,7 +1,5 @@
 <script setup>
-import ShellPreferences from '@/modules/shared/components/ShellPreferences.vue'
-import { useSidebarNavigation } from '@/modules/shared/composables/useSidebarNavigation.js'
-import { readSidebarCollapsed } from '@/modules/shared/utils/shellPreferences.js'
+import AppShell from '@/modules/shared/components/AppShell.vue'
 import { useLoginUsername } from '@/modules/shared/composables/useLoginUsername.js'
 // 数据看板统一外壳（对齐 project_management 模式）：
 // 深色侧栏导航 + 顶栏 + 页面头，按 route.params.section 切换分区；
@@ -104,28 +102,6 @@ const dashboardEmbedEnabled = computed(() => !!me.value && isDashboardEmbedEnabl
 const loading = ref(true)
 const loadError = ref("")
 const mobileMenuOpen = ref(false)
-// 侧栏的稳定 id 由模板给出（aria-controls 指向它）；menuButton 是抽屉收起后焦点的落脚点。
-const menuButton = ref(null)
-const sidebarElement = ref(null)
-const desktopSidebarCollapsed = ref(readSidebarCollapsed())
-const { hidden: sidebarHidden } = useSidebarNavigation({
-  open: mobileMenuOpen, container: sidebarElement, trigger: menuButton,
-  breakpoint: 900, collapsed: desktopSidebarCollapsed,
-})
-
-// closeMenuOnEscape 处理文档级 Escape：只在抽屉打开时收起，收起后把焦点交还汉堡按钮，
-// 键盘用户不会掉进已隐藏的侧栏。
-// 参数：event 为 keydown 事件。返回值：无。
-function closeMenuOnEscape(event) {
-  if (event.key !== "Escape" && event.key !== "Esc") return
-  if (!mobileMenuOpen.value) return
-  // 弹窗（确认框 / 指标卡设置等）先处理同一个 Escape：抽屉既不抢按键，也不抢焦点。
-  if (event.defaultPrevented) return
-  if (document.body?.dataset?.confirmDialogOpen === "true") return
-  if (document.querySelector('[role="dialog"]')) return
-  mobileMenuOpen.value = false
-  menuButton.value?.focus?.()
-}
 const iframeSrc = ref("")
 const embedFrame = ref(null)
 const recordEmbeddedActivity = inject('central-session-record-activity', null)
@@ -180,6 +156,25 @@ const currentUserRole = computed(() => {
 const currentUserInitial = computed(() => currentUserName.value.slice(0, 1).toUpperCase())
 const permissions = computed(() => me.value?.permissions || [])
 const hasPermission = (code) => permissions.value.includes(code)
+
+// AppShell 导航数据：只保留当前账号可见项，并把当前分区映射为 active。
+const appShellNavGroups = computed(() => [
+  ...navGroups.map((group) => ({
+    label: group.label,
+    items: group.items
+      .filter((item) => !item.permission || hasPermission(item.permission))
+      .map((item) => ({ ...item, active: section.value === item.key })),
+  })).filter((group) => group.items.length > 0),
+  {
+    label: "平台能力",
+    items: [{ key: "__portal", label: "返回子系统门户", icon: "nav-portal", anchor: "subsystem-portal" }],
+  },
+])
+
+function onShellNavigate(key) {
+  if (key === "__portal") returnToUnifiedPortal()
+  else navigate(key)
+}
 const canViewDashboard = (code) => permissions.value.includes(DASHBOARD_PERMISSIONS[code])
 const visibleDashboardSections = computed(() => DASHBOARD_SECTIONS.filter(canViewDashboard))
 const dataScopeLabel = computed(() => SCOPE_MODE_LABELS[scopeMode.value] ? `当前授权范围：${SCOPE_MODE_LABELS[scopeMode.value]}` : "数据范围尚未提供")
@@ -547,7 +542,6 @@ watch(statusOptions, (options) => {
 onMounted(async () => {
   document.addEventListener("visibilitychange", onVisibilityChange)
   // 抽屉的 Escape 必须挂在 document 上：焦点在遮罩或侧栏里时事件不会冒泡到外壳根节点。
-  document.addEventListener("keydown", closeMenuOnEscape)
   unsubscribeRelatedData = subscribeRelatedDataChanges(scheduleRelatedRefresh, { kinds: [RELATED_DATA.ORGANIZATIONS, RELATED_DATA.POSITIONS, RELATED_DATA.MEMBERSHIPS, RELATED_DATA.ROLE_CATALOG] })
   await loadMe()
   if (disposed) return
@@ -575,56 +569,60 @@ onBeforeUnmount(() => {
   if (unsubscribeRelatedData) unsubscribeRelatedData()
   document.removeEventListener("visibilitychange", onVisibilityChange)
   // 模块切走后不再持有 Escape 监听，避免去动已经卸载的抽屉状态。
-  document.removeEventListener("keydown", closeMenuOnEscape)
 })
 </script>
 
 <template>
-  <div class="console-page da-shell" :class="{ 'is-sidebar-collapsed': desktopSidebarCollapsed }">
-    <aside ref="sidebarElement" :inert="sidebarHidden" :aria-hidden="sidebarHidden ? 'true' : undefined" tabindex="-1" id="da-sidebar" class="da-sidebar" :class="{ open: mobileMenuOpen }">
-      <div class="da-brand">
-        <span class="da-brand-dot" aria-hidden="true"></span>
-        <b>数据看板子系统</b>
-        <button class="da-icon-button da-mobile-close" aria-label="关闭菜单" @click="mobileMenuOpen = false"><ConsoleIcon name="close" /></button>
-      </div>
-      <div class="da-brand-sub">经营数据视图 · 一期</div>
-      <nav class="da-nav" aria-label="数据看板导航" data-first-run-anchor="subsystem-nav">
-        <template v-for="group in navGroups" :key="group.label || 'primary'">
-          <div v-if="group.label && group.items.some((item) => !item.permission || hasPermission(item.permission))" class="da-nav-label">{{ group.label }}</div>
-          <button v-for="item in group.items" :key="item.key" v-show="!item.permission || hasPermission(item.permission)" class="da-nav-item" :class="{ active: section === item.key }" :aria-current="section === item.key ? 'page' : undefined" @click="navigate(item.key)">
-            <ConsoleIcon :name="item.icon" /><span>{{ item.label }}</span>
-          </button>
-        </template>
-        <div class="da-nav-divider"></div>
-        <button class="da-nav-item" type="button" data-first-run-anchor="subsystem-portal" @click="returnToUnifiedPortal"><ConsoleIcon name="nav-portal" /><span>返回子系统门户</span></button>
-      </nav>
+  <AppShell
+    page-class="da-shell"
+    sidebar-base-class="console-sidebar da-sidebar"
+    main-base-class="console-main da-main"
+    brand-class="da-brand"
+    sidebar-user-class="da-sidebar-user subsystem-sidebar-user"
+    content-class="da-shell-content"
+    topbar-class="da-topbar"
+    nav-item-class="da-nav-item"
+    nav-label-class="da-nav-label"
+    nav-label="数据看板导航"
+    :nav-groups="appShellNavGroups"
+    :menu-open="mobileMenuOpen"
+    @update:menu-open="mobileMenuOpen = $event"
+    @navigate="onShellNavigate"
+    @logout="logoutSystem"
+  >
+    <template #brand>
+      <span class="da-brand-dot" aria-hidden="true"></span>
+      <b>数据看板子系统</b>
+      <button class="da-icon-button da-mobile-close" aria-label="关闭菜单" @click="mobileMenuOpen = false"><ConsoleIcon name="close" /></button>
+      <span class="da-brand-sub">经营数据视图 · 一期</span>
+    </template>
+    <template #sidebar-note>
       <div class="da-sidebar-foot">复用基础平台 · Metabase 嵌入<br />角色：{{ currentUserRole }}</div>
-      <div class="da-sidebar-user subsystem-sidebar-user">
-        <span class="da-avatar">{{ currentUserInitial }}</span>
-        <span class="da-sidebar-user-copy"><strong :title="currentUserName">{{ currentUserName }}</strong><small :title="currentUserRole">{{ currentUserRole }}</small></span>
-        <button type="button" :disabled="isLoggingOut" aria-label="退出应用系统" @click="logoutSystem"><ConsoleIcon name="logout" /></button>
+    </template>
+    <template #sidebar-user>
+      <span class="da-avatar">{{ currentUserInitial }}</span>
+      <span class="da-sidebar-user-copy"><strong :title="currentUserName">{{ currentUserName }}</strong><small :title="currentUserRole">{{ currentUserRole }}</small></span>
+      <button type="button" :disabled="isLoggingOut" aria-label="退出应用系统" @click="logoutSystem"><ConsoleIcon name="logout" /></button>
+    </template>
+    <template #breadcrumb>
+      <div class="da-breadcrumb"><span class="da-topbar-sys">数据看板与统计分析</span><span>/</span><strong>{{ currentMeta[0] }}</strong></div>
+    </template>
+    <template #topbar-center>
+      <div class="da-topbar-filters">
+        <template v-if="statusOptions.length">
+          <label for="da-status-filter">状态</label>
+          <select id="da-status-filter" v-model="statusFilter" class="da-select">
+            <option v-for="option in statusOptions" :key="option" :value="option">{{ option }}</option>
+          </select>
+        </template>
+        <span v-if="scopeModeLabel" class="da-scope-pill">数据范围：{{ scopeModeLabel }}</span>
       </div>
-    </aside>
-    <div v-if="mobileMenuOpen" class="da-menu-mask" @click="mobileMenuOpen = false"></div>
+    </template>
+    <template #topbar-actions>
+      <span class="da-topbar-avatar">{{ currentUserInitial }}</span>
+    </template>
 
-    <main id="main-content" class="da-main" tabindex="-1">
-      <header class="da-topbar">
-        <button ref="menuButton" class="da-icon-button da-menu-button" aria-label="打开菜单" :aria-expanded="mobileMenuOpen ? 'true' : 'false'" aria-controls="da-sidebar" @click="mobileMenuOpen = true"><ConsoleIcon name="menu" /></button>
-        <div class="da-topbar-sys">数据看板与统计分析</div>
-        <div class="da-breadcrumb"><span>/</span><strong>{{ currentMeta[0] }}</strong></div>
-        <div class="da-topbar-filters">
-          <template v-if="statusOptions.length">
-            <label for="da-status-filter">状态</label>
-            <select id="da-status-filter" v-model="statusFilter" class="da-select">
-              <option v-for="option in statusOptions" :key="option" :value="option">{{ option }}</option>
-            </select>
-          </template>
-          <span v-if="scopeModeLabel" class="da-scope-pill">数据范围：{{ scopeModeLabel }}</span>
-        </div>
-        <div class="da-top-tools"><ShellPreferences sidebar-id="da-sidebar" @collapse-change="desktopSidebarCollapsed = $event" /><span class="da-topbar-avatar">{{ currentUserInitial }}</span></div>
-      </header>
-
-      <div class="da-page">
+    <div class="da-page">
         <section class="da-page-head" data-first-run-anchor="subsystem-title">
           <div><h1>{{ currentMeta[0] }}</h1><p>{{ currentMeta[1] }} · {{ dataScopeLabel }} <span v-if="scopeModeLabel" class="da-badge neutral">数据范围：{{ scopeModeLabel }}</span></p></div>
           <div class="da-actions">
@@ -685,16 +683,13 @@ onBeforeUnmount(() => {
         <DictionaryView v-else-if="section === 'dictionary'" :permissions="permissions" />
         <AdminSourcesView v-else-if="section === 'admin/sources'" :permissions="permissions" />
         <AlertRulesView v-else-if="section === 'admin/rules'" :permissions="permissions" />
-      </div>
-    </main>
-  </div>
+    </div>
+  </AppShell>
 </template>
 
 <style scoped>
 .da-breadcrumb { min-width: 0; }
 .da-breadcrumb strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-@media (min-width: 901px) {
-  .is-sidebar-collapsed > .da-sidebar { transform: translateX(-100%); visibility: hidden; }
-  .is-sidebar-collapsed > .da-main { margin-left: 0; }
-}
+/* AppShell 的内容容器只做语义包装，页面内边距仍由 .da-page 负责。 */
+.da-shell-content { max-width: none; padding: 0; }
 </style>
