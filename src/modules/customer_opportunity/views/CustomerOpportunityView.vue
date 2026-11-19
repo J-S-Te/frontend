@@ -262,7 +262,10 @@ const customerStakeholders = ref([])
 const customerSystems = ref([])
 const customerOpportunities = ref([])
 const customerProjects = ref([])
+const customerProjectsSource = ref('')
+const customerProjectsReadDirectly = computed(() => customerProjectsSource.value === 'project_management')
 const customerProjectsLoading = ref(false)
+const customerProjectsNotConfigured = ref(false)
 const customerProjectLoadSequence = ref(0)
 const customerProjectsPage = reactive({ number: 1, size: 20, total: 0 })
 const customerAuditLogs = ref([])
@@ -1533,6 +1536,11 @@ function restorePresaleStateFromURL() {
   presalePage.size = value.pageSize
   presaleColumnLimit.value = value.columnLimit
 }
+/**
+ * 用途：打开客户详情并重置按客户保存的页签状态。
+ * 参数：id 为要读取的客户标识。
+ * 返回值：详情读取和路由更新结束后的 Promise，失败时显示页面提示。
+ */
 async function openCustomer(id) {
   // 客户切换时先让旧详情及所有页签请求失效，再清空按客户缓存的数据；后续页签只会
   // 接受同时匹配“请求序号、客户 ID、当前页签”的响应。
@@ -1551,6 +1559,8 @@ async function openCustomer(id) {
 	  customerProjectLoadSequence.value += 1
 	  customerTabLoading.value = false
 	  customerProjectsLoading.value = false
+	  customerProjectsSource.value = ''
+	  customerProjectsNotConfigured.value = false
 	  Object.assign(customerProjectsPage, { number: 1, size: 20, total: 0 })
 	  for (const key of Object.keys(customerTabErrors)) delete customerTabErrors[key]
 	  for (const key of Object.keys(customerTabLoaded)) delete customerTabLoaded[key]
@@ -1600,25 +1610,36 @@ async function useCustomerQuickFilter(value) {
 	customerFilters.quick_filter = customerFilters.quick_filter === value ? '' : value; page.number = 1; await loadCurrent()
 }
 
+/**
+ * 用途：加载当前客户的项目历史，分别处理未启用和读取失败。
+ * 参数：nextPage 为要读取的项目历史页码。
+ * 返回值：成功更新当前客户列表时为 true，其余情况为 false。
+ */
 async function loadCustomerProjectPage(nextPage) {
 	if (!selectedCustomer.value || nextPage < 1 || customerProjectsLoading.value) return false
 	const customerID = selectedCustomer.value.id
 	const sequence = ++customerProjectLoadSequence.value
 	customerProjectsLoading.value = true
+	customerProjectsNotConfigured.value = false
 	delete customerTabErrors.projects
 	try {
 		const result = await listCustomerProjects(customerID, { page: nextPage, page_size: customerProjectsPage.size })
 		if (sequence !== customerProjectLoadSequence.value || selectedCustomer.value?.id !== customerID) return false
 		customerProjects.value = result?.items || []
+		customerProjectsSource.value = result?.source || ''
 		customerProjectsPage.number = Number(result?.page || nextPage)
 		customerProjectsPage.size = Number(result?.page_size || customerProjectsPage.size)
 		customerProjectsPage.total = Number(result?.total || 0)
 		return true
 	} catch (value) {
 		if (sequence !== customerProjectLoadSequence.value || selectedCustomer.value?.id !== customerID) return false
-		customerTabErrors.projects = value?.code === 'CRM_CUSTOMER_PROJECT_HISTORY_NOT_CONFIGURED'
-			? '项目快照依赖尚未接入，客户基本详情不受影响。'
-			: value?.status === 403 ? '无权查看此页签。' : formatCRMError(value, { fallback: '页签数据加载失败。' })
+		if (value?.code === 'CRM_CUSTOMER_PROJECT_HISTORY_NOT_CONFIGURED') {
+			customerProjectsNotConfigured.value = true
+			return false
+		}
+		customerTabErrors.projects = value?.status === 403
+			? '无权查看此页签。'
+			: formatCRMError(value, { fallback: '页签数据加载失败。' })
 		return false
 	} finally {
 		if (sequence === customerProjectLoadSequence.value) customerProjectsLoading.value = false
@@ -4032,19 +4053,23 @@ onMounted(async () => {
 </tbody>
 </table>
 </section>
-<section v-if="customerTab === 'projects' && !customerTabErrors.projects">
-<p class="crm-note">以下为 Portal 已持久化的项目同步快照，不代表项目上游实时状态；请结合源更新时间和本地同步时间判断新鲜度。</p>
-<ListState v-if="customerProjectsLoading || !customerProjects.length" :loading="customerProjectsLoading" empty-title="暂无项目快照" compact />
+<p v-if="customerTab === 'projects' && customerProjectsNotConfigured" class="crm-alert warning" role="status">
+项目历史尚未启用。请联系系统管理员接入项目数据源。
+</p>
+<section v-if="customerTab === 'projects' && !customerProjectsNotConfigured && !customerTabErrors.projects">
+<p v-if="customerProjectsReadDirectly" class="crm-note">项目摘要来自项目管理系统，仅包含已关联此客户的项目。</p>
+<p v-else-if="!customerProjectsLoading" class="crm-note">以下为 Portal 已持久化的项目同步快照，不代表项目上游实时状态；请结合源更新时间和本地同步时间判断新鲜度。</p>
+<ListState v-if="customerProjectsLoading || !customerProjects.length" :loading="customerProjectsLoading" :empty-title="customerProjectsReadDirectly ? '暂无关联项目' : '暂无项目快照'" compact />
 <table v-else>
 <thead>
 <tr>
 <th scope="col">项目</th>
 <th scope="col">合同号</th>
-<th scope="col">阶段 / 状态</th>
+<th scope="col">{{ customerProjectsReadDirectly ? '状态' : '阶段 / 状态' }}</th>
 <th scope="col">进度</th>
-<th scope="col">预计结束</th>
-<th scope="col">延期</th>
-<th scope="col">快照新鲜度</th>
+<th scope="col">{{ customerProjectsReadDirectly ? '项目期限' : '预计结束' }}</th>
+<th v-if="!customerProjectsReadDirectly" scope="col">延期</th>
+<th scope="col">{{ customerProjectsReadDirectly ? '更新时间' : '快照新鲜度' }}</th>
 </tr>
 </thead>
 <tbody>
@@ -4055,15 +4080,21 @@ onMounted(async () => {
 <small>{{ item.project_id }}</small>
 </td>
 <td>{{ item.contract_no || '—' }}</td>
-<td><span class="crm-badge crm-badge--info">{{ item.current_stage || '—' }}</span> <span class="crm-badge crm-badge--gray">{{ projectStatusText(item.status) }}</span></td>
+<td>
+<span v-if="!customerProjectsReadDirectly" class="crm-badge crm-badge--info">{{ item.current_stage || '—' }}</span>
+<span class="crm-badge crm-badge--gray">{{ projectStatusText(item.status) }}</span>
+</td>
 <td>{{ projectProgressText(item.progress_pct) }}</td>
-<td>{{ formatDate(item.expected_end_date) }}</td>
+<td>{{ customerProjectsReadDirectly ? (item.due || '—') : formatDate(item.expected_end_date) }}</td>
+<td v-if="customerProjectsReadDirectly">{{ formatDate(item.source_updated_at) }}</td>
+<template v-else>
 <td>{{ item.delayed ? '已延期' : '否' }}</td>
 <td>
 <span :class="item.stale ? 'crm-project-stale' : ''">{{ !item.sync_last_success_at ? '同步链路尚无完整成功记录' : item.stale ? '同步链路可能已过期' : '同步链路有效期内' }}</span>
 <br>
 <small>源数据变更：{{ formatDate(item.source_updated_at) }}<br>本行写入：{{ formatDate(item.synced_at) }}<br>最近成功同步：{{ item.sync_last_success_at ? formatDate(item.sync_last_success_at) : '从未完整成功同步' }}<template v-if="item.staleness_seconds !== null && item.staleness_seconds !== undefined"><br>距最近成功：{{ item.staleness_seconds }} 秒</template></small>
 </td>
+</template>
 </tr>
 </tbody>
 </table>
