@@ -10,6 +10,7 @@ import ErrorState from '../../shared/components/ErrorState.vue'
 import ConfirmDialog from '@/modules/shared/components/ConfirmDialog.vue'
 import { useConfirmDialog } from '@/modules/shared/composables/useConfirmDialog.js'
 
+const emit = defineEmits(['unread-change'])
 const rows=ref([]),total=ref(0),page=ref(1),unreadOnly=ref(false),unread=ref(0)
 const tab=ref('all'),tabs=[{key:'all',label:'全部'},{key:'local',label:'本系统'},{key:'cross',label:'跨系统'}]
 const detail=ref(null),error=ref(''),busy=ref(false)
@@ -27,6 +28,7 @@ async function load() {
   const [value,count]=await Promise.all([listInbox({page:page.value,pageSize:20,unreadOnly:unreadOnly.value,...scope}),getUnreadCount()])
   if(ticket!==sequence)return
   rows.value=value.items;total.value=value.total;unread.value=count.unread_count
+  emit('unread-change', unread.value)
  } catch(cause) {if(ticket===sequence)error.value=cause.message}
  finally {if(ticket===sequence)busy.value=false}
 }
@@ -82,7 +84,6 @@ useNotificationStream(load)
     <button class="expense-button" :disabled="busy || !hasReadItems" @click="deleteRead">删除已读</button><button class="expense-button" :disabled="busy" @click="load">刷新消息</button>
    </div>
   </header>
-  <p>平台统一收件箱；审批待办、催办等消息以平台实际接收结果为准。</p>
   <ErrorState v-if="error" compact title="站内消息未完成" :error="error" :retry="false" />
   <p v-if="busy">正在读取消息…</p><p v-else-if="!error && !rows.length">当前收件箱没有消息。</p>
   <ul v-else class="expense-message-list">
@@ -92,7 +93,7 @@ useNotificationStream(load)
       <span class="expense-message__content">{{ row.content }}</span>
       <span class="expense-message__time">{{ formatBusinessDateTime(row.delivered_at) }}</span>
     </span>
-    <button class="expense-button" :disabled="opening" @click="open(row)">查看并处理</button>
+    <button class="expense-button" :disabled="opening" @click="open(row)">查看通知</button>
    </li>
   </ul>
   <PaginationBar label="站内消息分页" :page="page" :total="total" :page-size="20" :loading="busy"

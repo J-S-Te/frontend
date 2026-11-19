@@ -365,62 +365,25 @@ test('openNotification 缺失目标或导航被拒绝时保留未读提醒并明
   }
 })
 
-test('toggleNotifications 打开即并行装载待办与通知，再次切换关闭', async () => {
-  const h = harness({
-    unreadCount: { unread_count: 3 },
-    inboxItems: [{ delivery_id: 'd1', read_at: null }],
-    approvalTasks: { items: [{ id: 'req-1', type: 'FIELD_ROLLBACK' }], total: 2 },
-  })
+test('审批任务不计入铃铛，审批结果计入通知未读', async () => {
+  const result = { delivery_id: 'result', category: 'ROLLBACK_REJECTED', title: '现场回退申请已驳回' }
+  const h = harness({ unreadCount: { unread_count: 1 }, inboxItems: [result],
+    approvalTasks: { items: [{ id: 'another-request' }], total: 2 } })
+  await h.refreshNotificationCount()
+  assert.equal(h.notificationCount.value, 1)
+  await h.toggleNotifications()
+  assert.deepEqual(h.notificationItems.value, [result])
+  assert.equal(h.notificationCount.value, 1)
+  assert.deepEqual(h.calls.approvals, [])
+})
+test('关闭铃铛后切回仅校准通知，审批接口故障不影响通知', async () => {
+  const h = harness({ approvalError: new Error('审批接口不可用') })
   await h.toggleNotifications()
   assert.equal(h.notificationOpen.value, true)
   assert.deepEqual(h.calls.inbox, [{ page: 1, pageSize: 20, unreadOnly: true }])
-  assert.deepEqual(h.calls.approvals, [{ page: 1, page_size: 5, view: 'assigned' }])
-  // 徽标是“未读 3 + 待审批 2”的合并口径，待办办结前不会因提醒已读而消失。
-  assert.equal(h.notificationCount.value, 5)
-  assert.equal(h.approvalItems.value.length, 1)
-
-  h.toggleNotifications()
+  assert.deepEqual(h.calls.approvals, [])
+  assert.equal(h.notificationCount.value, 3)
+  assert.equal(h.notificationError.value, '')
+  await h.toggleNotifications()
   assert.equal(h.notificationOpen.value, false)
 })
-
-test('refreshNotificationCount 合并未读与待审批，单侧失败不拖垮另一侧', async () => {
-  const both = harness({ unreadCount: { unread_count: 4 }, approvalTasks: { items: [], total: 2 } })
-  await both.refreshNotificationCount()
-  assert.equal(both.notificationCount.value, 6)
-
-  const approvalDown = harness({ unreadCount: { unread_count: 4 }, approvalError: new Error('404') })
-  await approvalDown.refreshNotificationCount()
-  assert.equal(approvalDown.notificationCount.value, 4)
-  assert.equal(approvalDown.notificationError.value, '')
-
-  const inboxDown = harness({ apiError: new Error('503'), approvalTasks: { items: [], total: 2 } })
-  await inboxDown.refreshNotificationCount()
-  assert.equal(inboxDown.notificationCount.value, 2)
-})
-
-test('openApprovalItem 直达审批并清除对应提醒；打开失败保留待办并提示', async () => {
-  const item = { delivery_id: 'notice-1', read_at: null,
-    reference_type: 'PROJECT_APPROVAL', reference_id: 'req-1', title: '报告更正待审批' }
-  const ok = harness({ unreadCount: { unread_count: 1 }, inboxItems: [item],
-    approvalTasks: { items: [{ id: 'req-1', type: 'REPORT_CORRECTION' }], total: 1 } })
-  await ok.loadUnreadNotifications()
-  ok.notificationOpen.value = true
-  await ok.openApprovalItem({ id: 'req-1', type: 'REPORT_CORRECTION' })
-  assert.deepEqual(ok.calls.marks, ['notice-1'])
-  assert.deepEqual(ok.calls.approvalOpens, ['req-1'])
-  assert.deepEqual(ok.calls.targets, ['/project_management/approvals?request_id=req-1'])
-  assert.deepEqual(ok.notificationItems.value, [])
-  // 提醒已读后未读数归零，但申请仍在待审批，铃铛保留 1 条待办。
-  assert.equal(ok.notificationCount.value, 1)
-  assert.equal(ok.approvalItems.value.length, 1)
-  assert.equal(ok.notificationOpen.value, false)
-
-  const blocked = harness({ inboxItems: [item], approvalTasks: { items: [{ id: 'req-1' }], total: 1 },
-    openApprovalError: new Error('403') })
-  await blocked.loadUnreadNotifications()
-  await blocked.openApprovalItem({ id: 'req-1' })
-  assert.equal(blocked.approvalItems.value.length, 1)
-  assert.equal(blocked.calls.toasts.length, 1)
-  assert.match(blocked.calls.toasts[0].message, /审批页面打开失败/)
-})
-

@@ -222,7 +222,6 @@ import {
   listSupplementContracts,
   closeSupplement,
   getApprovedContractServiceItems,
-  listApprovalTasks,
 } from '@/modules/project_management/api/projectManagement'
 import '@/modules/project_management/styles/project-management.css'
 
@@ -398,14 +397,12 @@ const nativeCreateOpen = ref(false)
 const nativeScopeProjectID = ref('')
 const {
   notificationOpen, notificationItems, notificationCount, notificationLoading, notificationError, notificationActionID,
-  approvalItems, approvalLoading, approvalError, approvalActionID,
-  closeNotifications, refreshNotificationCount, openNotification, openApprovalItem,
+  closeNotifications, refreshNotificationCount, openNotification,
   toggleNotifications, disposeNotifications,
 } = useProjectNotifications({
-  getNotification, getUnreadCount, listNotificationInbox, markNotificationRead, listApprovalTasks,
+  getNotification, getUnreadCount, listNotificationInbox, markNotificationRead,
   formatUserError, showToast,
   openTarget: openProjectNotificationTarget,
-  openApprovalTask: (task) => openApprovalRequest(task?.id),
   getContext: () => sectionDataContext.value,
 })
 // 侧栏角色必须跟随服务端当前授权，而不是停留在登录时的快照。
@@ -4093,16 +4090,9 @@ onBeforeUnmount(() => {
           :error="notificationError"
           :items="notificationItems"
           :action-id="notificationActionID"
-          :approvals="approvalItems"
-          :approval-loading="approvalLoading"
-          :approval-error="approvalError"
-          :approval-action-id="approvalActionID"
           :show-view-all="navigation.sections.includes('notifications')"
-          :show-approval-all="navigation.sections.includes('approvals')"
           @open-item="openNotification"
           @view-all="closeNotifications(); navigate('notifications')"
-          @open-approval="openApprovalItem"
-          @view-all-approvals="closeNotifications(); navigate('approvals')"
         />
       </Transition>
     </template>

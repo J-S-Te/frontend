@@ -167,7 +167,7 @@ test('收件箱显示未读计数、未读标记、正文与业务时间，并�
     assert.match(rendered, /&lt;b&gt;请处理&lt;\/b&gt;/)
     assert.doesNotMatch(rendered, /<b>请处理/)
     assert.match(rendered, /2026-11-11 09:00/)
-    assert.match(rendered, /查看并处理/)
+    assert.match(rendered, /查看通知/)
   } finally { app.unmount() }
 })
 
@@ -186,7 +186,7 @@ test('消息详情只渲染站内安全路径，脚本或跨站协议链接不�
     currentTarget = target
     const { app, html, click } = await mount(view)
     try {
-      await click('查看并处理')
+      await click('查看通知')
       const rendered = html()
       assert.match(rendered, /&lt;b&gt;详情&lt;\/b&gt;/)
       assert.doesNotMatch(rendered, /<b>详情/)

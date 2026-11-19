@@ -134,7 +134,7 @@ import { useCustomerEditor } from '../composables/useCustomerEditor.js'
 import { useOpportunityEditor } from '../composables/useOpportunityEditor.js'
 import { useCustomerImportWizard } from '../composables/useCustomerImportWizard.js'
 import { createPresaleReportFilters } from '../composables/usePresaleReportFilters.js'
-import { getUnreadCount } from '@/modules/platform/notifications/api/notifications'
+import { useNotificationBadge } from '@/modules/shared/composables/useNotificationBadge.js'
 import PlatformNotificationInbox from '@/modules/shared/components/PlatformNotificationInbox.vue'
 import AnimatedNumber from '@/modules/shared/components/AnimatedNumber.vue'
 import { listOwnerDirectory } from '../api/ownerDirectory.js'
@@ -635,7 +635,6 @@ const runtimeCapabilities = ref({})
 const runtimeCapabilitiesError = ref('')
 const runtimeCapabilitiesLoading = ref(false)
 // 统一收件箱的未读数走平台 scoped 计数；本地 crm_notifications 仅作为投递 outbox/审计。
-const notificationUnreadCount = ref(0)
 
 const stageAlerts = ref([])
 const stageAlertUnreadOnly = ref(false)
@@ -2359,16 +2358,6 @@ async function openCustomerFromRoute() {
   if (requestedTab === 'credit') await openCustomerTab('credit')
 }
 
-async function refreshNotificationCount() {
-  try {
-    const result = await getUnreadCount({ sourceApplication: 'customer_opportunity' })
-    notificationUnreadCount.value = Number(result?.unread_count || 0)
-  } catch {
-    // 徽标失败不影响业务列表；统一收件箱打开后会再次刷新。
-    notificationUnreadCount.value = 0
-  }
-}
-
 async function loadStageAlerts() {
   try {
     const result = await listOpportunityStageAlerts({ unread_only: stageAlertUnreadOnly.value, page: 1, page_size: 50 })
@@ -2907,6 +2896,12 @@ function handleRuleConfigKeydown(event) {
     if (showRuleDrawer.value) closeApprovalRuleDrawer()
   }
 }
+
+const notificationUnreadCount = useNotificationBadge({
+  session: () => canReadNotifications.value ? crmSession.value : null,
+  sourceApplication: 'customer_opportunity',
+  inboxVisible: () => activeSection.value === 'notifications',
+})
 
 onMounted(() => {
   document.addEventListener('pointerdown', handleRuleConfigPointer)
@@ -3450,7 +3445,6 @@ onMounted(async () => {
   await refreshRuntimeCapabilities()
   const permissionTasks = [
     ...(canReadOpportunities.value ? [loadStageAlerts()] : []),
-    ...(canReadNotifications.value ? [refreshNotificationCount()] : []),
     ...(activeSection.value === 'customers' ? [loadCustomerOwnerOptions()] : []),
   ]
   await Promise.all([loadCurrent(), loadAlerts(), ...permissionTasks])

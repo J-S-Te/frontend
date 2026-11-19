@@ -279,6 +279,7 @@ async function viewHarness(overrides = {}) {
   })
   const context = vm.createContext({
     ref, computed, watch,
+    useNotificationBadge: () => ref(0),
     useLoginUsername: () => ({ value: '当前用户' }),
     useRoute: () => route, useRouter: () => router,
     window: { setTimeout() {}, confirm: () => false }, formatSettlementError, ...bindings,

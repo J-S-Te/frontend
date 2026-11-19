@@ -1749,7 +1749,7 @@ test('商机负责人和团队 API 使用独立权限路由及幂等键', async 
 test('CRM 个人通知改读平台统一收件箱，未读数按本系统来源收敛', () => {
   assert.ok(view.includes('<PlatformNotificationInbox app-code="customer_opportunity"'))
   assert.ok(view.includes('@unread-change="notificationUnreadCount = $event"'))
-  assert.ok(view.includes("getUnreadCount({ sourceApplication: 'customer_opportunity' })"))
+  assert.match(view, /useNotificationBadge\(\{[\s\S]*?sourceApplication: 'customer_opportunity'/)
   assert.doesNotMatch(view, /listNotifications|getNotificationUnreadCount|markNotificationRead|parseNotificationTarget/)
   assert.match(view, /canReadNotifications/)
 })
