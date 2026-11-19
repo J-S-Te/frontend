@@ -124,7 +124,7 @@ test('CRM 面板与工具栏只用 background-color，不用 background 简写�
   const css = read('../customer_opportunity/styles/customer-opportunity.css')
   const matched = /\.crm-toolbar,\s*\n?\.crm-panel\s*\{([^}]*)\}/.exec(css)
   assert.ok(matched, '缺少 .crm-toolbar / .crm-panel 共用规则')
-  assert.match(matched[1], /background-color:\s*#fff/)
+  assert.match(matched[1], /background-color:\s*var\(--surface-card\)/)
   assert.doesNotMatch(matched[1], /\bbackground:/, 'background 简写会清掉 background-image 降级层')
   const view = read('../customer_opportunity/views/CustomerOpportunityView.vue')
   assert.match(view, /class="crm-panel table-panel"/)

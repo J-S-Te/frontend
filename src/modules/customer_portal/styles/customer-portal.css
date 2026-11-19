@@ -136,14 +136,14 @@
 .portal-success { color: var(--success-text, #15803d); border-color: var(--success-border, #bbe7cc); background: var(--success-soft, #dcfce7); }
 
 .portal-empty {
-  padding: 46px !important;
-  color: var(--muted, #64748b) !important;
+  padding: 46px;
+  color: var(--muted, #64748b);
   font-size: 13px;
   text-align: center;
 }
 .project-empty {
-  padding: 18px !important;
-  color: var(--muted, #64748b) !important;
+  padding: 18px;
+  color: var(--muted, #64748b);
   text-align: center;
 }
 
@@ -173,9 +173,9 @@
 .project-list strong { color: var(--muted, #64748b); font-size: 12px; overflow-wrap: anywhere; word-break: break-word; }
 .project-list progress { grid-column: 1 / -1; width: 100%; accent-color: var(--p, #2563eb); }
 
-.project-detail { width: min(900px, 100%) !important; }
+.project-detail { width: min(900px, 100%); }
 .project-detail section { border-top: 1px solid var(--border-soft, #e4ecfc); margin-top: 20px; padding-top: 12px; }
-.project-overview { border-top: 0 !important; margin-top: 0 !important; padding-top: 0 !important; }
+.project-overview { border-top: 0; margin-top: 0; padding-top: 0; }
 .project-overview > div:first-child { display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: end; }
 .project-overview > div:first-child small { grid-column: 1 / -1; color: var(--muted, #64748b); }
 .project-overview > div:first-child strong { font-size: 24px; }
@@ -195,7 +195,7 @@
 .project-team { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
 .project-team > div { display: grid; gap: 5px; padding: 11px; border-radius: 8px; background: var(--surface-head, #f5f8fc); }
 .project-activities p { display: grid; gap: 5px; padding: 8px 12px; border-left: 3px solid var(--border-brand-strong, #8fb2e5); }
-.project-pagination { display: flex !important; align-items: center; justify-content: center; gap: 14px; padding: 8px 0 !important; background: transparent !important; }
+.project-pagination { display: flex; align-items: center; justify-content: center; gap: 14px; padding: 8px 0; background: transparent; }
 .project-pagination button {
   min-height: 32px;
   padding: 6px 12px;
@@ -211,7 +211,7 @@
 
 /* 项目动态的列表分页用共享 PaginationBar（.ui-pager）：这里只留外距。
    .project-pagination 仍是「加载更多」手写导航的样式，不要再复用到分页条上：
-   那条规则带 !important 的居中对齐，会覆盖分页条自己的右对齐与尺寸。 */
+   那条规则带 的居中对齐，会覆盖分页条自己的右对齐与尺寸。 */
 .portal-pagination { padding: 8px 0; }
 
 /* ===== 双栏布局 ===== */
@@ -240,7 +240,7 @@
 .report-row strong { font-size: 13px; overflow-wrap: anywhere; word-break: break-word; }
 .report-row small { color: var(--muted, #64748b); overflow-wrap: anywhere; word-break: break-word; }
 .report-row em { color: var(--p, #2563eb); font-style: normal; white-space: nowrap; font-size: 12px; font-weight: 500; }
-.report-detail { width: min(780px, 100%) !important; }
+.report-detail { width: min(780px, 100%); }
 .report-detail > section { border-top: 1px solid var(--border-soft, #e4ecfc); margin-top: 18px; padding-top: 10px; }
 .report-summary { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
 .report-summary > div { display: grid; gap: 5px; padding: 11px; border-radius: 8px; background: var(--surface-head, #f5f8fc); }
@@ -267,8 +267,8 @@
 .report-download .portal-error { margin: 0; }
 
 /* ===== 反馈 ===== */
-.feedback-row { display: flex; width: 100%; align-items: center; justify-content: space-between; gap: 14px; padding: 14px 0; text-align: left; border: 0 !important; border-bottom: 1px solid var(--border-soft, #f1f5f9) !important; background: var(--surface-card, #fff) !important; color: var(--text, #0f172a) !important; }
-.feedback-row:last-child { border-bottom: 0 !important; }
+.feedback-row { display: flex; width: 100%; align-items: center; justify-content: space-between; gap: 14px; padding: 14px 0; text-align: left; border: 0; border-bottom: 1px solid var(--border-soft, #f1f5f9); background: var(--surface-card, #fff); color: var(--text, #0f172a); }
+.feedback-row:last-child { border-bottom: 0; }
 .feedback-row span { display: grid; gap: 4px; min-width: 0; overflow-wrap: anywhere; word-break: break-word; }
 .feedback-row small,
 .feedback-message small { color: var(--muted, #64748b); }
@@ -332,17 +332,17 @@
   right: 8px;
   display: grid;
   width: 24px;
-  min-height: 24px !important;
+  min-height: 24px;
   place-items: center;
-  padding: 0 !important;
-  color: var(--muted, #64748b) !important;
-  font-size: 18px !important;
+  padding: 0;
+  color: var(--muted, #64748b);
+  font-size: 18px;
   line-height: 1;
-  border: 0 !important;
-  background: transparent !important;
-  box-shadow: none !important;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
 }
-.filing-validation-popover-close:hover:not(:disabled) { color: var(--text, #0f172a) !important; background: var(--surface-hover, #e2e8f0) !important; box-shadow: none !important; }
+.filing-validation-popover-close:hover:not(:disabled) { color: var(--text, #0f172a); background: var(--surface-hover, #e2e8f0); box-shadow: none; }
 .filing-validation-popover strong { display: block; margin-bottom: 7px; color: var(--danger-ink, #991b1b); font-size: 14px; }
 .filing-validation-popover ul { display: grid; gap: 4px; margin: 0; padding-left: 18px; font-size: 13px; line-height: 1.5; }
 .filing-validation-popover-enter-active,
@@ -458,7 +458,7 @@
   align-items: center;
   gap: 12px;
   border-bottom: 1px solid var(--border-soft, #f1f5f9);
-  background: var(--surface-card, #fff) !important;
+  background: var(--surface-card, #fff);
 }
 .filing-list-row:last-child { border-bottom: 0; }
 .filing-list-open {
@@ -473,28 +473,28 @@
   font: inherit;
   text-align: left;
   cursor: pointer;
-  border: 0 !important;
-  border-radius: 0 !important;
-  background: transparent !important;
-  box-shadow: none !important;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
   transition: none !important;
 }
-.filing-list-open:hover:not(:disabled) { color: var(--text, #0f172a); background: transparent !important; border-color: transparent !important; box-shadow: none !important; }
+.filing-list-open:hover:not(:disabled) { color: var(--text, #0f172a); background: transparent; border-color: transparent; box-shadow: none; }
 .filing-list-open span { display: grid; gap: 4px; min-width: 0; overflow-wrap: anywhere; word-break: break-word; }
 .filing-list-open strong { display: block; visibility: visible; opacity: 1; transform: none; color: var(--text, #0f172a); }
 .filing-list-open small { color: var(--muted, #64748b); }
 .filing-list-open em { padding: 4px 10px; color: var(--primary-ink, #2563eb); font-style: normal; font-size: 12px; border-radius: 999px; background: var(--chip-brand, #e7efff); }
-.filing-list-delete { flex: 0 0 auto; min-height: 32px !important; padding: 6px 12px !important; font-size: 12px !important; }
+.filing-list-delete { flex: 0 0 auto; min-height: 32px; padding: 6px 12px; font-size: 12px; }
 
 /* 步骤导航：进度条式 stepper，与系统数字徽标风格统一 */
 .filing-steps {
   position: relative;
-  display: grid !important;
+  display: grid;
   grid-template-columns: repeat(7, 1fr);
   gap: 0;
-  padding: 6px 0 2px !important;
+  padding: 6px 0 2px;
   margin: 0;
-  background: transparent !important;
+  background: transparent;
 }
 .filing-steps::before {
   content: "";
@@ -514,17 +514,17 @@
   justify-items: center;
   gap: 6px;
   min-width: 0;
-  padding: 4px 6px 10px !important;
-  color: var(--secondary, #475569) !important;
+  padding: 4px 6px 10px;
+  color: var(--secondary, #475569);
   font-size: 12px;
   text-align: center;
   cursor: pointer;
-  border: 0 !important;
-  border-radius: 9px !important;
-  background: transparent !important;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
   transition: color .15s ease, background .15s ease;
 }
-.filing-steps button:hover { color: var(--p, #2563eb) !important; background: var(--p-bg, #eff6ff) !important; }
+.filing-steps button:hover { color: var(--p, #2563eb); background: var(--p-bg, #eff6ff); }
 .filing-steps button > span {
   display: grid;
   width: 26px;
@@ -543,7 +543,7 @@
   border-color: var(--border-brand-strong, #93c5fd);
   background: var(--p-bg, #eff6ff);
 }
-.filing-steps button.active { color: var(--p, #2563eb) !important; }
+.filing-steps button.active { color: var(--p, #2563eb); }
 .filing-steps button.active > span {
   color: #fff;
   border-color: var(--p, #2563eb);
@@ -582,7 +582,7 @@
   align-items: stretch;
   min-width: 0;
   padding: 0;
-  margin: 0 !important;
+  margin: 0;
   color: var(--secondary, #475569);
   border: 1px solid var(--border-soft, #e8eef7);
   border-radius: 8px;
@@ -693,7 +693,7 @@
 }
 .material-declaration .filing-field-control > label:has(input[type=radio]):has(input:checked) { color: var(--p, #2563eb); border-color: var(--p, #2563eb); background: var(--p-bg, #eff6ff); }
 .material-declaration .filing-field-control > label:not(:has(input[type=radio])) {
-  display: grid !important;
+  display: grid;
   grid-template-columns: auto 1fr;
   align-items: center;
   flex: 1 1 100%;
@@ -783,7 +783,7 @@
 .filing-matrices fieldset > button:hover:not(:disabled) { color: var(--p, #2563eb); border-color: var(--border-brand-strong, #93c5fd); }
 
 /* 校验结果 */
-.filing-validation { overflow: hidden; padding: 0 !important; }
+.filing-validation { overflow: hidden; padding: 0; }
 .filing-validation-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 16px 18px; border-bottom: 1px solid var(--border-soft, #e4ecfc); background: var(--surface-tint, #fbfdff); }
 .filing-validation-heading h2 { margin: 3px 0 0; color: var(--text, #0f172a); font-size: 16px; }
 .filing-validation-eyebrow { color: var(--muted, #64748b); font-size: var(--fs-xs); }
