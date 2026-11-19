@@ -367,7 +367,7 @@ async function reimbursementNetwork(page, payload) {
 
 // 用途：用真实 console.css 骨架检查授权事件抽屉的几何契约。
 // 参数：page 为挂载了真实 LicenseEventsSheet 的页面；width/height 为当前视口。
-// 返回值：违规列表；≤720px 要求整屏，>720px 要求右贴边且不超过 560px。
+// 返回值：违规列表；≤900px 要求整屏，>900px 要求右贴边且不超过 560px。
 async function sheetViolations(page, width, height) {
   return page.evaluate(({ width, height }) => {
     const errors = []
@@ -375,7 +375,7 @@ async function sheetViolations(page, width, height) {
     const sheet = document.querySelector('.console-sheet')
     if (!sheet) return ['event sheet missing']
     const rect = box(sheet)
-    const fullScreen = width <= 720
+    const fullScreen = width <= 900
     if (fullScreen) {
       if (Math.abs(rect.left) > 1 || Math.abs(rect.top) > 1
         || Math.abs(rect.right - width) > 1 || Math.abs(rect.bottom - height) > 1) {

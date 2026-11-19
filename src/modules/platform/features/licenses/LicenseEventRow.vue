@@ -271,8 +271,8 @@ onBeforeUnmount(() => clearTimeout(feedbackTimer))
   font-size: var(--fs-xs);
 }
 
-/* 窄屏：摘要行变两行（名+版本修订 / 时间），行高 64px；详情字段改上下堆叠。 */
-@media (max-width: 640px) {
+/* 抽屉整屏断点（≤900px）：摘要行变两行（名+版本修订 / 时间），行高 64px；详情字段改上下堆叠。 */
+@media (max-width: 900px) {
   .license-event-summary {
     grid-template-areas:
       "name meta chevron"
