@@ -692,7 +692,7 @@ onBeforeUnmount(() => { requestReferenceSeq++ })
 .personnel-change-hero h2 { margin: 0; color: var(--text-1); font-size: 22px; letter-spacing: -.02em; }
 .personnel-change-hero p { max-width: 720px; margin: .45rem 0 0; line-height: 1.65; }
 .iam-section-kicker { display: inline-flex; align-items: center; gap: .5rem; color: var(--muted, #6f8098); font-size: 11.5px; font-weight: 750; letter-spacing: .12em; }
-.personnel-change-kicker-icon { display: inline-grid; place-items: center; width: 1.65rem; height: 1.65rem; color: var(--primary); background: #dfe9ff; border-radius: .55rem; }
+.personnel-change-kicker-icon { display: inline-grid; place-items: center; width: 1.65rem; height: 1.65rem; color: var(--primary); background: var(--primary-soft); border-radius: .55rem; }
 .personnel-change-heading-actions { display: flex; align-items: center; gap: .6rem; flex-wrap: wrap; align-self: center; }
 .personnel-change-heading-actions .console-button { white-space: nowrap; }
 .personnel-handover-panel { display: grid; gap: .8rem; margin-bottom: .9rem; padding: .9rem; border: 1px solid var(--line); border-radius: .75rem; background: var(--sunken, #f8fafc); }
@@ -716,7 +716,7 @@ onBeforeUnmount(() => { requestReferenceSeq++ })
 .personnel-change-flow ol { display: grid; grid-template-columns: repeat(4, 1fr); gap: .75rem; margin: 0; padding: 0; list-style: none; }
 .personnel-change-flow li { display: flex; align-items: center; gap: .55rem; color: var(--secondary, #52647d); font-size: 13px; }
 .personnel-change-flow li:not(:last-child)::after { content: '→'; margin-left: auto; color: #a8b8cc; }
-.personnel-change-flow b { display: grid; place-items: center; width: 1.65rem; height: 1.65rem; color: var(--primary); background: #e4edff; border-radius: var(--radius-pill); font-size: 11px; }
+.personnel-change-flow b { display: grid; place-items: center; width: 1.65rem; height: 1.65rem; color: var(--primary); background: var(--primary-soft); border-radius: var(--radius-pill); font-size: 11px; }
 .personnel-change-toolbar { display: flex; align-items: end; gap: .65rem; margin: 0 1.9rem 1rem; padding: .75rem; border: 1px solid var(--line); border-radius: .75rem; background: var(--card, #fff); }
 .personnel-change-search, .personnel-change-select { display: grid; gap: .28rem; }
 .personnel-change-search { position: relative; flex: 1 1 20rem; }
@@ -724,7 +724,7 @@ onBeforeUnmount(() => { requestReferenceSeq++ })
 .personnel-change-search input { padding-left: 2.2rem; }
 .personnel-change-select { flex: 0 1 10rem; }
 .personnel-change-select span { color: var(--muted, #71829b); font-size: 11.5px; }
-.personnel-change-toolbar input, .personnel-change-toolbar select { width: 100%; min-height: 2.25rem; border: 1px solid #dce6f2; border-radius: .5rem; background: var(--sunken, #f8fafc); }
+.personnel-change-toolbar input, .personnel-change-toolbar select { width: 100%; min-height: 2.25rem; border: 1px solid var(--line); border-radius: .5rem; background: var(--sunken, #f8fafc); }
 .personnel-change-toolbar input:focus, .personnel-change-toolbar select:focus { border-color: #7da3e8; box-shadow: 0 0 0 3px rgba(83, 129, 211, .12); outline: 0; }
 .personnel-change-toolbar .console-button { min-height: 2.25rem; white-space: nowrap; }
 .personnel-change-loading { display: flex; align-items: center; justify-content: center; gap: .55rem; min-height: 12rem; margin: 0 1.9rem 1.9rem; color: var(--muted, #71829b); }
@@ -732,13 +732,13 @@ onBeforeUnmount(() => { requestReferenceSeq++ })
 .personnel-change-center > .console-card-body > .settings-empty { margin: 0 1.9rem 1.9rem; border: 1px dashed #ccd8e8; border-radius: .8rem; }
 .personnel-change-table-shell { margin: 0 1.9rem 1.9rem; overflow: hidden; border: 1px solid var(--line); border-radius: .8rem; background: var(--card, #fff); }
 .personnel-change-table { overflow-x: auto; }
-.personnel-change-row { display: grid; grid-template-columns: 1.25fr .95fr 1.55fr .85fr 1.1fr 1.55fr; gap: .8rem; align-items: center; min-width: 920px; padding: .85rem 1rem; border-top: 1px solid #edf1f7; }
+.personnel-change-row { display: grid; grid-template-columns: 1.25fr .95fr 1.55fr .85fr 1.1fr 1.55fr; gap: .8rem; align-items: center; min-width: 920px; padding: .85rem 1rem; border-top: 1px solid var(--line); }
 .personnel-change-row:first-child { border-top: 0; }
 .personnel-change-header { color: var(--muted, #71829b); background: var(--sunken, #f8fafc); font-size: 11.5px; font-weight: 700; }
 .personnel-change-row:not(.personnel-change-header):hover { background: var(--surface-tint); }
 .personnel-change-person, .personnel-change-person > span:last-child, .personnel-change-move { display: grid; gap: .18rem; min-width: 0; }
 .personnel-change-person { display: flex; align-items: center; gap: .65rem; }
-.personnel-person-avatar { display: grid; flex: 0 0 auto; place-items: center; width: 2rem; height: 2rem; color: var(--primary); background: #e4edff; border-radius: .65rem; font-weight: 750; }
+.personnel-person-avatar { display: grid; flex: 0 0 auto; place-items: center; width: 2rem; height: 2rem; color: var(--primary); background: var(--primary-soft); border-radius: .65rem; font-weight: 750; }
 .personnel-change-person strong, .personnel-change-move strong { overflow: hidden; color: var(--text-1); font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
 .personnel-change-person small, .personnel-change-move small, .personnel-change-code { color: var(--muted, #8190a5); font-size: 11.5px; }
 .personnel-change-type { color: var(--text-2); font-weight: 650; }
@@ -758,7 +758,7 @@ onBeforeUnmount(() => { requestReferenceSeq++ })
 .personnel-change-modal-header > div { position: relative; z-index: 1; }
 .personnel-change-modal-header h2 { margin: .35rem 0 0; color: var(--text-1); font-size: 22px; letter-spacing: -.02em; }
 .personnel-change-modal-header p:not(.console-modal-eyebrow) { margin: .4rem 0 0; color: var(--muted, #71829b); font-size: 12.5px; line-height: 1.5; }
-.personnel-modal-eyebrow-icon { display: inline-grid; place-items: center; width: 1.35rem; height: 1.35rem; margin-right: .35rem; color: var(--primary); background: #dfe9ff; border-radius: .4rem; vertical-align: middle; }
+.personnel-modal-eyebrow-icon { display: inline-grid; place-items: center; width: 1.35rem; height: 1.35rem; margin-right: .35rem; color: var(--primary); background: var(--primary-soft); border-radius: .4rem; vertical-align: middle; }
 .personnel-modal-eyebrow-icon svg { width: .8rem; height: .8rem; }
 .personnel-change-modal-body { min-height: 0; flex: 1 1 auto; overflow-y: auto; padding: 1.35rem 1.75rem 1.5rem; }
 .personnel-change-form-intro { display: flex; align-items: flex-start; gap: .7rem; margin-bottom: 1.15rem; padding: .8rem .9rem; border: 1px solid var(--line); border-radius: .7rem; background: #f7faff; }
@@ -795,7 +795,7 @@ onBeforeUnmount(() => { requestReferenceSeq++ })
 .personnel-authorization-modal { max-width: 900px; }
 .personnel-authorization-user { position: relative; display: inline-flex; align-items: center; cursor: help; border-bottom: 1px dashed var(--border-strong, #cbd5e1); outline: none; }
 .personnel-authorization-user:hover,
-.personnel-authorization-user:focus-visible { border-bottom-color: var(--primary, #2563eb); }
+.personnel-authorization-user:focus-visible { border-bottom-color: var(--primary); }
 .personnel-authorization-user-tooltip { position: absolute; z-index: 3; top: calc(100% + 8px); left: 0; display: block; width: max-content; max-width: min(420px, 70vw); padding: 7px 9px; color: var(--surface-muted); background: var(--text-1); border-radius: 6px; box-shadow: 0 8px 20px rgba(15, 23, 42, .24); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; font-weight: 500; line-height: 1.45; white-space: normal; overflow-wrap: anywhere; opacity: 0; visibility: hidden; pointer-events: none; transform: translateY(-3px); transition: opacity .14s ease, transform .14s ease, visibility .14s ease; }
 .personnel-authorization-user:hover .personnel-authorization-user-tooltip,
 .personnel-authorization-user:focus-visible .personnel-authorization-user-tooltip { opacity: 1; visibility: visible; transform: translateY(0); }
@@ -968,7 +968,7 @@ onBeforeUnmount(() => { requestReferenceSeq++ })
    --------------------------------------------------------------------------
    --text 的浅色是 var(--text-1)、--line-soft 的浅色是 #edf0f5、--line-strong 的浅色
    是 var(--text-4)，而本组件正文/描边的浅色原值是 var(--text-1) / var(--text-1) / var(--text-2) /
-   var(--line) / var(--line) / #dce6f2 / #edf1f7 / #ccd8e8。写成 var(--token, 字面量)
+   var(--line) / var(--line) / var(--line) / var(--line) / #ccd8e8。写成 var(--token, 字面量)
    时 token 在浅色已定义、回退不生效，浅色会被 token 顶掉。所以浅色恢复原字面量，
    深色在这里补同名覆盖，取值仍是原来的深色 token（深色渲染不变）。
    ========================================================================== */
