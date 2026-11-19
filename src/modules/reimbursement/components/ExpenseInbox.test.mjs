@@ -16,9 +16,10 @@ function component(extras = {}) {
   const { descriptor } = parse(readFileSync(new URL('./ExpenseInbox.vue', import.meta.url), 'utf8'))
   const compiled = compileScript(descriptor, { id: 'expense-inbox-test', inlineTemplate: true })
   const values = { useRouter: () => ({ push: async () => {} }), openNotificationTarget,
-    notificationTarget, PaginationBar: PaginationBarStub, ErrorState: createErrorStateStub().Stub,
-    ConfirmDialog: { render() { return null } }, useConfirmDialog: () => ({ dialog: { value: null },
-      askConfirm: async () => false, accept() {}, cancel() {} }), ...extras }
+    notificationTarget, PaginationBar: PaginationBarStub,
+    ErrorState: createErrorStateStub().Stub, ConfirmDialog: { render() { return null } },
+    useConfirmDialog: () => ({ dialog: { value: null }, askConfirm: async () => false,
+      accept() {}, cancel() {} }), ...extras }
   const directives = {
     vModelText: { created: (el, binding) => { el.props.value = binding.value } },
     vModelSelect: { created: (el, binding) => { el.props.value = binding.value } },

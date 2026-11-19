@@ -10,6 +10,10 @@ import { contentMappingInput } from '../invoiceClassification.js'
 // 参数：name 为当前组件文件名；request 为受控只读网络替身。
 // 返回值：保留真实模板和原生事件绑定的 Vue 组件。
 function component(name, request) {
+  // 图标只负责视觉，测试用空 svg 替身避免递归编译图标资源表。
+  if (name.endsWith('ConsoleIcon.vue')) {
+    return { props: ['name'], setup: () => () => Vue.h('svg') }
+  }
   const { descriptor } = parse(readFileSync(new URL(name, import.meta.url), 'utf8'))
   const compiled = compileScript(descriptor, { id: name, inlineTemplate: true })
   const bindings = { reimbursementAPI: { request }, createRequestID }

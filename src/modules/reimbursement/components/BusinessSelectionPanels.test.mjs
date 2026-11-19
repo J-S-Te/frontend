@@ -21,6 +21,10 @@ import { claimStatusLabel, failureMessage } from '../statusLabels.js'
 // 参数：name为组件名，request为网络替身，inline为是否包含真实模板。
 // 返回值：保留真实业务函数和选择器接线的Vue组件。
 function component(name, request, inline = false) {
+  // 图标只负责视觉，测试用空 svg 替身避免递归编译图标资源表。
+  if (String(name).endsWith('ConsoleIcon.vue')) {
+    return { props: ['name'], setup: () => () => Vue.h('svg') }
+  }
   const { descriptor } = parse(readFileSync(new URL(name, import.meta.url), 'utf8'))
   const compiled = compileScript(descriptor, { id: String(name), inlineTemplate: inline })
   const bindings = { ...client, ...classification, ...fields, ...recovery, ...cities, ...optionPicker,

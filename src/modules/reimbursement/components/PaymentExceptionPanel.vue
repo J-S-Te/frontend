@@ -1,6 +1,7 @@
 <script setup>
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import BusinessObjectSelect from './BusinessObjectSelect.vue'
+import FileDropzone from './FileDropzone.vue'
 
 import { formatMinor } from '../api/client.js'
 import { formatBusinessDateTime } from '../../shared/utils/businessTime.js'
@@ -220,10 +221,17 @@ onBeforeUnmount(() => { paymentSequence++; resolutionSequence++ })
           </select>
         </div>
 
-        <label>上传外部付款凭证
-          <input type="file" accept=".pdf,.png,.jpg,.jpeg"
-            @change="emit('upload', $event, 'exceptionFact')">
-        </label>
+        <div class="expense-upload-field">
+          <span class="expense-upload-field__label">上传外部付款凭证</span>
+          <FileDropzone
+            compact
+            title="拖拽或点击选择文件"
+            hint="PDF / PNG / JPEG"
+            accept=".pdf,.png,.jpg,.jpeg"
+            action-label="上传"
+            @files="files => emit('upload', { target: { files } }, 'exceptionFact')"
+          />
+        </div>
         <div class="expense-option-field">
           <span>已上传外部付款凭证（1至20份，按文件名选择）</span>
           <BusinessOptionPicker
@@ -300,8 +308,17 @@ onBeforeUnmount(() => { paymentSequence++; resolutionSequence++ })
           </option>
         </select></label>
         <label>独立核实依据<textarea v-model="reviewForm.reason" maxlength="2000" /></label>
-        <label>上传核实证据<input type="file" accept=".pdf,.png,.jpg,.jpeg"
-          @change="emit('upload', $event, 'exceptionReview')"></label>
+        <div class="expense-upload-field">
+          <span class="expense-upload-field__label">上传核实证据</span>
+          <FileDropzone
+            compact
+            title="拖拽或点击选择文件"
+            hint="PDF / PNG / JPEG"
+            accept=".pdf,.png,.jpg,.jpeg"
+            action-label="上传"
+            @files="files => emit('upload', { target: { files } }, 'exceptionReview')"
+          />
+        </div>
         <div class="expense-option-field">
           <span>已上传核实证据（1至20份，按文件名选择）</span>
           <BusinessOptionPicker

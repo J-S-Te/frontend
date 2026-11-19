@@ -15,6 +15,7 @@ import ExpenseInbox from '../components/ExpenseInbox.vue'
 import TravelFields from '../components/TravelFields.vue'
 import BusinessObjectSelect from '../components/BusinessObjectSelect.vue'
 import BusinessAttachmentSelect from '../components/BusinessAttachmentSelect.vue'
+import FileDropzone from '../components/FileDropzone.vue'
 import CitySelect from '../components/CitySelect.vue'
 import { resolveDraftContext, draftOrganizations, financeEntityChoices, payeeChoices,
   normalProjectReference, projectReferenceLabel } from '../claimPresentation.js'
@@ -95,6 +96,19 @@ const claimPreview=ref(null),previewBusy=ref(false),previewError=ref(''),preview
 let previewSequence=0,previewTimer=null
 const invoiceChoices = ref([])
 const uploadBatch = ref([])
+// 用途：上传队列汇总只统计真实状态，供工作台头部展示“就绪/上传中/失败”。
+// 参数：无。
+// 返回值：各状态数量与本次文件总数。
+const uploadBatchSummary = computed(() => {
+  const rows = uploadBatch.value
+  return {
+    total: rows.length,
+    ready: rows.filter((row) => row.status === 'READY').length,
+    uploading: rows.filter((row) => row.status === 'UPLOADING' || row.status === 'WAITING').length,
+    failed: rows.filter((row) => row.status === 'FAILED').length,
+    unknown: rows.filter((row) => row.status === 'UNKNOWN').length,
+  }
+})
 const batchBusy = ref(false)
 const statistics = ref(null)
 const selected = ref(null)
@@ -391,19 +405,27 @@ const sessionRolesLabel = computed(() => (session.value?.roles || [])
   .join('、') || '按当前账号授权范围')
 const scopeDescription = computed(() => expenseScopeDescription(session.value))
 
-// 工作台统计卡：tone 只影响色条，不改变服务端指标含义；suffix/hint 只做展示。
+// 工作台统计卡：tone 只影响图标语义色，不改变服务端指标含义；suffix/hint 只做展示。
 const dashboardMetrics = [
-  { key: 'my_claims', label: '我的单据', section: 'claims', icon: 'account', tone: 'blue',
+  { key: 'my_claims', label: '我的单据', section: 'claims', icon: 'account', tone: 'neutral',
     suffix: '单', hint: '本人在当前范围' },
   { key: 'pending_approvals', label: '待审批', section: 'approvals', icon: 'shield', tone: 'orange',
-    suffix: '单', hint: '当前可办理' },
-  { key: 'pending_payments', label: '待付款', section: 'payments', icon: 'link', tone: 'green',
+    suffix: '条', hint: '当前可办理' },
+  { key: 'pending_payments', label: '待付款', section: 'payments', icon: 'link', tone: 'neutral',
     suffix: '单', hint: '已通过待支付' },
-  { key: 'invoice_review_required', label: '待复核发票', section: 'invoices', icon: 'search', tone: 'purple',
+  { key: 'invoice_review_required', label: '待复核发票', section: 'invoices', icon: 'search', tone: 'orange',
     suffix: '张', hint: '本人票据' },
-  { key: 'my_paid_this_month', label: '本月本人已付款', section: 'payments', icon: 'dashboard', tone: 'blue',
+  { key: 'my_paid_this_month', label: '本月本人已付款', section: 'payments', icon: 'dashboard', tone: 'neutral',
     suffix: '笔', hint: '按业务日统计' },
 ]
+// 用途：工作台首屏只保留 4 张指标卡，第 5 项（本月已付款）降为角色卡内的次级统计，保持单页 ≤4。
+// 参数：无。
+// 返回值：可点击的 4 张主指标。
+const dashboardPrimaryMetrics = dashboardMetrics.filter((metric) => metric.key !== 'my_paid_this_month')
+// 用途：在角色卡内展示本月付款笔数，信息不丢失但不与主指标争夺注意力。
+// 参数：无。
+// 返回值：本月付款指标定义；不存在时为 undefined。
+const paidMetric = dashboardMetrics.find((metric) => metric.key === 'my_paid_this_month')
 
 // 用途：判断分区是否在当前账号能力内，避免指标把用户带进无权页面。
 // 参数：key 为分区键。
@@ -2108,6 +2130,69 @@ async function verifyInvoice() {
   if (result) { await openInvoice(selectedInvoice.value.id); await load({ preserveContext: true }) }
 }
 
+// 用途：把文件选择事件、拖放事件或纯文件数组统一成 File 数组，兼容旧上传入口。
+// 参数：payload 为原生事件或 File 数组。
+// 返回值：当前批次的实际文件数组；无文件时为空数组。
+function payloadFiles(payload) {
+  if (Array.isArray(payload)) return payload
+  return [...(payload?.dataTransfer?.files || payload?.target?.files || [])]
+}
+
+// 用途：从文件名取扩展名，用于上传队列的类型标记。
+// 参数：name 为原始文件名。
+// 返回值：大写扩展名；无扩展名时返回 FILE。
+function fileExtension(name) {
+  const extension = String(name || '').split('.').pop()
+  if (!extension || extension === String(name)) return 'FILE'
+  return extension.slice(0, 5).toUpperCase()
+}
+
+// 用途：把字节数格式化为单行可读体积，不改变提交时的真实 size_bytes。
+// 参数：size 为文件字节数。
+// 返回值：KB / MB 文本；未知时返回空字符串。
+function formatFileSize(size) {
+  const value = Number(size)
+  if (!Number.isFinite(value) || value <= 0) return ''
+  if (value >= 1024 * 1024) return `${(value / 1024 / 1024).toFixed(1)} MB`
+  return `${Math.max(1, Math.round(value / 1024))} KB`
+}
+
+// 用途：上传状态文案集中定义，模板不再内联状态字典。
+// 参数：status 为上传队列状态。
+// 返回值：面向用户的中文状态。
+const uploadStatusText = {
+  WAITING: '等待上传',
+  UPLOADING: '上传中',
+  READY: '已就绪',
+  UNKNOWN: '结果待确认',
+  FAILED: '上传失败',
+}
+
+// 用途：把上传状态映射到统一胶囊语义，避免每个状态各自上色。
+// 参数：status 为上传队列状态。
+// 返回值：expense-badge 的语义类名。
+function uploadStatusTone(status) {
+  if (status === 'READY') return 'success'
+  if (status === 'UNKNOWN') return 'warning'
+  if (status === 'FAILED') return 'danger'
+  if (status === 'UPLOADING') return 'info'
+  return 'gray'
+}
+
+// 用途：把无票/预付独立证明的文件数组接到既有单文件上传流程，用途固定。
+// 参数：item 为当前费用项；files 为 FileDropzone 给出的文件数组。
+// 返回值：真实上传 Promise；服务端仍校验文件归属与用途。
+function uploadClaimNoInvoice(item, files) {
+  return uploadInvoice({ target: { files } }, 'reimbursement.claim.evidence', `claimNoInvoice:${item?.id}`)
+}
+
+// 用途：把付款凭证的文件数组接到既有上传流程，用途固定为 payment.voucher。
+// 参数：files 为 FileDropzone 给出的文件数组。
+// 返回值：真实上传 Promise；失败保留原文件供重试。
+function uploadPaymentVoucher(files) {
+  return uploadInvoice({ target: { files } }, 'reimbursement.payment.voucher')
+}
+
 // 用途：创建真实文件上传会话；结果未知时保留文件以恢复原会话。
 // 参数：event 为文件选择事件，purpose 为文件用途，voucherDestination 为凭证表单目标。
 // 返回值：无；失败保留当前文件和服务器文档标识。
@@ -2168,8 +2253,8 @@ async function uploadContent(permit, file, purpose) {
 async function uploadInvoiceBatch(event) {
   if(batchBusy.value || saving.value || runner.pending()) return
   try {
-    const files=uploadFiles(event.dataTransfer?.files || event.target?.files,'reimbursement.invoice.original')
-    uploadBatch.value=files.map(({file})=>({name:file.name,status:'WAITING',document_id:''}))
+    const files=uploadFiles(payloadFiles(event),'reimbursement.invoice.original')
+    uploadBatch.value=files.map(({file})=>({name:file.name,size:file.size,status:'WAITING',document_id:''}))
     batchBusy.value=true
     for(let i=0;i<files.length;i+=1) {
       const row=uploadBatch.value[i];row.status='UPLOADING'
@@ -2935,9 +3020,10 @@ onBeforeUnmount(() => {
     </div>
     <LoadingState v-if="loading && !initialized" />
     <template v-if="hasModule">
-      <p v-if="!(section === 'invoices' && selectedInvoice)" class="expense-alert" role="note">
-        {{ scopeDescription }}
-      </p>
+      <div v-if="!(section === 'invoices' && selectedInvoice)" class="expense-scope" role="note">
+        <ConsoleIcon name="shield" aria-hidden="true" />
+        <span>{{ scopeDescription }}</span>
+      </div>
       <p v-if="returnProject"><RouterLink :to="returnProject">返回来源项目</RouterLink></p>
       <div v-if="routeContextChips.length" class="expense-context" role="group" aria-label="地址参数回显">
         <span class="expense-context__title">地址参数</span>
@@ -3002,18 +3088,24 @@ onBeforeUnmount(() => {
             <div class="expense-role-card__copy">
               <strong class="expense-role-card__name">{{ currentUserName }}</strong>
               <span class="expense-role-card__meta">角色：{{ sessionRolesLabel }}</span>
-              <span class="expense-role-card__meta">{{ scopeDescription }}</span>
             </div>
           </div>
-          <p class="expense-role-card__summary">
-            当前可办理 <strong>{{ dashboard?.pending_approvals ?? '—' }}</strong> 条审批待办
-          </p>
+          <div class="expense-role-card__stats">
+            <span class="expense-role-card__stat">
+              <small>待办审批</small>
+              <b>{{ dashboard?.pending_approvals ?? '—' }}<i>条</i></b>
+            </span>
+            <span v-if="paidMetric" class="expense-role-card__stat">
+              <small>本月已付款</small>
+              <b>{{ dashboard?.[paidMetric.key] ?? '—' }}<i>笔</i></b>
+            </span>
+          </div>
         </article>
         <!-- 读取失败必须显示原因和重试，不能落成"没有待办"。 -->
         <ErrorState v-if="dashboardError" :error="dashboardError" title="工作台加载失败" @retry="load" />
         <template v-else>
           <div class="expense-metrics expense-metrics--tiles" role="group" aria-label="工作台指标">
-            <template v-for="metric in dashboardMetrics" :key="metric.key">
+            <template v-for="metric in dashboardPrimaryMetrics" :key="metric.key">
               <button v-if="sectionAllowed(metric.section)" type="button"
                 class="expense-metric expense-metric-link"
                 :data-tone="metric.tone"
@@ -3085,72 +3177,149 @@ onBeforeUnmount(() => {
           </div>
         </template>
       </section>
-      <!-- 刷新后找回：保留任务与原件位置，用户不必重新上传。 -->
-      <section v-if="workspace === 'invoice-upload' && (recentTask.parse || recentTask.document)" class="expense-panel" aria-label="找回上次上传与解析">
-        <header class="expense-card-head">
-          <h2 class="expense-card-title">找回上次上传与解析</h2>
-          <span class="expense-card-extra">任务与原件坐标保存在本机</span>
-        </header>
-        <p>刷新页面后任务号和文档号仍保留在本机；继续查询不会重新上传，也不会重复创建解析任务。</p>
-        <div class="expense-actions">
-          <button v-if="recentTask.document" type="button" class="expense-button" @click="resumeRecentDocument">
-            读取最近上传的原件（{{ savedAtLabel(recentTask.document.saved_at) }}）
-          </button>
-          <button v-if="recentTask.parse" type="button" class="expense-button" @click="resumeParseTask">
-            继续查询上次解析任务
-          </button>
-        </div>
-      </section>
+      <!-- 刷新后找回的入口已并入上传工作台右侧，不再单独占一张卡片。 -->
       <section v-if="workspace === 'invoice-upload' && can('expense.invoice.upload')" class="expense-upload-page">
-        <section class="expense-panel">
+        <section class="expense-panel expense-upload-workbench">
           <header class="expense-card-head">
-            <h2 class="expense-card-title"><span class="expense-step">1</span>选择发票文件</h2>
-            <span class="expense-card-extra">1–20 个文件 · 单个 ≤ 20MiB</span>
-          </header>
-          <label class="expense-upload-zone"
-            @dragover.prevent
-            @drop.prevent="uploadInvoiceBatch"
-          >
-            <input
-              type="file"
-              accept=".pdf,.ofd,.png,.jpg,.jpeg"
-              multiple
-              :disabled="saving || batchBusy || !!pending"
-              @change="uploadInvoiceBatch"
-            >
-            <span class="expense-upload-zone__icon" aria-hidden="true">
-              <ConsoleIcon name="save" />
+            <div class="expense-card-heading">
+              <h2 class="expense-card-title">
+                <span class="expense-step">1</span>选择发票文件
+              </h2>
+              <p class="expense-card-sub">
+                选择后立即逐份上传；解析只提供候选字段，仍需逐张人工复核。
+              </p>
+            </div>
+            <span v-if="uploadBatch.length" class="expense-card-extra" role="status">
+              已选 {{ uploadBatchSummary.total }} 份<template v-if="uploadBatchSummary.ready"> · 就绪 {{ uploadBatchSummary.ready }}</template><template v-if="uploadBatchSummary.uploading"> · 上传中 {{ uploadBatchSummary.uploading }}</template><template v-if="uploadBatchSummary.failed"> · 失败 {{ uploadBatchSummary.failed }}</template><template v-if="uploadBatchSummary.unknown"> · 待确认 {{ uploadBatchSummary.unknown }}</template>
             </span>
-            <span class="expense-upload-zone__title">拖拽发票到此处，或点击选择文件</span>
-            <span class="expense-upload-zone__help">支持 PDF / OFD / PNG / JPEG。PDF/OFD 可解析候选；图片请人工录入，人工核验不代表税务自动验真。</span>
-          </label>
-          <ul v-if="uploadBatch.length" class="expense-todo-list" aria-live="polite">
-            <li v-for="(file,index) in uploadBatch" :key="index" class="expense-todo">
-              <span class="expense-todo__main">
-                <b>{{ file.name }}</b>
-                <small>{{ {WAITING:'等待',UPLOADING:'上传中',READY:'已就绪',UNKNOWN:'结果待确认',FAILED:'失败'}[file.status] }}</small>
-              </span>
-              <button type="button" v-if="file.document_id" class="expense-button" @click="documentID=file.document_id; readDocument()">读取此原件</button>
-            </li>
-          </ul>
+          </header>
+          <div class="expense-upload-layout">
+            <div class="expense-upload-main">
+              <FileDropzone
+                title="拖拽发票到此处，或点击选择文件"
+                hint="PDF / OFD 可解析候选；PNG / JPEG 请人工录入"
+                accept=".pdf,.ofd,.png,.jpg,.jpeg"
+                multiple
+                :disabled="saving || batchBusy || !!pending"
+                limit="单份 ≤ 20MiB · 每批 1–20 份 · 选择后立即开始上传"
+                @files="uploadInvoiceBatch"
+              />
+              <div v-if="uploadBatch.length" class="expense-filelist" aria-live="polite">
+                <div class="expense-filelist__head">
+                  <span class="expense-filelist__title">上传队列</span>
+                  <span class="expense-filelist__meta">{{ uploadBatchSummary.ready }} / {{ uploadBatchSummary.total }} 已就绪</span>
+                </div>
+                <ul role="list">
+                  <li
+                    v-for="(file, index) in uploadBatch"
+                    :key="index"
+                    class="expense-file"
+                    :data-status="file.status"
+                  >
+                    <span class="expense-file__type" aria-hidden="true">{{ fileExtension(file.name) }}</span>
+                    <span class="expense-file__body">
+                      <strong class="expense-file__name">{{ file.name }}</strong>
+                      <span class="expense-file__meta">
+                        <span v-if="formatFileSize(file.size)">{{ formatFileSize(file.size) }}</span>
+                        <span>{{ uploadStatusText[file.status] }}</span>
+                      </span>
+                      <span
+                        v-if="file.status === 'UPLOADING' || file.status === 'WAITING'"
+                        class="expense-file__track"
+                        aria-hidden="true"
+                      ><i /></span>
+                    </span>
+                    <span class="expense-badge" :class="uploadStatusTone(file.status)">{{ uploadStatusText[file.status] }}</span>
+                    <button
+                      v-if="file.document_id"
+                      type="button"
+                      class="expense-button expense-button--sm"
+                      @click="documentID = file.document_id; readDocument()"
+                    >
+                      读取此原件
+                    </button>
+                  </li>
+                </ul>
+              </div>
+              <div v-else class="expense-upload-empty">
+                <ConsoleIcon name="info" aria-hidden="true" />
+                <span>还没有选择文件。上传结果会逐份出现在这里，并可直接读取原件。</span>
+              </div>
+            </div>
+            <aside class="expense-upload-aside">
+              <section class="expense-upload-steps">
+                <h3>上传、解析与复核</h3>
+                <ol>
+                  <li>
+                    <span class="expense-upload-steps__no" aria-hidden="true">1</span>
+                    <span><b>上传原件</b><small>存入平台文件网关，取得文档号。</small></span>
+                  </li>
+                  <li>
+                    <span class="expense-upload-steps__no" aria-hidden="true">2</span>
+                    <span><b>解析原件</b><small>PDF / OFD 提取候选字段，图片不自动解析。</small></span>
+                  </li>
+                  <li>
+                    <span class="expense-upload-steps__no" aria-hidden="true">3</span>
+                    <span><b>人工复核</b><small>逐张核对后，才可生成费用草稿。</small></span>
+                  </li>
+                </ol>
+              </section>
+              <div class="expense-upload-tip">
+                <ConsoleIcon name="info" aria-hidden="true" />
+                <p>解析与人工核验都不代表税务自动验真。</p>
+              </div>
+              <section v-if="recentTask.parse || recentTask.document" class="expense-upload-recent">
+                <h3>找回上次上传</h3>
+                <p>任务号保存在本机，继续查询不会重新上传。</p>
+                <button v-if="recentTask.document" type="button" class="expense-button" @click="resumeRecentDocument">
+                  读取最近上传的原件（{{ savedAtLabel(recentTask.document.saved_at) }}）
+                </button>
+                <button v-if="recentTask.parse" type="button" class="expense-button" @click="resumeParseTask">
+                  继续查询上次解析任务
+                </button>
+              </section>
+            </aside>
+          </div>
         </section>
         <section class="expense-panel">
           <header class="expense-card-head">
-            <h2 class="expense-card-title"><span class="expense-step">2</span>解析与原件</h2>
+            <div class="expense-card-heading">
+              <h2 class="expense-card-title">
+                <span class="expense-step">2</span>解析与原件
+              </h2>
+              <p class="expense-card-sub">
+                上传后自动回填文档号；也可按文件名选择已上传原件。
+              </p>
+            </div>
             <span class="expense-card-extra">解析结果仅辅助填写</span>
           </header>
-          <div class="expense-option-field">
-            <span>原件文档（上传后自动回填；也可按文件名选择已上传原件）</span>
-            <BusinessOptionPicker
-              v-model="documentID"
-              path="/invoice-document-options"
-              purpose="reimbursement.invoice.original"
-              object-label="原件文档"
-              :current-label="documentLabel"
-              :disabled="saving || batchBusy || !!pending"
-              aria-label="选择原件文档"
-            />
-            <small v-if="documentLabel">本次上传：{{ documentLabel }}</small>
+          <div class="expense-parse-grid">
+            <div class="expense-parse-card">
+              <span class="expense-parse-card__label">当前原件</span>
+              <BusinessOptionPicker
+                v-model="documentID"
+                path="/invoice-document-options"
+                purpose="reimbursement.invoice.original"
+                object-label="原件文档"
+                :current-label="documentLabel"
+                :disabled="saving || batchBusy || !!pending"
+                aria-label="选择原件文档"
+              />
+              <small v-if="documentLabel" class="expense-parse-card__hint">本次上传：{{ documentLabel }}</small>
+              <small v-else class="expense-parse-card__hint">尚未选择原件；上传完成后自动回填。</small>
+            </div>
+            <div class="expense-parse-card expense-parse-card--status">
+              <span class="expense-parse-card__label">当前状态</span>
+              <p class="expense-parse-status">
+                <span v-if="parseRun" class="expense-badge" :class="claimStatusTone(parseRun.status)">{{ statusLabel(parseRun.status) }}</span>
+                <span v-else-if="documentID" class="expense-badge info">原件已选择</span>
+                <span v-else class="expense-badge gray">尚未选择原件</span>
+                <span v-if="parseRun" class="expense-parse-status__meta">已尝试 {{ parseRun.attempt ?? 0 }} 次</span>
+              </p>
+              <p v-if="documentStatus" class="expense-parse-status__meta">
+                文档状态：{{ statusLabel(documentStatus.status) }}
+              </p>
+            </div>
           </div>
           <div class="expense-actions">
             <button v-if="!parseRun" type="button" class="expense-button primary" :disabled="saving || !documentID" @click="parseDocument">
@@ -3170,15 +3339,8 @@ onBeforeUnmount(() => {
               查询解析状态
             </button>
           </div>
-          <div v-if="parseRun" class="expense-item" role="status">
+          <div v-if="parseRun" class="expense-parse-result" role="status">
             <h3>解析任务 {{ parseRun.id }}</h3>
-            <p>
-              <span class="expense-badge" :class="claimStatusTone(parseRun.status)">{{ statusLabel(parseRun.status) }}</span>
-              · 已尝试 {{ parseRun.attempt ?? 0 }} 次
-              <template v-if="documentStatus">
-                · 文档状态：{{ statusLabel(documentStatus.status) }}
-              </template>
-            </p>
             <ul v-if="documentStatus?.detail?.parse_issues?.length">
               <li v-for="issue in documentStatus.detail.parse_issues" :key="issue">{{ parseIssueLabel(issue) }}</li>
             </ul>
@@ -4254,8 +4416,18 @@ onBeforeUnmount(() => {
               <label>住宿分类<input v-model="item.accommodation_category" :list="`accommodation-${item.id}`" placeholder="选择已发布标准编码或输入" data-field="accommodation_category" :aria-invalid="invalidField('accommodation_category', index)">
                 <datalist :id="`accommodation-${item.id}`"><option v-for="value in standardChoices('accommodation_category',item.fee_type)" :key="value" :value="value" /></datalist></label>
               <label>无票证明类型<select v-model="item.no_invoice_proof_type" data-field="no_invoice_proof_type" :aria-invalid="invalidField('no_invoice_proof_type', index)"><option value="">未选择</option><option value="PAYMENT_PROOF">支付证明</option><option value="SERVICE_CONFIRMATION">服务确认</option><option value="OTHER">其他证明</option></select></label>
-              <label>无票／预付独立证明（PDF / PNG / JPEG）<input type="file" accept=".pdf,.png,.jpg,.jpeg"
-                @change="uploadInvoice($event,'reimbursement.claim.evidence',`claimNoInvoice:${item.id}`)"></label>
+              <div class="expense-upload-field">
+                <span class="expense-upload-field__label">无票／预付独立证明</span>
+                <FileDropzone
+                  compact
+                  title="拖拽或点击选择文件"
+                  hint="PDF / PNG / JPEG"
+                  accept=".pdf,.png,.jpg,.jpeg"
+                  action-label="上传"
+                  :disabled="saving || !!pending || !editable"
+                  @files="files => uploadClaimNoInvoice(item, files)"
+                />
+              </div>
               <div class="expense-option-field">
                 <span>独立证明文件（上传后自动关联；也可按文件名补选，仍由服务器校验）</span>
                 <BusinessOptionPicker
@@ -4649,15 +4821,18 @@ onBeforeUnmount(() => {
                 流水号
                 <input v-model="paymentForm.transaction_no" data-field="transaction_no">
               </label>
-              <label>
-                上传付款凭证
-                <input
-                  type="file"
+              <div class="expense-upload-field">
+                <span class="expense-upload-field__label">上传付款凭证</span>
+                <FileDropzone
+                  compact
+                  title="拖拽或点击选择文件"
+                  hint="PDF / PNG / JPEG"
                   accept=".pdf,.png,.jpg,.jpeg"
+                  action-label="上传"
                   :disabled="saving || !!pending"
-                  @change="uploadInvoice($event, 'reimbursement.payment.voucher')"
-                >
-              </label>
+                  @files="uploadPaymentVoucher"
+                />
+              </div>
               <div class="expense-option-field">
                 <span>付款凭证文件（按文件名选择，可多选）</span>
                 <BusinessOptionPicker

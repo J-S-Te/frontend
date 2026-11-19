@@ -26,6 +26,11 @@ import { loadInvoiceCandidateCards } from '../components/InvoiceCandidateCards.t
 import { loginUsername } from '../../shared/loginUsername.mjs'
 
 const panelStub = { render: () => null }
+// 上传控件替身：把标题/提示渲染为可断言文本，验证上传入口仍然存在。
+const FileDropzoneStub = {
+  props: ['title', 'hint', 'limit', 'actionLabel'],
+  setup: (props) => () => Vue.h('div', [props.title, props.hint, props.limit].filter(Boolean).join(' ')),
+}
 const InvoiceCandidateCards = loadInvoiceCandidateCards()
 
 // 失败态替身：把标题和错误原因渲染成可断言文本，验证"失败没有被渲染成空态"。
@@ -84,7 +89,7 @@ async function mountPage(permissions, request, section = 'dashboard', roles = []
     onBeforeRouteLeave() {}, onBeforeRouteUpdate: () => {}, PaginationBar: PaginationBarStub, InvoiceCandidateCards,
     useLoginUsername: (session) => Vue.computed(() => loginUsername(session.value)),
     ConfirmDialog: panelStub, useConfirmDialog: useConfirmDialogStub,
-    AppShell: { props: ['userName'], setup: (props, { slots }) => { Object.assign(shellProps, props); return () => Vue.h('main', slots.default?.()) } }, LoadingState: panelStub, ErrorState: ErrorStateStub, EmptyState: EmptyStateStub, ExpenseInbox: panelStub, ArchiveBorrowPanel: panelStub, TravelFields: panelStub, BusinessObjectSelect: panelStub, BusinessAttachmentSelect: panelStub, CitySelect: panelStub, ClaimPreviewPanel:panelStub,InvoiceContentFields:panelStub,InvoiceContentMappings:panelStub,InvoiceClassificationEvidence:panelStub,ParseExceptionsPanel:panelStub, PaymentExceptionPanel: panelStub, ClaimEvidenceTravelPanel: panelStub, BusinessOptionPicker: panelStub, ArchivePackagePanel: panelStub, InvoiceControlsPanel: panelStub, ApprovalRoundsPanel: panelStub, ClaimSyncPanel: panelStub, ReimbursementCostNotice: panelStub, RecoveryPanel: panelStub, InvoiceOriginalViewer: panelStub, todayBusinessDate: () => '2026-11-10', formatBusinessDateTime: (value) => value,
+    AppShell: { props: ['userName'], setup: (props, { slots }) => { Object.assign(shellProps, props); return () => Vue.h('main', slots.default?.()) } }, LoadingState: panelStub, ErrorState: ErrorStateStub, EmptyState: EmptyStateStub, ExpenseInbox: panelStub, ArchiveBorrowPanel: panelStub, TravelFields: panelStub, BusinessObjectSelect: panelStub, BusinessAttachmentSelect: panelStub, FileDropzone: FileDropzoneStub, CitySelect: panelStub, ClaimPreviewPanel:panelStub,InvoiceContentFields:panelStub,InvoiceContentMappings:panelStub,InvoiceClassificationEvidence:panelStub,ParseExceptionsPanel:panelStub, PaymentExceptionPanel: panelStub, ClaimEvidenceTravelPanel: panelStub, BusinessOptionPicker: panelStub, ArchivePackagePanel: panelStub, InvoiceControlsPanel: panelStub, ApprovalRoundsPanel: panelStub, ClaimSyncPanel: panelStub, ReimbursementCostNotice: panelStub, RecoveryPanel: panelStub, InvoiceOriginalViewer: panelStub, todayBusinessDate: () => '2026-11-10', formatBusinessDateTime: (value) => value,
     createCommandRunner, createRequestID, timeoutSignal, formatMinor, toMinor, validateItems, createIdempotencyKey: (() => { let n = 0; return () => `expense-key-${++n}` })(), approvalNodeLabel, approvalNodesLabel, assignmentPurpose, expenseScopeDescription, hasTenantAllCapability, reimbursementRoleLabel, canSelectProjectReference, editableClaimItem, evidenceIDs, policyFields, policyFormFrom, policyPayload, statusLabel, claimStatusTone, failureMessage, failureText, parseIssueLabel, formatUserError, pollTask, taskSettled, recallTask, rememberTask, savedAtLabel,
 
     ensureReimbursementSession: async () => ({ tenant_id: 'test', subject_id: 'actor', permissions, roles, ...profile }),
