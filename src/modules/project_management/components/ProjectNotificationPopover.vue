@@ -22,7 +22,7 @@ defineEmits(['open-item', 'view-all'])
       <p v-else-if="error" class="pm-notification-state danger">{{ error }}</p>
       <button v-for="item in items" :key="item.delivery_id" :disabled="actionId === item.delivery_id" @click="$emit('open-item', item)"><i :class="item.category === 'DEVIATION_REPORTED' ? 'danger' : 'warning'"></i><span><b>{{ item.title }}</b><small>{{ item.content }}</small></span></button>
       <EmptyHint v-if="!loading && !error && !items.length" message="暂无未读通知" />
-      <button v-if="showViewAll" type="button" @click="$emit('view-all')">查看全部通知</button>
+      <button v-if="showViewAll" type="button" class="pm-notification-view-all" @click="$emit('view-all')">查看全部通知</button>
     </section>
   </div>
 </template>

@@ -2,6 +2,22 @@ import { useNotificationStream } from '../../shared/composables/notificationStre
 import { onBeforeUnmount, ref } from 'vue'
 import { projectApprovalTarget } from '../approvalTasks.js'
 
+// 用途：收件箱按“标题 + 正文 + 关联对象”去重，避免同一业务事件被多个投递通道重复展示。
+// 参数：items 为服务端未读列表。
+// 返回值：保留首次出现顺序的去重列表。
+export function dedupeNotificationItems(items) {
+  const seen = new Set()
+  return (Array.isArray(items) ? items : []).filter((item) => {
+    const key = [item?.title, item?.content, item?.reference_type, item?.reference_id]
+      .map((value) => String(value || '').trim())
+      .join('\u0000')
+    if (!key.replace(/\u0000/g, '')) return true
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+}
+
 // 用途：管理项目铃铛的未读通知，以及关联业务目标跳转。
 // 参数：由注入的接口读取及标记本人通知，openTarget 执行受控跳转，getContext 提供当前身份。
 // 返回值：弹层状态、未读计数和打开通知等操作。
@@ -75,7 +91,8 @@ async function loadUnreadNotifications() {
   ])
   if (!isCurrent(context)) return
   if (inboxResult.status === 'fulfilled') {
-    notificationItems.value = (inboxResult.value?.items || []).filter((item) => !item.read_at)
+    notificationItems.value = dedupeNotificationItems(
+      (inboxResult.value?.items || []).filter((item) => !item.read_at))
   } else {
     notificationItems.value = []
     notificationError.value = formatUserError(inboxResult.reason, { fallback: '未读通知加载失败' })

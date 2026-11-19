@@ -289,14 +289,15 @@ test('通知铃铛仅显示未读通知，不自动收起', () => {
 test('通知铃铛只读取未点击事件，点击后持久化已读并立即移除', () => {
   assert.match(notificationApiSource, /if \(unreadOnly\) query\.set\('unread_only', 'true'\)/)
   assert.match(notificationSource, /listNotificationInbox\(\{ page: 1, pageSize: 20, unreadOnly: true \}\)/)
-  assert.match(notificationSource, /notificationItems\.value = \(inboxResult\.value\?\.items \|\| \[\]\)\.filter\(\(item\) => !item\.read_at\)/)
+  assert.match(notificationSource, /notificationItems\.value = dedupeNotificationItems\(/)
+  assert.match(notificationSource, /filter\(\(item\) => !item\.read_at\)\)/)
   assert.match(notificationSource, /await markNotificationRead\(deliveryID\)/)
   assert.match(notificationSource, /notificationItems\.value = notificationItems\.value\.filter\(\(entry\) => entry\.delivery_id !== deliveryID\)/)
   assert.match(notificationSource, /notificationCount\.value = Math\.max\(0, notificationCount\.value - 1\)/)
   assert.doesNotMatch(notificationSource, /listApprovalTasks/)
   assert.match(popoverSource, /message="暂无未读通知"/)
   assert.doesNotMatch(source, /pendingDeviations\.length \+ decompositionItems\.value\.length \+ inboxItems\.value\.length/)
-  assert.match(styles, /\.pm-notifications \{[\s\S]*?max-height: min\(520px,[\s\S]*?overflow-y: auto;/)
+  assert.match(styles, /\.pm-notification-group \{[\s\S]*?overflow-y: auto;/)
 })
 
 test('项目管理页面视觉基线对齐 V1.1 SPA 原型（Element Plus 形态）', () => {
