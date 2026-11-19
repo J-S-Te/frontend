@@ -3606,6 +3606,7 @@
 
 /* ===== 商机详情工作台（按 2026-11-19 设计稿重构） ===== */
 .crm-opportunity-detail {
+  --crm-detail-layout-version: 3;
   display: flex;
   flex-direction: column;
   gap: 0;
