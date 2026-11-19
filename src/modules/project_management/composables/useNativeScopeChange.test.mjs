@@ -2,6 +2,23 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { useNativeScopeChange } from './useNativeScopeChange.js'
 
+test('精确范围链接只读取该提案，旧链接不得提交新提案或审批另一待办', async () => {
+  const calls = []
+  const old = { id: 'old', project_id: 'PJ-1', requested_by: 'business', status: 'APPROVED', version: 2 }
+  const other = { id: 'new', project_id: 'PJ-1', requested_by: 'other', status: 'PENDING', version: 1 }
+  const ui = useNativeScopeChange({ projectId: 'PJ-1', changeId: 'old', api: {
+    read: async (...args) => { calls.push(args); return { ...state(), actor_id: 'director',
+      can_approve: true, changes: [old] } },
+    decide: async () => { throw new Error('不应写入') },
+  } })
+  await ui.load()
+  assert.deepEqual(calls, [['PJ-1', 'old']])
+  assert.equal(ui.canRequest.value, false)
+  assert.equal(ui.canDecide(other), false)
+  assert.equal(ui.canDecide(old), false)
+  await ui.decide(other, 'APPROVE', '不可串提案')
+})
+
 // 用途：创建真实控制器依赖的权威本地范围状态。
 // 参数：无。
 // 返回值：带真实来源行及版本的测试状态。

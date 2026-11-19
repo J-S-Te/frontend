@@ -464,7 +464,12 @@ test('所有业务节点只展示当前归属项目并在回退后清除原节�
   assert.match(workflowNodeSource, /Boolean\(item\.team_lead_id && item\.project_manager_id && \(item\.engineer_ids \|\| \[\]\)\.length\)/)
   assert.match(workflowNodeSource, /item\.conflict_status === 'PASSED'/)
   assert.match(source, /projectAllowsNode\(item, 'planning'\) && implementationPlanReady\(item\)/)
-  assert.match(source, /const exceptionItems = computed\(\(\) => serviceItems\.value\.filter\(\(item\) => item\.status === '异常处理中' && projectAllowsNode\(item, 'exceptions'\)\)\)/)
+  const focusedItems = source.slice(source.indexOf('const workflowServiceItems = computed('),
+    source.indexOf('const projectByID = computed('))
+  assert.match(focusedItems, /const item = approvalDeepLink\.serviceItem\.value/)
+  assert.match(focusedItems, /if \(!item \|\| !\['methods', 'exceptions'\]\.includes\(activeSection\.value\)\) return serviceItems\.value/)
+  assert.match(focusedItems, /return \[\.\.\.serviceItems\.value\.filter\(\(row\) => row\.id !== item\.id\), item\]/)
+  assert.match(source, /const exceptionItems = computed\(\(\) => workflowServiceItems\.value\.filter\(\(item\) => item\.status === '异常处理中' && projectAllowsNode\(item, 'exceptions'\)\)\)/)
   assert.match(source, /exceptionItemIDs\.value\.has\(event\.service_item_id\)/)
   assert.match(source, /const activeNodeItems = computed\(\(\) => \(\{/)
   for (const node of ['allocation', 'inbox', 'planning', 'preparation', 'assignments', 'methods', 'exceptions', 'reports', 'implementation']) {

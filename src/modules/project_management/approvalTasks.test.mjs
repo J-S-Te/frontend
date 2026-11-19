@@ -2,6 +2,28 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 
 import { projectApprovalTarget, approvalOwnerLabel, approvalStatusLabel, approvalTypeLabel } from './approvalTasks.js'
+import * as approvals from './approvalTasks.js'
+
+test('新审批类型按原业务坐标直达，后端参数顺序不影响校验且错配目标被拒绝', () => {
+  assert.equal(typeof approvals.approvalTaskTarget, 'function')
+  const cases = [
+    [{ id: 'SI-2', type: 'SPECIAL_METHOD_REVIEW', service_item_id: 'SI-2' },
+      '/project_management/methods?service_item_id=SI-2', '特殊方法复核'],
+    [{ id: 'DV-2', type: 'FIELD_DEVIATION', service_item_id: 'SI-2' },
+      '/project_management/exceptions?service_item_id=SI-2&deviation_id=DV-2', '现场偏离评审'],
+    [{ id: 'CH-2', type: 'NATIVE_SCOPE_CHANGE', project_id: 'PJ-2' },
+      '/project_management/project_detail?project=PJ-2&scope_change_id=CH-2', '原生委托范围变更'],
+  ]
+  for (const [task, target, label] of cases) {
+    assert.equal(approvals.approvalTaskTarget(task), target)
+    const url = new URL(target, 'https://app.example')
+    url.searchParams.sort()
+    assert.equal(approvals.approvalTaskTarget({ ...task, target_url: url.pathname + url.search }), target)
+    assert.equal(approvalTypeLabel(task.type), label)
+    assert.equal(approvals.approvalTaskTarget({ ...task, target_url: target + '&decision=APPROVED' }), '')
+    assert.equal(approvals.approvalTaskTarget({ ...task, target_url: '/project_management/approvals?request_id=other' }), '')
+  }
+})
 
 test('平台真实收件箱的大写引用类型可直达，代码字段兼容大小写和首尾空白', () => {
   const item = {

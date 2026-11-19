@@ -25,13 +25,13 @@ function exactReceipt(value, command, project) {
 }
 
 // 用途：管理本地范围提案及异人审批，未知结果仅允许原操作精确重试。
-// 参数：projectId 为固定项目，api 为既有真实transport，disabled 为当前禁写状态，uuid 生成操作号。
+// 参数：projectId/changeId 为固定项目及可选精确提案，api 为原接口，disabled 禁写，uuid 生成操作号。
 // 返回值：完整表单、状态、权限及读取和写入动作。
-export function useNativeScopeChange({ projectId, api, disabled = () => false, uuid = createIdempotencyKey, onChanged = () => {}, initialState = null }) {
+export function useNativeScopeChange({ projectId, changeId = '', api, disabled = () => false, uuid = createIdempotencyKey, onChanged = () => {}, initialState = null }) {
   const state = ref(initialState), lines = ref([]), reason = ref(''), confirmed = ref(false)
   const busy = ref(false), loading = ref(false), error = ref(''), notice = ref(''), pending = ref(null)
   const active = computed(() => state.value?.changes?.find((item) => item.status === 'PENDING'))
-  const canRequest = computed(() => state.value?.can_request === true && !active.value && !pending.value && !busy.value && !loading.value && !disabled())
+  const canRequest = computed(() => !changeId && state.value?.can_request === true && !active.value && !pending.value && !busy.value && !loading.value && !disabled())
 
   // 用途：读取真实当前版本及有界提案，避免刷新丢失未知写入操作。
   // 参数：无。
@@ -40,10 +40,10 @@ export function useNativeScopeChange({ projectId, api, disabled = () => false, u
     if (loading.value) return
     loading.value = true; error.value = ''
     try {
-      const value = await api.read(projectId)
+      const value = await (changeId ? api.read(projectId, changeId) : api.read(projectId))
       if (value?.project_id !== projectId || !Number.isSafeInteger(value.scope_version) || value.scope_version < 1 ||
           !Number.isSafeInteger(value.project_version) || !Array.isArray(value.service_items) || !Array.isArray(value.changes) || !value.actor_id) throw new Error('范围读取回执无效')
-      state.value = value
+      state.value = changeId ? { ...value, changes: value.changes.filter((item) => item.id === changeId) } : value
       if (pending.value) {
         const receipt = value.changes.find((item) => exactReceipt(item, pending.value, projectId))
         if (receipt) { pending.value = null; notice.value = '已按原操作号核对持久结果'; onChanged(receipt) }
@@ -57,7 +57,8 @@ export function useNativeScopeChange({ projectId, api, disabled = () => false, u
   // 参数：change 为持久提案。
   // 返回值：服务端能力和不同身份全部满足时为真。
   function canDecide(change) {
-    return state.value?.can_approve === true && change?.status === 'PENDING' &&
+    return state.value?.changes?.includes(change) && (!changeId || change.id === changeId) &&
+      state.value?.can_approve === true && change?.status === 'PENDING' &&
       change.requested_by !== state.value.actor_id && !pending.value && !busy.value && !loading.value && !disabled()
   }
 
@@ -97,7 +98,8 @@ export function useNativeScopeChange({ projectId, api, disabled = () => false, u
   // 参数：change 为真实提案，decision 为决定，comment 为必填意见。
   // 返回值：无；角色或身份不符合时不发送。
   async function decide(change, decision, comment) {
-    const withdrawal = decision === 'WITHDRAW' && change?.status === 'PENDING' &&
+    const withdrawal = state.value?.changes?.includes(change) && (!changeId || change.id === changeId) &&
+      decision === 'WITHDRAW' && change?.status === 'PENDING' && !loading.value &&
       state.value?.can_request === true && change.requested_by === state.value.actor_id && !pending.value && !busy.value && !disabled()
     if ((!withdrawal && !canDecide(change)) || !['APPROVE', 'REJECT', 'WITHDRAW'].includes(decision) || !comment?.trim()) return
     await perform({ kind: 'decision', actor: state.value.actor_id, changeID: change.id,

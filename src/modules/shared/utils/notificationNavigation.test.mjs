@@ -8,6 +8,48 @@ import {
   notificationTarget,
 } from './notificationNavigation.js'
 
+test('项目新审批及结果通知核对原业务引用，历史缺目标可精确补齐', () => {
+  const origin = 'https://app.example'
+  const cases = [
+    ['SPECIAL_METHOD_REVIEW_REQUESTED', 'SERVICE_ITEM', 'SI-2', '/project_management/methods?service_item_id=SI-2'],
+    ['SPECIAL_METHOD_REVIEWED', 'SPECIAL_METHOD_REVIEW', 'EV-2', '/project_management/methods?service_item_id=SI-2&review_id=EV-2'],
+    ['DEVIATION_REPORTED', 'DEVIATION', 'DV-2', '/project_management/exceptions?deviation_id=DV-2&service_item_id=SI-2'],
+    ['DEVIATION_REVIEWED', 'DEVIATION', 'DV-2', '/project_management/exceptions?service_item_id=SI-2&deviation_id=DV-2'],
+    ['NATIVE_SCOPE_CHANGE_REQUESTED', 'NATIVE_SCOPE_CHANGE', 'CH-2', '/project_management/project_detail?project=PJ-2&scope_change_id=CH-2'],
+    ['NATIVE_SCOPE_CHANGE_APPROVED', 'NATIVE_SCOPE_CHANGE', 'CH-2', '/project_management/project_detail?project=PJ-2&scope_change_id=CH-2'],
+    ['NATIVE_SCOPE_CHANGE_REJECTED', 'NATIVE_SCOPE_CHANGE', 'CH-2', '/project_management/project_detail?project=PJ-2&scope_change_id=CH-2'],
+  ]
+  for (const [category, reference_type, reference_id, target_url] of cases) {
+    const item = { source_application: 'project_management', category, reference_type, reference_id, target_url }
+    assert.equal(notificationTarget(item, origin), target_url)
+    assert.equal(notificationTarget({ ...item, reference_id: 'other' }, origin), '')
+    assert.equal(notificationTarget({ ...item, reference_type: 'OTHER' }, origin), '')
+    assert.equal(notificationTarget({ ...item, target_url: target_url + '&decision=APPROVED' }, origin), '')
+  }
+  assert.equal(notificationTarget({ source_application: 'project_management', category: 'DEVIATION_REPORTED',
+    reference_type: 'DEVIATION', reference_id: 'DV-2' }, origin), '/project_management/exceptions?deviation_id=DV-2')
+  assert.equal(notificationTarget({ source_application: 'project_management', category: 'NATIVE_SCOPE_CHANGE_REJECTED',
+    reference_type: 'NATIVE_SCOPE_CHANGE', reference_id: 'CH-2' }, origin), '/project_management/project_detail?scope_change_id=CH-2')
+  for (const [category, section] of [
+    ['DEVIATION_REVIEWED', 'exceptions'], ['SPECIAL_METHOD_REVIEWED', 'methods'],
+  ]) {
+    assert.equal(notificationTarget({ source_application: 'project_management', category,
+      reference_type: 'SERVICE_ITEM', reference_id: 'SI-2',
+      target_url: `/project_management/${section}?service_item_id=SI-2` }, origin),
+    `/project_management/${section}`, '旧结果缺少实例编号时只进入原页面，不误选下一轮待办')
+  }
+  assert.equal(notificationTarget({ source_application: 'project_management',
+    category: 'SPECIAL_METHOD_REVIEW_REQUESTED', reference_type: 'SERVICE_ITEM', reference_id: 'SI-2',
+    target_url: '/project_management/methods?service_item_id=SI-2&review_id=EV-other' }, origin), '')
+  assert.equal(notificationTarget({ source_application: 'project_management',
+    category: 'NATIVE_SCOPE_CHANGE_APPROVED', reference_type: 'NATIVE_SCOPE_CHANGE', reference_id: 'CH-2',
+    target_url: '/project_management/project_detail?project=PJ-2' }, origin),
+    '/project_management/project_detail?project=PJ-2&scope_change_id=CH-2')
+  assert.equal(notificationTarget({ source_application: 'project_management',
+    category: 'SPECIAL_METHOD_REVIEWED', reference_type: 'SERVICE_ITEM', reference_id: 'SI-2',
+    target_url: '/project_management/methods?service_item_id=SI-other' }, origin), '')
+})
+
 test('通知目标保留站内审批坐标、查询参数和锚点', () => {
   assert.equal(safeTarget('/contract_management/approvals?approval_id=a%2Fb#task'),
     '/contract_management/approvals?approval_id=a%2Fb#task')

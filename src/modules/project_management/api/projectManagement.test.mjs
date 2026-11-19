@@ -232,6 +232,20 @@ test('项目与服务项快照请求强制 all=1，不会误传分页参数并�
   assert.equal(scoped.truncated, true)
   await api.listServiceItemsSnapshot()
   assert.equal(paths[2], '/service-items?all=1')
+  await api.listServiceItemsSnapshot('PJ-1', 'SI/2')
+  const exact = new URL(paths[3], 'https://app.example')
+  assert.deepEqual([...exact.searchParams], [['all', '1'], ['project_id', 'PJ-1'], ['service_item_id', 'SI/2']])
+})
+
+test('范围历史精确读取编码change_id，普通读取保持最近历史接口', async () => {
+  const body = source.match(/export function getNativeProjectScope\([^]*?\n\}/)[0]
+  const paths = []
+  const read = vm.runInNewContext(`${body.replace('export ', '')}\ngetNativeProjectScope`,
+    { URLSearchParams, request: async path => { paths.push(path); return { project_id: 'PJ-1' } } })
+  await read('PJ-1')
+  await read('PJ-1', 'CH/2')
+  assert.equal(paths[0], '/projects/PJ-1/native-scope')
+  assert.equal(new URL(paths[1], 'https://app.example').searchParams.get('change_id'), 'CH/2')
 })
 
 test('实时监控读取独立服务端快照并保留分页与版本元数据', () => {

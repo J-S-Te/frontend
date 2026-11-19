@@ -11,7 +11,8 @@ import PaginationBar from '@/modules/shared/components/PaginationBar.vue'
 import { computed, defineAsyncComponent, defineComponent, h, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import { formatUserError } from '../../shared/utils/userError.js'
 import { openNotificationTarget } from '../../shared/utils/notificationNavigation.js'
-import { projectApprovalTarget } from '../approvalTasks.js'
+import { approvalTaskTarget, approvalStatusLabel, approvalTypeLabel, projectApprovalTarget } from '../approvalTasks.js'
+import { useProjectApprovalDeepLink } from '../composables/useProjectApprovalDeepLink.js'
 import { createRequestScope } from '../../platform/shared/composables/requestScope.js'
 import { useConfirmDialog } from '../../shared/composables/useConfirmDialog.js'
 import { usePromptDialog } from '../../shared/composables/usePromptDialog.js'
@@ -20,7 +21,7 @@ import ConfirmDialog from '../../shared/components/ConfirmDialog.vue'
 import StatusTag from '../../shared/components/StatusTag.vue'
 import PromptDialog from '../../shared/components/PromptDialog.vue'
 import { assignServiceItemTeams } from '../assignment.js'
-import { useRoute, useRouter } from 'vue-router'
+import { onBeforeRouteLeave, onBeforeRouteUpdate, useRoute, useRouter } from 'vue-router'
 import { AuthError, logoutCurrentSession } from '@/modules/platform/auth/api/auth'
 import {
   getNotification, getUnreadCount, listInbox as listNotificationInbox, markNotificationRead,
@@ -186,6 +187,8 @@ import {
   saveSplitOverride,
   deleteSplitOverride,
   listServiceItemsSnapshot,
+  getProject,
+  listApprovalTasks,
   listPersonnel,
   listQualifiedPersonnel,
   listEquipmentReservations,
@@ -396,6 +399,7 @@ const selectedRows = ref([])
 const createOpen = ref(false)
 const nativeCreateOpen = ref(false)
 const nativeScopeProjectID = ref('')
+const nativeScopeLocked = ref(false)
 const {
   notificationOpen, notificationItems, notificationCount, notificationLoading, notificationError, notificationActionID,
   closeNotifications, refreshNotificationCount, openNotification,
@@ -416,6 +420,7 @@ const toastMessage = ref('')
 const toastType = ref('success')
 const isLoggingOut = ref(false)
 const loading = ref(true)
+const workspaceReady = ref(false)
 // 写后同步与手动刷新在后台进行：不卸载已渲染的工作区，避免整页闪一下。
 const refreshing = ref(false)
 // 写成功但随动刷新失败时保留可重试入口，不能只弹一次 Toast。
@@ -1349,7 +1354,23 @@ function navigateMulti(event, options, name, toggle) {
 }
 function onEquipmentCodesKeydown(event) { navigateMulti(event, equipmentCodeOptions.value, 'equipmentCodes', (option) => toggleEquipmentCode(option.code)) }
 function onDetectionRequiredCodesKeydown(event) { navigateMulti(event, detectionRequiredCodeOptions.value, 'detectionRequiredCodes', (option) => toggleDetectionRequiredCode(option.code)) }
-const projectByID = computed(() => new Map(projects.value.map((project) => [project.id, project])))
+const approvalDeepLink = useProjectApprovalDeepLink({ route, section: activeSection,
+  context: sectionDataContext, ready: computed(() => workspaceReady.value && !loading.value && !loadError.value),
+  busy: computed(() => saving.value || nativeScopeLocked.value),
+  api: { listApprovalTasks, listServiceItemsSnapshot, getProject } })
+const { task: focusedApprovalTask, loading: approvalTargetLoading,
+  error: approvalTargetError, requested: approvalTargetRequested } = approvalDeepLink
+// 只补充当前深链业务页的授权单条资源，不改变普通项目及服务项快照。
+const workflowServiceItems = computed(() => {
+  const item = approvalDeepLink.serviceItem.value
+  if (!item || !['methods', 'exceptions'].includes(activeSection.value)) return serviceItems.value
+  return [...serviceItems.value.filter((row) => row.id !== item.id), item]
+})
+const projectByID = computed(() => {
+  const rows = new Map(projects.value.map((project) => [project.id, project]))
+  if (approvalDeepLink.project.value) rows.set(approvalDeepLink.project.value.id, approvalDeepLink.project.value)
+  return rows
+})
 const projectStatusForItem = (item) => projectByID.value.get(item?.project_id)?.status || ''
 const projectAllowsNode = (item, node) => projectAllowsWorkflowNode(projectStatusForItem(item), node)
 // 任务分配只接收“项目和服务项都处于待分配”的记录。任一服务项退回拆解后，服务端会把
@@ -1423,7 +1444,7 @@ const travelTravelerOptions = computed(() => {
     return { id: row.resourceID, name: personLabel(row.resourceID), description: implementers.has(row.resourceID) ? `${role} · 实施人员` : role }
   })
 })
-const itemByID = computed(() => new Map(serviceItems.value.map((item) => [item.id, item])))
+const itemByID = computed(() => new Map(workflowServiceItems.value.map((item) => [item.id, item])))
 const stampedContractStateByProject = computed(() => {
   const states = new Map()
   for (const event of deliveryEvents.value) {
@@ -1503,10 +1524,20 @@ const penetrationPackageStats = computed(() => {
     completed: packages.filter((item) => item.execution_status === 'COMPLETED').length,
   }
 })
-const exceptionItems = computed(() => serviceItems.value.filter((item) => item.status === '异常处理中' && projectAllowsNode(item, 'exceptions')))
+const exceptionItems = computed(() => workflowServiceItems.value.filter((item) => item.status === '异常处理中' && projectAllowsNode(item, 'exceptions')))
 const exceptionItemIDs = computed(() => new Set(exceptionItems.value.map((item) => item.id)))
-const pendingDeviations = computed(() => deliveryEvents.value.filter((event) => event.type === 'DEVIATION_REPORTED' && exceptionItemIDs.value.has(event.service_item_id) && !reviewedDeviationIDs.value.has(event.payload?.deviation_id)))
-const methodItems = computed(() => serviceItems.value.filter((item) => projectAllowsNode(item, 'methods') && item.status === '待分配' && item.special === '是' && ['PENDING', 'REJECTED'].includes(item.tech_review_status)))
+const pendingDeviations = computed(() => {
+  const rows = deliveryEvents.value.filter((event) => event.type === 'DEVIATION_REPORTED'
+    && exceptionItemIDs.value.has(event.service_item_id) && !reviewedDeviationIDs.value.has(event.payload?.deviation_id))
+  const task = focusedApprovalTask.value
+  if (task?.type !== 'FIELD_DEVIATION' || task.status !== 'PENDING') return rows
+  return [...rows.filter((event) => event.payload?.deviation_id !== task.id), {
+    id: task.id, type: 'DEVIATION_REPORTED', service_item_id: task.service_item_id,
+    actor_user_id: task.requester_user_id, created_at: task.created_at,
+    payload: { deviation_id: task.id, description: task.reason, severity: task.severity },
+  }]
+})
+const methodItems = computed(() => workflowServiceItems.value.filter((item) => projectAllowsNode(item, 'methods') && item.status === '待分配' && item.special === '是' && ['PENDING', 'REJECTED'].includes(item.tech_review_status)))
 const assignmentItems = computed(() => allocationCandidates.value.filter((item) => item.team_lead_id && item.conflict_status !== 'PASSED'))
 const activeNodeItems = computed(() => ({
   allocation: allocationItems.value,
@@ -1983,7 +2014,8 @@ const selectedDeviation = computed(() => {
   const wanted = String(operationForm.value.deviationID || '').trim()
   const candidates = pendingDeviations.value
     .filter((event) => event.service_item_id === selectedServiceItem.value?.id)
-  return candidates.find((event) => event.payload?.deviation_id === wanted) || candidates[0] || null
+  return candidates.find((event) => event.payload?.deviation_id === wanted)
+    || (!wanted && candidates.length === 1 ? candidates[0] : null) || null
 })
 const exceptionFlow = computed(() => {
   const deviation = selectedDeviation.value
@@ -2121,7 +2153,6 @@ const operationDetailFields = computed(() => {
 // 时把失败写入页面错误区；reportError=false 用于写后刷新——静默上抛，由调用方以
 // “已保存，但最新数据读取失败”的准确文案提示，不把整个工作区替换成错误页。
 const workspaceScope = createRequestScope()
-const workspaceReady = ref(false)
 const workspaceAuthorizationPending = ref(false)
 const { loading: sectionExtrasLoading, error: sectionExtrasError, load: loadSectionExtras } = useProjectSectionData({
   section: activeSection, context: sectionDataContext,
@@ -2677,10 +2708,16 @@ async function openApprovalTarget(target) {
   }
 }
 
-// 用途：将原业务页的申请入口统一带到精确审批详情。
-// 参数：requestID 为当前可见申请的标识。
-// 返回值：导航结果；没有申请标识时返回 false。
+// 用途：将待办及旧申请入口带到原业务页或精确统一审批详情。
+// 参数：requestID 为旧申请编号，或含原业务类型和坐标的授权待办。
+// 返回值：导航结果；缺少编号或目标不一致时返回 false。
 function openApprovalRequest(requestID) {
+  if (requestID && typeof requestID === 'object') {
+    const target = approvalTaskTarget(requestID)
+    if (target) return openProjectNotificationTarget({ target_url: target })
+    showToast('待办目标无法确认，请刷新审批待办重试。', 'warning')
+    return Promise.resolve(false)
+  }
   if (!requestID) return Promise.resolve(false)
   return openApprovalTarget(`/project_management/approvals?${new URLSearchParams({ request_id: requestID })}`)
 }
@@ -2698,7 +2735,10 @@ function openProjectTimeline(project) {
 }
 const detailProject = computed(() => {
   const id = String(route.query.project || '')
-  return projects.value.find((project) => project.id === id) || null
+  const focused = approvalDeepLink.project.value
+  return projects.value.find((project) => project.id === id)
+    || (approvalDeepLink.requested.value?.type === 'NATIVE_SCOPE_CHANGE'
+      && focused && (!id || focused.id === id) ? focused : null)
 })
 // 只在身份、项目或读取授权变化时销毁工作区；普通刷新不丢弃未知写结果的原操作号。
 watch([
@@ -2706,7 +2746,7 @@ watch([
   () => principalIdentityID(session.value),
   () => session.value?.tenant_id,
   canReadNativeProjectScope,
-], () => { nativeScopeProjectID.value = '' })
+], () => { nativeScopeProjectID.value = ''; nativeScopeLocked.value = false })
 
 // 用途：刷新已提交的原生范围与服务项，不重发提案或审批。
 // 参数：change为真实持久提案回执。
@@ -3353,6 +3393,18 @@ async function runOperation(kind) {
   const items = kind === 'allocation' ? selectedServiceItems.value : (item ? [item] : [])
   if (!items.length) { showToast(kind === 'allocation' ? '请至少选择一个服务项' : '当前没有可操作的服务项'); return }
   const form = operationForm.value
+  if (kind === 'exception-review' && (!selectedDeviation.value
+    || selectedDeviation.value.payload?.deviation_id !== form.deviationID
+    || (approvalDeepLink.requested.value && (!approvalDeepLink.canProcess.value
+      || focusedApprovalTask.value?.id !== form.deviationID)))) {
+    showToast('请重新核对本次待评审偏离，旧记录或其他偏离不能在当前链接中提交。', 'warning')
+    return
+  }
+  if (['special-approve', 'special-reject'].includes(kind) && approvalDeepLink.requested.value
+    && (!approvalDeepLink.canProcess.value || focusedApprovalTask.value?.service_item_id !== item?.id)) {
+    showToast('该复核链接仅供查看结果，请从当前待办进入本次复核。', 'warning')
+    return
+  }
   const completedAssignmentIDs = []
   const savedAssignmentIDs = []
   const conflictedAssignments = []
@@ -3927,6 +3979,9 @@ function selectNotificationServiceItem(itemID) {
   const item = activeNodeItems.value.find((row) => row.id === itemID)
   if (item) {
     selectServiceItem(item)
+    if (activeSection.value === 'exceptions' && !route.query.deviation_id) {
+      operationForm.value.deviationID = ''
+    }
     return
   }
   selectedServiceItemIDs.value = []
@@ -3953,6 +4008,7 @@ function selectNotificationDecomposition(projectID, itemID) {
 // 参数：无；读取当前栏目、查询坐标和工作区加载状态。
 // 返回值：无；同一坐标只初始化一次，避免刷新清空用户正在填写的表单。
 function applyNotificationSelection() {
+  if (saving.value || nativeScopeLocked.value) return
   const section = activeSection.value
   const workflowSections = ['allocation', 'inbox', 'planning', 'preparation',
     'assignments', 'methods', 'exceptions', 'reports', 'implementation']
@@ -3960,8 +4016,34 @@ function applyNotificationSelection() {
     ? notificationCoordinate(route.query.service_item_id) : ''
   const projectID = Object.hasOwn(route.query, 'project')
     ? notificationCoordinate(route.query.project) : ''
-  const context = JSON.stringify([section, route.query.service_item_id,
-    route.query.project, sectionDataContext.value])
+  const context = JSON.stringify([section, route.query.service_item_id, route.query.deviation_id,
+    route.query.scope_change_id, route.query.review_id, route.query.project, sectionDataContext.value])
+  const exact = approvalDeepLink.requested.value
+  if (exact) {
+    if (loading.value || !workspaceReady.value || loadError.value) return
+    const task = approvalDeepLink.task.value
+    if (approvalDeepLink.loading.value || approvalDeepLink.error.value || !task) {
+      selectedServiceItemIDs.value = []; operationForm.value.deviationID = ''
+      notificationSelectionContext = ''
+      return
+    }
+    if (context === notificationSelectionContext) return
+    notificationSelectionContext = context
+    selectedServiceItemIDs.value = []; operationForm.value.deviationID = ''
+    if (task.type === 'NATIVE_SCOPE_CHANGE') {
+      if (canReadNativeProjectScope.value) nativeScopeProjectID.value = task.project_id
+      return
+    }
+    if (!approvalDeepLink.canProcess.value) return
+    const item = activeNodeItems.value.find((row) => row.id === task.service_item_id)
+    if (!item) {
+      showToast('该申请已离开当前处理节点，请核对最新状态。', 'warning')
+      return
+    }
+    selectServiceItem(item)
+    if (task.type === 'FIELD_DEVIATION') operationForm.value.deviationID = task.id
+    return
+  }
   if (section !== 'decomposition' && !workflowSections.includes(section)) {
     notificationSelectionContext = ''
     return
@@ -3987,15 +4069,19 @@ function applyNotificationSelection() {
   else selectNotificationServiceItem(itemID)
 }
 watch([activeSection, () => route.query.service_item_id, () => route.query.project,
+  () => route.query.deviation_id, () => route.query.scope_change_id, () => route.query.review_id,
+  () => approvalDeepLink.task.value, () => approvalDeepLink.loading.value,
+  () => approvalDeepLink.error.value, () => approvalDeepLink.canProcess.value,
+  saving, nativeScopeLocked,
   activeNodeItems, serviceItems, decompositionProjects, sectionDataContext,
   loading, sectionExtrasLoading, workspaceReady, loadError, sectionExtrasError],
 applyNotificationSelection, { immediate: true, flush: 'post' })
 
 // 用途：进入通知业务页，并在重复路由下重新定位被手动改选的真实目标。
 // 参数：detail 为当前主体重新读取的通知详情。
-// 返回值：安全导航成功为 true；无目标为 false，保存期间拒绝切换并抛错。
+// 返回值：安全导航成功为 true；无目标为 false，保存或结果未知时拒绝切换并抛错。
 async function openProjectNotificationTarget(detail) {
-  if (saving.value) throw new Error('当前操作正在保存，请完成后再打开通知。')
+  if (saving.value || nativeScopeLocked.value) throw new Error('当前操作正在保存或核对结果，请完成后再打开通知。')
   if (String(detail?.reference_type || '').trim().toUpperCase() === 'PROJECT_APPROVAL') {
     const target = projectApprovalTarget(detail, window.location.origin)
     if (!target) throw new Error('审批通知的申请编号与目标不一致，请从审批待办重新进入。')
@@ -4005,7 +4091,7 @@ async function openProjectNotificationTarget(detail) {
   if (!opened) return false
   await nextTick()
   if (route.name !== 'project_management') return true
-  if (saving.value) throw new Error('当前操作正在保存，请完成后重新打开通知。')
+  if (saving.value || nativeScopeLocked.value) throw new Error('当前操作正在保存，请完成后重新打开通知。')
   const itemID = Object.hasOwn(route.query, 'service_item_id')
     ? notificationCoordinate(route.query.service_item_id) : ''
   const projectID = Object.hasOwn(route.query, 'project')
@@ -4013,16 +4099,30 @@ async function openProjectNotificationTarget(detail) {
   const item = activeNodeItems.value.find((row) => row.id === itemID)
   const valid = itemID !== null && projectID !== null
     && (!itemID || !projectID || item?.project_id === projectID)
-  const alreadySelected = valid && (activeSection.value === 'decomposition'
+  const alreadySelected = valid && (activeSection.value === 'project_detail'
+    ? nativeScopeProjectID.value && nativeScopeProjectID.value === (projectID || approvalDeepLink.task.value?.project_id)
+    : activeSection.value === 'decomposition'
     ? selectedDecompositionProjectID.value === (projectID || item?.project_id)
     : itemID && selectedServiceItemIDs.value.length === 1
-      && selectedServiceItemIDs.value[0] === itemID)
+      && selectedServiceItemIDs.value[0] === itemID
+      && (!route.query.deviation_id || operationForm.value.deviationID === route.query.deviation_id))
   if (!alreadySelected) {
     notificationSelectionContext = ''
     applyNotificationSelection()
   }
   return true
 }
+
+// 用途：阻止导航销毁保存中或结果未知的原业务表单。
+// 参数：无；读取统一保存状态与原生范围冻结操作状态。
+// 返回值：可安全离开为 true，否则提示并返回 false。
+function guardApprovalNavigation() {
+  if (!saving.value && !nativeScopeLocked.value) return true
+  showToast('当前操作正在保存或核对结果，请完成后再切换页面。', 'warning')
+  return false
+}
+onBeforeRouteUpdate(guardApprovalNavigation)
+onBeforeRouteLeave(guardApprovalNavigation)
 // 会话权限异步到达：只有拿到执行团队分配权限后，项目经理/工程师的角色目录才会被查询；
 // 权限在这之后才加载完成时必须补一次，否则这两个下拉会一直空着。
 // 切换服务项或在准备页刷新工作区时重新拉取设备占用：占用是别的项目造成的，
@@ -4149,6 +4249,21 @@ onBeforeUnmount(() => {
           <div><b>最新状态尚未同步</b><p>{{ refreshWarning }}<button type="button" class="pm-link" :disabled="refreshing" @click="retryAfterWrite">{{ refreshing ? '重新加载中…' : '重新加载工作区' }}</button></p></div>
         </section>
 
+        <section v-if="approvalTargetRequested" class="pm-panel" aria-label="通知关联审批记录">
+          <p v-if="approvalTargetLoading" role="status">正在核对指定审批记录…</p>
+          <p v-if="approvalTargetError" role="alert">{{ approvalTargetError }}</p>
+          <button v-if="approvalTargetError" type="button" class="pm-button"
+            :disabled="saving || nativeScopeLocked" @click="approvalDeepLink.load">重新核对</button>
+          <template v-if="focusedApprovalTask">
+            <h2>{{ approvalTypeLabel(focusedApprovalTask.type) }} · {{ approvalStatusLabel(focusedApprovalTask.status) }}</h2>
+            <p>申请 {{ focusedApprovalTask.id }} · 项目 {{ focusedApprovalTask.project_id }}<span v-if="focusedApprovalTask.service_item_id"> · 服务项 {{ focusedApprovalTask.service_item_id }}</span></p>
+            <p>申请人 {{ focusedApprovalTask.requester_user_id || '未提供' }} · {{ formatDateTime(focusedApprovalTask.created_at) }}</p>
+            <p>{{ focusedApprovalTask.reason || '未提供申请原因' }}</p>
+            <p v-if="focusedApprovalTask.severity">严重度：{{ focusedApprovalTask.severity }}</p>
+            <p v-if="focusedApprovalTask.status !== 'PENDING'">处理结果：{{ { RELEASE: '放行', RETEST: '重测', TERMINATE: '终止' }[focusedApprovalTask.decision] || approvalStatusLabel(focusedApprovalTask.status) }} · {{ focusedApprovalTask.decision_comment || '未提供处理意见' }}<span v-if="focusedApprovalTask.decided_at"> · {{ formatDateTime(focusedApprovalTask.decided_at) }}</span></p>
+            <p v-if="!approvalDeepLink.canProcess.value" class="pm-form-hint">本条记录仅供查看，请从当前待办进入可处理的申请。</p>
+          </template>
+        </section>
         <ListState v-if="!workspaceReady && (loading || sectionExtrasLoading)" loading loading-title="正在读取当前栏目数据…" />
         <ListState v-else-if="loadError || !workspaceReady" error-title="后端数据加载失败" :error="loadError || '工作区数据尚未确认，请重新读取。'" retry-text="重新加载" @retry="loadWorkspace" />
         <ListState v-else-if="sectionExtrasError" error-title="当前栏目数据读取失败" :error="sectionExtrasError" retry-text="重试当前栏目" @retry="loadSectionExtras" />
@@ -4350,10 +4465,15 @@ onBeforeUnmount(() => {
               <button v-if="!nativeScopeProjectID && nativeProjectEnabled" type="button" class="pm-button"
                 :disabled="saving" @click="nativeScopeProjectID = detailProject.id">原生委托范围变更</button>
               <NativeScopeChangePanel
-                v-if="nativeScopeProjectID === detailProject.id"
-                :key="detailProject.id" :project-id="detailProject.id"
-                :categories="detectionCategories" :disabled="saving || !nativeProjectEnabled"
+                v-if="nativeScopeProjectID === detailProject.id && (!approvalTargetRequested
+                  || (focusedApprovalTask?.type === 'NATIVE_SCOPE_CHANGE'
+                    && focusedApprovalTask.id === String(route.query.scope_change_id || '')))"
+                :key="`${detailProject.id}:${String(route.query.scope_change_id || '')}`"
+                :project-id="detailProject.id" :change-id="String(route.query.scope_change_id || '')"
+                :categories="detectionCategories" :disabled="saving || !nativeProjectEnabled
+                  || (!!focusedApprovalTask && focusedApprovalTask.status !== 'PENDING')"
                 @close="nativeScopeProjectID = ''" @changed="onNativeScopeChanged"
+                @locked="nativeScopeLocked = $event"
               />
             </section>
             <section v-if="detailSupplementClosure.visible" class="pm-supplement-closure" aria-label="补充协议关账">
@@ -4846,7 +4966,7 @@ onBeforeUnmount(() => {
                   @click="withdrawPendingRollback(request)">撤回申请</button>
               </div>
             </section>
-            <div v-if="selectedServiceItem" class="pm-form pm-operation-form">
+            <div v-if="selectedServiceItem && (!approvalTargetRequested || approvalDeepLink.canProcess.value)" class="pm-form pm-operation-form">
               <template v-if="['allocation', 'inbox', 'assignments'].includes(activeSection) && selectedItemCanAssign">
                 <p v-if="personnelError" class="pm-form-hint pm-span-full" role="alert">{{ personnelError }}</p>
                 <div class="pm-field"><span>团队负责人 <em>*</em></span><SearchableSelect v-model="operationForm.teamLeadID" :options="teamLeadOptions" value-key="id" label-key="name" description-key="description" placeholder="请选择团队负责人" search-placeholder="搜索姓名、资质编号或资质编码" empty-text="人员资质库中没有匹配的团队负责人" aria-label="选择团队负责人" :disabled="personnelLoading" required /></div>

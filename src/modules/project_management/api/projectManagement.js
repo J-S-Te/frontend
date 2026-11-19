@@ -448,18 +448,14 @@ export async function listServiceItems(projectID = '') {
   return unwrapPage(data).items
 }
 
-/**
- * listServiceItemsSnapshot 以显式 all 快照模式读取服务项集合（可选按项目过滤）。
- *
- * all=1 时服务端最多返回 500 行，truncated 表示过滤后总数大于本次行数：
- * 调用方不得把截断集合当成完整清单，需要向用户提示缩小筛选范围。
- *
- * @param {string|number} [projectID=''] 可选项目 ID。
- * @returns {Promise<{items: Array<object>, total: number, truncated: boolean}>} 快照行、过滤后总数与截断标记。
- * @throws {Error} 会话失效、鉴权失败或网关返回非成功状态时抛出。
- */
-export async function listServiceItemsSnapshot(projectID = '') {
-  const search = projectID ? `?all=1&project_id=${encodeURIComponent(projectID)}` : '?all=1'
+// 用途：读取授权服务项快照或指定单条；普通快照上限 500，截断时须提示缩小范围。
+// 参数：projectID 可选限定项目，serviceItemID 可选精确服务项，均不携带分页参数。
+// 返回值：items、total 与 truncated；读取失败抛错，截断集合不得视作全量。
+export async function listServiceItemsSnapshot(projectID = '', serviceItemID = '') {
+  const params = new URLSearchParams({ all: '1' })
+  if (projectID) params.set('project_id', projectID)
+  if (serviceItemID) params.set('service_item_id', serviceItemID)
+  const search = `?${params}`
   const page = unwrapPage(await request(`/service-items${search}`))
   return { items: page.items, total: page.total, truncated: page.truncated }
 }
@@ -871,7 +867,7 @@ export function requestRollback(itemID, payload) {
 }
 
 // 用途：读取当前用户受权的审批待办或精确申请详情。
-// 参数：params 为 page、page_size、view 和可选 request_id 查询条件。
+// 参数：params 为分页、视图及可选 request_id/task_type 精确查询条件。
 // 返回值：服务端分页结果；鉴权、校验和网络失败由统一请求错误抛出。
 export function listApprovalTasks(params = {}) {
   const search = new URLSearchParams(Object.entries(params)
@@ -1275,10 +1271,11 @@ export function createNativeProject(payload) {
 }
 
 // 用途：读取原生项目的当前权威范围及审批历史。
-// 参数：id 为真实项目主键。
+// 参数：id 为真实项目主键，changeID 可选指定提案，避免有界历史遗漏原申请。
 // 返回值：服务端范围状态；认证和错误沿用现有transport。
-export function getNativeProjectScope(id) {
-  return request(`/projects/${encodeURIComponent(id)}/native-scope`)
+export function getNativeProjectScope(id, changeID = '') {
+  const query = changeID ? `?${new URLSearchParams({ change_id: changeID })}` : ''
+  return request(`/projects/${encodeURIComponent(id)}/native-scope${query}`)
 }
 
 // 用途：以明确操作号提交完整本地范围提案。

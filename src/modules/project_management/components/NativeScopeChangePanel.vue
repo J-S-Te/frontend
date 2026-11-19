@@ -1,17 +1,22 @@
 <script setup>
-import { computed, onMounted, reactive } from 'vue'
+import { computed, onMounted, reactive, watch } from 'vue'
 import { getNativeProjectScope, requestNativeProjectScope, decideNativeProjectScope, withdrawNativeProjectScope } from '../api/projectManagement.js'
 import { useNativeScopeChange } from '../composables/useNativeScopeChange.js'
 
-const props = defineProps({ projectId: { type: String, required: true }, categories: { type: Array, default: () => [] }, disabled: Boolean, initialState: { type: Object, default: null } })
-const emit = defineEmits(['changed', 'close'])
-const ui = useNativeScopeChange({ projectId: props.projectId, initialState: props.initialState,
+const props = defineProps({ projectId: { type: String, required: true },
+  changeId: { type: String, default: '' }, categories: { type: Array, default: () => [] },
+  disabled: Boolean, initialState: { type: Object, default: null } })
+const emit = defineEmits(['changed', 'close', 'locked'])
+const ui = useNativeScopeChange({ projectId: props.projectId, changeId: props.changeId, initialState: props.initialState,
   disabled: () => props.disabled, onChanged: (value) => emit('changed', value),
   api: { read: getNativeProjectScope, request: requestNativeProjectScope, decide: decideNativeProjectScope, withdraw: withdrawNativeProjectScope } })
 const { state, lines, reason, confirmed, busy, loading, error, notice, pending, canRequest } = ui
 const comments = reactive({})
 const categories = computed(() => props.categories.filter((entry) => entry.enabled))
 const locked = computed(() => props.disabled || busy.value || loading.value || !!pending.value)
+const visibleChanges = computed(() => (state.value?.changes || [])
+  .filter((change) => !props.changeId || change.id === props.changeId))
+watch([busy, pending], () => emit('locked', busy.value || !!pending.value), { flush: 'sync' })
 const statusNames = { PENDING: '待审批', APPROVED: '已批准生效', REJECTED: '已驳回', WITHDRAWN: '已撤回' }
 
 // 用途：增加不复用旧合同编号的本地范围行。
@@ -43,7 +48,7 @@ onMounted(load)
     <template v-if="state">
       <h4>当前生效范围 v{{ state.scope_version }} · 项目版本 {{ state.project_version }}</h4>
       <ul><li v-for="item in state.service_items" :key="item.source_service_id">{{ item.source_service_id }} · {{ item.batch }} · {{ item.site }} · {{ item.category }} · {{ item.test_mode }} · {{ item.system }} · {{ item.system_level }} · {{ item.system_standard }} · {{ (item.required_codes || []).join('、') }} · {{ item.requirement || '无附加要求' }}</li></ul>
-      <form v-if="state.can_request" @submit.prevent="ui.submit">
+      <form v-if="state.can_request && !changeId" @submit.prevent="ui.submit">
         <fieldset :disabled="locked || !canRequest">
           <legend>申请完整范围新版本（不直接生效）</legend>
           <label>变更原因<textarea v-model="reason" maxlength="500" required /></label>
@@ -62,9 +67,9 @@ onMounted(load)
           <button type="submit" :disabled="!confirmed || !categories.length">提交异人审批</button>
         </fieldset>
       </form>
-      <h4>最近二十条范围提案</h4>
-      <p v-if="!state.changes.length">暂无范围变更记录。</p>
-      <article v-for="change in state.changes" :key="change.id" class="pm-native-change">
+      <h4>{{ changeId ? `指定范围提案 ${changeId}` : '最近二十条范围提案' }}</h4>
+      <p v-if="!visibleChanges.length">{{ changeId ? '未能定位指定提案，请刷新核对或返回审批待办。' : '暂无范围变更记录。' }}</p>
+      <article v-for="change in visibleChanges" :key="change.id" class="pm-native-change">
         <h5>{{ statusNames[change.status] || '未知状态，禁止操作' }} · 基于 v{{ change.base_scope_version }}<span v-if="change.applied_scope_version"> → v{{ change.applied_scope_version }}</span></h5>
         <p>原操作号 {{ change.operation_id }} · 申请人 {{ change.requested_by }} · {{ change.reason }}</p>
         <p v-if="change.decided_by">决定人 {{ change.decided_by }} · {{ change.comment }}</p>
