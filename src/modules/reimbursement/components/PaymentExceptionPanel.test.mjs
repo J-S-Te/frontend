@@ -24,6 +24,7 @@ function component(name = './PaymentExceptionPanel.vue') {
   const { descriptor } = parse(readFileSync(new URL(name, import.meta.url), 'utf8'))
   const compiled = compileScript(descriptor, { id: 'payment-exception-test', inlineTemplate: true })
   const bindings = { formatMinor, formatBusinessDateTime, PaginationBar: PaginationBarStub,
+    FileDropzone: { props: ['title'], setup: (props) => () => Vue.h('div', props.title) },
     BusinessOptionPicker: pickerStub, reimbursementAPI: { request: async () => ({ source_accounts: [], payee_profiles: [], items: [], payments: [], reversals: [] }) } }
   const source = compiled.content
     .replace(/^import\s+\w+\s+from\s+['"][^'"]+['"];?[ \t]*$/gm, '')

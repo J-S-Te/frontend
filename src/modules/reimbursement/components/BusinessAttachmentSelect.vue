@@ -1,6 +1,7 @@
 <script setup>
 import { computed, ref, watch } from 'vue'
 import BusinessObjectSelect from './BusinessObjectSelect.vue'
+import FileDropzone from './FileDropzone.vue'
 
 const props = defineProps({
   modelValue: { type: [Array, String], default: '' },
@@ -58,10 +59,11 @@ function removeAttachment(fileID) {
 }
 
 // 用途：把原生文件事件交给父页面现有受控上传流程。
-// 参数：event 为用户选择本地文件的真实事件。
+// 参数：files 为用户选择的真实文件数组；event 为可选原始事件。
 // 返回值：无；组件不另建上传会话或生成写入命令。
-function upload(event) {
-  if (!props.disabled) emit('upload', event)
+function upload(files, event) {
+  if (props.disabled || !files?.length) return
+  emit('upload', event || { target: { files } })
 }
 
 watch(() => props.purpose, () => {
@@ -75,9 +77,15 @@ watch(() => props.purpose, () => {
     <BusinessObjectSelect v-model="selectedDocument" source="/invoice-document-options"
       :extra-params="{ purpose }" label="已上传附件" :disabled="disabled"
       @select="selectAttachment" />
-    <label>上传新附件
-      <input type="file" :accept="accept" :disabled="disabled" @change="upload">
-    </label>
+    <FileDropzone
+      compact
+      title="上传新附件"
+      :hint="accept"
+      :accept="accept"
+      action-label="上传"
+      :disabled="disabled"
+      @files="upload"
+    />
     <ul v-if="fileIDs.length" aria-label="已关联附件">
       <li v-for="fileID in fileIDs" :key="fileID">
         <span>{{ attachmentName(fileID) }}</span>
@@ -91,6 +99,7 @@ watch(() => props.purpose, () => {
 
 <style scoped>
 .expense-attachment-select { min-width: 0; }
+.expense-attachment-select :deep(.expense-dropzone) { margin: 8px 0; }
 .expense-attachment-select li {
   display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-block: 6px;
 }

@@ -51,6 +51,8 @@ export function useRouter() {
   }
 }
 export function onBeforeRouteLeave() {}
+export function onBeforeRouteUpdate() {}
+export const NavigationFailureType = { aborted: 4, cancelled: 8, duplicated: 16 }
 export const RouterLink = { props: ['to'], setup(_props, { slots }) { return () => h('a', {}, slots.default?.()) } }
 `
 
