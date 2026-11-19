@@ -97,11 +97,11 @@ body {
   transition: background-color .2s ease, color .2s ease;
 }
 :root :is(.console-nav-item, .contract-nav-item, .pm-nav-item, .crm-nav-item, .da-nav-item, .settlement-nav-item, .portal-nav-item):hover {
-  color: #fff;
+  color: var(--on-primary);
   background: rgba(255, 255, 255, .08);
 }
 :root :is(.console-nav-item, .contract-nav-item, .pm-nav-item, .crm-nav-item, .da-nav-item, .settlement-nav-item, .portal-nav-item).active {
-  color: #fff;
+  color: var(--on-primary);
   background: var(--ui-primary);
   box-shadow: none;
 }
@@ -148,7 +148,7 @@ body {
   box-shadow: var(--ui-shadow-hover);
 }
 
-/* Button：Ant 四个状态；主按钮 #1677ff，默认/危险边界明确。 */
+/* Button：Ant 四个状态；主按钮 var(--primary)，默认/危险边界明确。 */
 :root :is(.console-button, .contract-button, .pm-button, .da-button, .expense-button) {
   min-height: 36px;
   padding: 0 16px;
@@ -169,13 +169,13 @@ body {
   border-color: var(--ui-primary-hover);
 }
 :root :is(.console-button, .contract-button, .pm-button, .da-button, .expense-button).primary {
-  color: #fff;
+  color: var(--on-primary);
   border-color: var(--ui-primary);
   background: var(--ui-primary);
   box-shadow: none;
 }
 :root :is(.console-button, .contract-button, .pm-button, .da-button, .expense-button).primary:hover:not(:disabled) {
-  color: #fff;
+  color: var(--on-primary);
   border-color: var(--ui-primary-hover);
   background: var(--ui-primary-hover);
 }
@@ -262,7 +262,7 @@ body {
   box-shadow: 0 0 0 2px rgba(5, 145, 255, .1);
 }
 
-/* Table：#fafafa 表头、14px 字号、hover 浅灰；不改变表格滚动容器。 */
+/* Table：var(--surface-muted) 表头、14px 字号、hover 浅灰；不改变表格滚动容器。 */
 :root :is(.console-data-table, .contract-data-table, .crm-data-table, .crm-light-table,
   .pm-table, .da-table, .settlement-plan-table, .settlement-invoice-table table,
   .metric-facts-table, .expense-table-body table) {
@@ -469,6 +469,6 @@ body {
   color: rgba(255, 255, 255, .65);
 }
 :root body :is(.console-nav-item, .contract-nav-item, .pm-nav-item, .crm-nav-item, .da-nav-item, .settlement-nav-item, .portal-nav-item).active {
-  color: #fff;
+  color: var(--on-primary);
   background: var(--ui-primary);
 }

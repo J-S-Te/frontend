@@ -73,7 +73,7 @@
   justify-content: space-between;
   gap: var(--space-3);
   margin: 0 0 var(--space-3);
-  color: var(--primary-ink, var(--primary));
+  color: var(--primary-ink);
   font-size: var(--fs-xs);
   font-weight: 700;
   letter-spacing: .12em;
@@ -126,7 +126,7 @@
 .first-run-button:focus-visible,
 .first-run-checklist__close:focus-visible,
 .first-run-checklist__retry:focus-visible {
-  outline: 2px solid var(--primary-ink, var(--primary));
+  outline: 2px solid var(--primary-ink);
   outline-offset: 2px;
 }
 
@@ -198,7 +198,7 @@
 
 .first-run-checklist__eyebrow {
   margin: 0 0 var(--space-1);
-  color: var(--primary-ink, var(--primary));
+  color: var(--primary-ink);
   font-size: var(--fs-xs);
   font-weight: 700;
   letter-spacing: .16em;
@@ -234,7 +234,7 @@
   line-height: 1;
 }
 
-.first-run-checklist__close:hover { color: var(--text); background: var(--surface-hover, var(--surface-muted)); }
+.first-run-checklist__close:hover { color: var(--text); background: var(--surface-hover); }
 
 .first-run-checklist__progress {
   display: flex;
@@ -286,7 +286,7 @@
 }
 
 .first-run-checklist__item.is-done .first-run-checklist__marker {
-  color: var(--primary-ink, var(--primary));
+  color: var(--primary-ink);
   border-color: var(--primary-border);
   background: var(--primary-soft);
 }

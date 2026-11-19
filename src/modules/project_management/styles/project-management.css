@@ -2085,7 +2085,7 @@
 .pm-stepper-panel > .pm-stepper { padding: var(--pm-sp-1) 0; }
 .pm-approval-panel header { margin-bottom: var(--pm-sp-3); }
 .pm-detail-stack { display: grid; gap: var(--pm-sp-6); min-width: 0; }
-.pm-detail-tabs { margin-bottom: 0; position: sticky; top: var(--pm-h-topbar, 56px); z-index: var(--pm-z-sticky); padding: 4px 0; background: var(--pm-content, var(--pm-card)); }
+.pm-detail-tabs { margin-bottom: 0; position: sticky; top: var(--pm-h-topbar, 56px); z-index: var(--pm-z-sticky); padding: 4px 0; background: var(--pm-content); }
 .pm-capability-tabs { flex-basis: 100%; }
 
 /* 18.13 状态胶囊统一：全部状态字段经 statusTone 输出语义色调；
@@ -2320,8 +2320,8 @@
   gap: 5px;
   border: 1px solid var(--status-border, transparent);
   border-radius: var(--radius-pill, 999px);
-  background: var(--status-bg, var(--pm-primary-soft));
-  color: var(--status-text, var(--pm-blue-text));
+  background: var(--status-bg);
+  color: var(--status-text);
   font-size: var(--pm-fs-hint);
   font-weight: 500;
 }
@@ -2738,10 +2738,10 @@
   gap: 5px;
   min-height: 22px;
   padding: 0 9px;
-  border: 1px solid var(--kind-border, var(--pm-line));
+  border: 1px solid var(--kind-border);
   border-radius: var(--pm-r-full);
-  background: var(--kind-bg, var(--pm-sunken));
-  color: var(--kind-text, var(--pm-body));
+  background: var(--kind-bg);
+  color: var(--kind-text);
   font-size: var(--pm-fs-hint);
   font-weight: 600;
   white-space: nowrap;
@@ -2788,7 +2788,7 @@
   z-index: var(--pm-z-base);
   background: var(--pm-card);
 }
-.pm-detail-items thead th:first-child { background: var(--pm-th-bg, var(--pm-card)); }
+.pm-detail-items thead th:first-child { background: var(--pm-th-bg); }
 
 /* 项目详情第二批：指标带、关注条、紧凑表头与移动端卡片。 */
 .pm-detail-kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; }

@@ -3264,9 +3264,9 @@
 
 /* 看板：原型 kanban-card 的标题、金额、负责人和终态行。 */
 .crm-board-column { padding: 14px; border-radius: 10px; }
-.crm-board-column h2 { display: flex; align-items: center; gap: 8px; justify-content: flex-start; color: var(--crm-stage-accent, var(--text-secondary)); }
+.crm-board-column h2 { display: flex; align-items: center; gap: 8px; justify-content: flex-start; color: var(--crm-stage-accent); }
 .crm-board-column h2 small { margin-left: auto; }
-.crm-board-dot { width: 8px; height: 8px; flex: 0 0 auto; border-radius: 50%; background: var(--crm-stage-accent, var(--crm-primary)); }
+.crm-board-dot { width: 8px; height: 8px; flex: 0 0 auto; border-radius: 50%; background: var(--crm-stage-accent); }
 .crm-opportunity-board .crm-board-column.is-terminal { border-style: dashed; }
 .crm-opportunity-board .crm-board-column.is-won { border-color: var(--crm-success-border); }
 .crm-opportunity-board .crm-board-column.is-lost { border-color: var(--crm-danger-border); }

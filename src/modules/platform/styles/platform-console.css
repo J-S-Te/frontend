@@ -266,7 +266,7 @@
 }
 
 .console-page--platform .console-icon-button:hover {
-  color: var(--primary-ink, var(--primary));
+  color: var(--primary-ink);
   background: var(--surface-muted);
 }
 
@@ -390,7 +390,7 @@
   align-items: center;
   gap: 6px;
   margin-bottom: 7px;
-  color: var(--primary-ink, var(--primary));
+  color: var(--primary-ink);
   font-size: var(--pc-fs-kicker);
   font-weight: 700;
   letter-spacing: .12em;
@@ -400,7 +400,7 @@
 .console-page--platform .settings-content .configuration-head > div > span {
   display: block;
   margin-bottom: 7px;
-  color: var(--primary-ink, var(--primary));
+  color: var(--primary-ink);
   font-size: var(--pc-fs-kicker);
   font-weight: 700;
   letter-spacing: .12em;
@@ -533,7 +533,7 @@
 }
 
 .console-page--platform .console-button.secondary:hover {
-  color: var(--primary-ink, var(--primary-dark));
+  color: var(--primary-ink);
   border-color: var(--primary-border);
   background: var(--surface-muted);
 }
@@ -543,7 +543,7 @@
 }
 
 .console-page--platform .console-button.ghost:hover {
-  color: var(--primary-ink, var(--primary-dark));
+  color: var(--primary-ink);
   background: var(--surface-muted);
   border-color: var(--border);
 }
@@ -697,7 +697,7 @@
 }
 
 .console-page--platform .ui-state__retry:hover {
-  color: var(--primary-ink, var(--primary-dark));
+  color: var(--primary-ink);
   border-color: var(--primary-border);
 }
 
@@ -851,7 +851,7 @@
 }
 
 .console-page--platform .audit-advanced-toggle.active {
-  color: var(--primary-ink, var(--primary-dark));
+  color: var(--primary-ink);
   border-color: var(--primary-border);
   background: var(--surface-muted);
 }
@@ -993,11 +993,11 @@
 
 :root[data-theme="dark"] .console-page--platform .console-search-field,
 :root[data-theme="dark"] .console-page--platform .console-select-field {
-  background: var(--surface-input, var(--surface-muted));
+  background: var(--surface-input);
 }
 
 :root[data-theme="dark"] .console-page--platform .console-data-table th {
-  background: var(--surface-head, var(--surface-muted));
+  background: var(--surface-head);
 }
 
 :root[data-theme="dark"] .console-page--platform .console-data-table tbody tr:hover td {
@@ -1247,7 +1247,7 @@
   font-size: var(--pc-fs-body);
   border: 1px solid var(--border);
   border-radius: 8px;
-  background: var(--surface-input, var(--surface-card));
+  background: var(--surface-input);
 }
 
 .console-page--platform .settings-content .configuration-card :is(input, select, textarea):focus {
