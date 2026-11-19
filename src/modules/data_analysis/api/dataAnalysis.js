@@ -241,6 +241,9 @@ async function request(path, options = {}) {
   }
   const businessError = isRecord(body) && Object.hasOwn(body, 'code') && body.code !== 'OK'
   if (!response.ok || businessError) {
+    if (response.status === 403 && typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
+      window.dispatchEvent(new Event('dsh:authorization-denied'))
+    }
     const error = new Error(formatDataAnalysisError(body, { status: response.status, method, fallback: '数据看板服务暂时无法处理请求。' }))
     error.details = body?.details
     if (parseCause) error.cause = parseCause

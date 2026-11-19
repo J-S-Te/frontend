@@ -415,8 +415,12 @@ const {
 // 侧栏角色必须跟随服务端当前授权，而不是停留在登录时的快照。
 if (typeof useAuthorizationRefresh === 'function') useAuthorizationRefresh(async () => {
   const next = await getProjectSession({ force: true })
-  if (authorizationScopeKey(session.value) !== authorizationScopeKey(next)) clearProjectAuthorizationData()
+  const changed = authorizationScopeKey(session.value) !== authorizationScopeKey(next)
   session.value = next
+  if (!changed) return
+  // 授权范围变化后不能只换侧栏角色：清掉旧快照并重读当前工作区，避免页面停留在 403/加载失败。
+  clearProjectAuthorizationData()
+  await loadWorkspace({ reportError: false, background: workspaceReady.value })
 })
 const toastMessage = ref('')
 const toastType = ref('success')

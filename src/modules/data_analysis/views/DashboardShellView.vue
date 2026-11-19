@@ -97,7 +97,12 @@ const section = computed(() => {
 const me = ref(null)
 // 侧栏角色跟随服务端当前授权：页面重新可见或定时重读，避免历史角色残留。
 if (typeof useAuthorizationRefresh === 'function') useAuthorizationRefresh(async () => {
-  me.value = await getAuthMe({ force: true })
+  const next = await getAuthMe({ force: true })
+  const changed = authorizationScopeKey(me.value) !== authorizationScopeKey(next)
+  me.value = next
+  if (!changed) return
+  // 权限范围变化后重新读取会话并让当前看板按新能力重建，避免停留在旧错误态。
+  await loadMe()
 })
 const dashboardEmbedEnabled = computed(() => !!me.value && isDashboardEmbedEnabled(me.value))
 const loading = ref(true)

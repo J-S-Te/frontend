@@ -1739,3 +1739,10 @@ test('项目移动抽屉由 AppShell 的关闭按钮更新菜单状态', () => {
   assert.match(source, /<AppShell\b[^>]*:menu-open="mobileMenuOpen"\s+@update:menu-open="mobileMenuOpen = \$event"/)
   assert.doesNotMatch(source, /class="pm-close-menu"/)
 })
+
+test('岗位授权变化后重读当前项目工作区，403 不等待定时器', () => {
+  assert.match(source, /const changed = authorizationScopeKey\(session\.value\) !== authorizationScopeKey\(next\)/)
+  assert.match(source, /clearProjectAuthorizationData\(\)[\s\S]*?await loadWorkspace\(\{ reportError: false/)
+  assert.match(pmApiSource, /dsh:authorization-denied/)
+  assert.match(pmApiSource, /response\.status === 403/)
+})

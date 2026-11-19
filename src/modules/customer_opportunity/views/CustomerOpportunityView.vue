@@ -59,6 +59,7 @@ import {
 } from '../api/opportunity.js'
 import { createIdempotencyKey, getCRMSession, getCRMRuntimeCapabilities } from '../api/client.js'
 import { useAuthorizationRefresh } from '@/modules/shared/composables/useAuthorizationRefresh.js'
+import { authorizationScopeKey } from '@/modules/shared/authz/authorizationSnapshot.js'
 import { createCreateMutationRetryState } from '../createMutationRetry.js'
 import { createContractTransferRetryState } from '../contractTransferRetry.js'
 import { createAttachmentUploadRetryState } from '../attachmentUploadRetry.js'
@@ -582,7 +583,12 @@ async function onReportOrganizationChange() {
 const crmSession = ref(null)
 // 侧栏角色跟随服务端当前授权：页面重新可见或定时重读，避免历史角色残留。
 if (typeof useAuthorizationRefresh === 'function') useAuthorizationRefresh(async () => {
-  crmSession.value = await getCRMSession({ force: true })
+  const next = await getCRMSession({ force: true })
+  const changed = authorizationScopeKey(crmSession.value) !== authorizationScopeKey(next)
+  crmSession.value = next
+  if (!changed) return
+  // 授权变化后清除旧数据并重读当前 CRM 分区，避免错误态长期停留。
+  await loadCurrent()
 })
 const commercialRecordCommands = createCommercialRecordCommandStore()
 const commercialRecordCommandScope = computed(() => JSON.stringify([

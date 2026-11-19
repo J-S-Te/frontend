@@ -92,6 +92,9 @@ export function createClient({ fetcher = (...args) => fetch(...args), base = '/r
       } catch { throw apiError({ code: 'NETWORK_ERROR' }, 0, mutation, method) }
       let body
       try { body = await response.json() } catch { throw apiError(null, response.status, mutation, method) }
+      if (response.status === 403 && typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
+        window.dispatchEvent(new Event('dsh:authorization-denied'))
+      }
       if (!response.ok) throw apiError(body, response.status, mutation && response.status >= 500, method)
       if (!body || !Object.hasOwn(body, 'data') || body.data === null
         || (mutation && (typeof body.data !== 'object' || Array.isArray(body.data)
