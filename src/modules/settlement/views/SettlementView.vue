@@ -1,5 +1,7 @@
 <script setup>
 import { useNotificationBadge } from '@/modules/shared/composables/useNotificationBadge.js'
+import { useAuthorizationRefresh } from '@/modules/shared/composables/useAuthorizationRefresh.js'
+import { authorizationScopeKey } from '@/modules/shared/authz/authorizationSnapshot.js'
 import { useLoginUsername } from '@/modules/shared/composables/useLoginUsername.js'
 import { agingDisplayRows } from "../utils/agingDisplay.js";
 import { allowedSections, permissionCheck, canLoad as canLoadKey } from "../utils/capabilities.js";
@@ -955,6 +957,14 @@ async function selectReceiptMatch(match) {
   await router.push({ name: "settlement", params: { section: "allocations" } });
   allocationComposerOpen.value = true;
 }
+
+if (typeof useAuthorizationRefresh === "function") useAuthorizationRefresh(async (isMounted) => {
+  const previous = settlementSession.value;
+  if (!previous?.tenant_id || loading.value || isLoggingOut.value) return;
+  const current = await getSettlementSession({ force: true });
+  if (!isMounted() || loading.value || isLoggingOut.value || settlementSession.value !== previous) return;
+  if (authorizationScopeKey(previous) !== authorizationScopeKey(current)) await load();
+});
 
 watch(
   () => route.params.section,
