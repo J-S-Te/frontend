@@ -27,7 +27,9 @@ const tabs = [{ key: 'assigned', label: '我的待审批' }, { key: 'submitted',
 // 参数：task 为当前受权列表中的申请。
 // 返回值：无；忙碌或缺少申请标识时不切换。
 function openRequest(task) {
-  if (!saving.value && task?.id) emit('open-request', task.id)
+  if (!saving.value && task?.id) emit('open-request',
+    ['SPECIAL_METHOD_REVIEW', 'FIELD_DEVIATION', 'NATIVE_SCOPE_CHANGE'].includes(task.type)
+      ? task : task.id)
 }
 
 // 用途：提交详情中明确选择的决定，成功后清空已使用的意见。
@@ -54,7 +56,7 @@ onMounted(load)
   <section class="pm-panel pm-approval-inbox" aria-label="审批待办">
     <header class="pm-approval-header">
       <div><h2>{{ requestId ? '审批申请详情' : '审批待办' }}</h2>
-        <p>报告返工、报告更正和现场回退均由技术总监审批。</p>
+        <p>报告返工、更正和现场回退在此审批；特殊方法、偏离及范围变更进入原处理页。</p>
       </div>
       <div class="pm-actions">
         <button v-if="requestId" type="button" class="pm-button"
@@ -95,6 +97,10 @@ onMounted(load)
           <p class="pm-form-hint">该申请{{ approvalStatusLabel(detail.status) }}，无需再次审批。</p>
           <h4>处理意见</h4><p class="pm-approval-text">{{ detail.decision_comment || '未提供' }}</p>
         </template>
+        <template v-else-if="['SPECIAL_METHOD_REVIEW', 'FIELD_DEVIATION', 'NATIVE_SCOPE_CHANGE'].includes(detail.type)">
+          <p class="pm-form-hint">请进入原业务页核对本次申请及处理权限。</p>
+          <button type="button" class="pm-button" :disabled="saving" @click="openRequest(detail)">进入处理页</button>
+        </template>
         <template v-else-if="canDecide(detail) || saving">
           <p v-if="detail.type === 'REPORT_CORRECTION'" class="pm-form-hint">
             批准后旧报告版本作废，并生成待整改的新版本，需重新编制、审核、签发和归档。
@@ -117,7 +123,7 @@ onMounted(load)
         <p v-if="!items.length" class="pm-empty-mini">{{ view === 'assigned'
           ? '暂无需要你审批的申请。' : '暂无你提交的待处理申请。' }}</p>
         <div v-else class="pm-approval-list">
-          <article v-for="task in items" :key="task.id" class="pm-approval-row">
+          <article v-for="task in items" :key="`${task.type}:${task.id}`" class="pm-approval-row">
             <div><h3>{{ approvalTypeLabel(task.type) }} · {{ task.service_item_id }}</h3>
               <p>{{ task.project_id }} · {{ task.site || '地点未提供' }}</p>
               <p class="pm-approval-text">{{ task.reason }}</p>

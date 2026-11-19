@@ -97,6 +97,22 @@ async function loadSfc(file) {
 // 外壳 SFC 只编译一次（含递归加载 ConsoleIcon.vue），后续用例复用同一组件对象。
 const AppShell = await loadSfc(SHELL_FILE)
 
+test('项目管理和数据看板独立打开时先加载外壳样式，再应用模块样式', () => {
+  const entryStyles = [
+    ['../project_management/views/ProjectManagementView.vue', 'project_management/styles/project-management.css'],
+    ['../data_analysis/views/DashboardShellView.vue', 'data_analysis/styles/data-analysis.css'],
+  ]
+  for (const [entry, moduleStyle] of entryStyles) {
+    const source = readFileSync(new URL(entry, import.meta.url), 'utf8')
+    const styles = [...source.matchAll(/^import ['"]@\/modules\/([^'"]+\.css)['"];?$/gm)]
+      .map(([, path]) => path)
+    const shellIndex = styles.indexOf('platform/styles/console.css')
+    const moduleIndex = styles.indexOf(moduleStyle)
+    assert.ok(shellIndex >= 0 && moduleIndex > shellIndex,
+      `${entry} 必须在加载模块样式前加载 console.css`)
+  }
+})
+
 // ---------------------------------------------------------------------------
 // 纯对象宿主 renderer：渲染真实 vnode 树并允许调用 onClick 派发点击
 // ---------------------------------------------------------------------------

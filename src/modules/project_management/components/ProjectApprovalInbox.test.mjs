@@ -31,3 +31,26 @@ test('统一审批组件从申请列表进入精确详情，并把审批意见�
     assert.equal(state.comment.value, '')
   } finally { mounted.unmount() }
 })
+
+test('三类新待办向原业务页传递完整坐标且不能调用旧统一审批写入', async () => {
+  const filename = fileURLToPath(new URL('./ProjectApprovalInbox.vue', import.meta.url))
+  const api = fileURLToPath(new URL('../api/projectManagement.js', import.meta.url))
+  for (const type of ['SPECIAL_METHOD_REVIEW', 'FIELD_DEVIATION', 'NATIVE_SCOPE_CHANGE']) {
+    const task = { id: 'new-1', project_id: 'PJ-1', service_item_id: 'SI-1', type,
+      status: 'PENDING', can_decide: true, version: 1, requester_user_id: 'other' }
+    const opens = [], writes = []
+    const mounted = await mountSFC(filename, { [api]: {
+      listApprovalTasks: async () => ({ items: [task], total: 1 }),
+      decideRollback: async () => writes.push(true), decideReportCorrection: async () => writes.push(true),
+    } }, { requestId: 'new-1', context: 'tenant:director', userId: 'director',
+      onOpenRequest: value => opens.push(value) })
+    try {
+      await mounted.state.load()
+      mounted.state.openRequest(task)
+      assert.deepEqual(opens, [task])
+      mounted.state.comment.value = '同意'
+      await mounted.state.submitDecision('APPROVED')
+      assert.deepEqual(writes, [])
+    } finally { mounted.unmount() }
+  }
+})

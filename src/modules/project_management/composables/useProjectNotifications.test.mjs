@@ -249,11 +249,11 @@ test('openNotification 只使用重新读取的真实详情，忽略过期摘要
     target_url: '/project_management/exceptions?service_item_id=SI-old' }],
   detailItems: [{ delivery_id: 'stale', read_at: null,
     source_application: 'project_management', category: 'SPECIAL_METHOD_REVIEWED',
-    reference_type: 'SERVICE_ITEM', reference_id: 'SI-current', target_url: '' }] })
+    reference_type: 'SPECIAL_METHOD_REVIEW', reference_id: 'REV-current', target_url: '' }] })
   await h.loadUnreadNotifications()
   await h.openNotification(h.notificationItems.value[0])
   assert.deepEqual(h.calls.details, ['stale'])
-  assert.deepEqual(h.calls.navigations, ['/project_management/methods?service_item_id=SI-current'])
+  assert.deepEqual(h.calls.navigations, ['/project_management/methods?review_id=REV-current'])
   assert.deepEqual(h.calls.marks, ['stale'])
 
   const missing = harness({ inboxItems: [{ delivery_id: 'removed-target', read_at: null,

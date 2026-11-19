@@ -26,6 +26,7 @@ import { createEmbedSessionActivity } from "../utils/embedSessionActivity.js"
 import { RELATED_DATA, subscribeRelatedDataChanges } from "@/modules/platform/shared/utils/relatedDataInvalidation.js"
 import { formatDataAnalysisError } from "../utils/errors.js"
 import { useUrlFilterState } from "@/modules/shared/composables/useUrlFilterState.js"
+import "@/modules/platform/styles/console.css"
 import "@/modules/data_analysis/styles/data-analysis.css"
 
 const route = useRoute()
@@ -592,9 +593,10 @@ onBeforeUnmount(() => {
   >
     <template #brand>
       <span class="da-brand-dot" aria-hidden="true"></span>
-      <b>数据看板子系统</b>
-      <button class="da-icon-button da-mobile-close" aria-label="关闭菜单" @click="mobileMenuOpen = false"><ConsoleIcon name="close" /></button>
-      <span class="da-brand-sub">经营数据视图 · 一期</span>
+      <span class="console-brand-copy">
+        <b>数据看板子系统</b>
+        <span class="da-brand-sub">经营数据视图 · 一期</span>
+      </span>
     </template>
     <template #sidebar-note>
       <div class="da-sidebar-foot">复用基础平台 · Metabase 嵌入<br />角色：{{ currentUserRole }}</div>

@@ -464,7 +464,12 @@ test('所有业务节点只展示当前归属项目并在回退后清除原节�
   assert.match(workflowNodeSource, /Boolean\(item\.team_lead_id && item\.project_manager_id && \(item\.engineer_ids \|\| \[\]\)\.length\)/)
   assert.match(workflowNodeSource, /item\.conflict_status === 'PASSED'/)
   assert.match(source, /projectAllowsNode\(item, 'planning'\) && implementationPlanReady\(item\)/)
-  assert.match(source, /const exceptionItems = computed\(\(\) => serviceItems\.value\.filter\(\(item\) => item\.status === '异常处理中' && projectAllowsNode\(item, 'exceptions'\)\)\)/)
+  const focusedItems = source.slice(source.indexOf('const workflowServiceItems = computed('),
+    source.indexOf('const projectByID = computed('))
+  assert.match(focusedItems, /const item = approvalDeepLink\.serviceItem\.value/)
+  assert.match(focusedItems, /if \(!item \|\| !\['methods', 'exceptions'\]\.includes\(activeSection\.value\)\) return serviceItems\.value/)
+  assert.match(focusedItems, /return \[\.\.\.serviceItems\.value\.filter\(\(row\) => row\.id !== item\.id\), item\]/)
+  assert.match(source, /const exceptionItems = computed\(\(\) => workflowServiceItems\.value\.filter\(\(item\) => item\.status === '异常处理中' && projectAllowsNode\(item, 'exceptions'\)\)\)/)
   assert.match(source, /exceptionItemIDs\.value\.has\(event\.service_item_id\)/)
   assert.match(source, /const activeNodeItems = computed\(\(\) => \(\{/)
   for (const node of ['allocation', 'inbox', 'planning', 'preparation', 'assignments', 'methods', 'exceptions', 'reports', 'implementation']) {
@@ -1721,9 +1726,7 @@ test('现场缺项判定由服务端证据接口驱动（BIZ-PROJECT-06）', () 
 })
 
 // P2-2：移动抽屉必须有可见关闭按钮；桌面侧栏常驻时隐藏，避免多一个无意义按钮。
-test('项目移动抽屉提供可见关闭按钮并可收起菜单', () => {
-  assert.match(source, /<button class="pm-close-menu" type="button" aria-label="关闭菜单" @click="mobileMenuOpen = false"><ConsoleIcon name="close" \/><\/button>/)
-  assert.match(styles, /\.pm-close-menu \{[^}]*display: none/)
-  const narrow = styles.slice(styles.indexOf('@media (max-width: 900px)'))
-  assert.match(narrow, /\.pm-close-menu \{ display: grid; \}/, '抽屉断点内关闭按钮必须可见')
+test('项目移动抽屉由 AppShell 的关闭按钮更新菜单状态', () => {
+  assert.match(source, /<AppShell\b[^>]*:menu-open="mobileMenuOpen"\s+@update:menu-open="mobileMenuOpen = \$event"/)
+  assert.doesNotMatch(source, /class="pm-close-menu"/)
 })

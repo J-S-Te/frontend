@@ -50,6 +50,10 @@ function mountNotificationSelection({ section = 'methods', target = 'SI-2', item
     sectionDataContext: ref('tenant:user:revision-1'),
     route: reactive({ name: 'project_management', query: { service_item_id: target } }),
     saving: ref(false),
+    nativeScopeLocked: ref(false), nativeScopeProjectID: ref(''),
+    canReadNativeProjectScope: ref(true),
+    approvalDeepLink: { task: ref(null), serviceItem: ref(null), project: ref(null),
+      requested: ref(null), loading: ref(false), error: ref(''), canProcess: ref(false) },
     navigation: ref({ sections: ['approvals'] }), mobileMenuOpen: ref(false),
     operationForm: ref({ deviationID: '' }), pendingDeviations: ref([]),
     fieldEvidenceSnapshot: ref({ itemID: 'stale' }), fieldEvidenceError: ref('old error'),
@@ -71,7 +75,7 @@ function mountNotificationSelection({ section = 'methods', target = 'SI-2', item
     'refreshSelectedFieldEvidence', 'showToast', 'nextTick', 'openNotificationTarget', 'router',
     'useProjectNotifications', 'getNotification', 'getUnreadCount', 'listNotificationInbox',
     'markNotificationRead', 'listApprovalTasks', 'openApprovalRequest',
-    'formatUserError', 'projectApprovalTarget',
+    'formatUserError', 'projectApprovalTarget', 'onBeforeRouteUpdate', 'onBeforeRouteLeave',
     `${select}\n${declaration}\n${decompositionWatch}\n${approvalNavigation}\n${targetWatch}
     return { selectServiceItem, openTarget: ${binding}.openTarget }`)(
     watch, ...Object.values(state),
@@ -82,10 +86,51 @@ function mountNotificationSelection({ section = 'methods', target = 'SI-2', item
     () => {}, () => {}, () => {}, () => {},
     () => ({ items: [], total: 0 }), () => true,
     error => error.message,
-    projectApprovalTarget,
+    projectApprovalTarget, () => {}, () => {},
   ))
   return { ...state, ...controls, calls, stop: () => scope.stop() }
 }
+
+test('精确偏离深链只选择指定实例，同服务项切换与已处理旧链接均不得串到新偏离', async () => {
+  const state = mountNotificationSelection({ section: 'exceptions',
+    items: [{ id: 'SI-2', project_id: 'PJ-2' }] })
+  try {
+    state.route.query.deviation_id = 'DV-2'
+    state.approvalDeepLink.requested.value = { type: 'FIELD_DEVIATION', id: 'DV-2' }
+    state.approvalDeepLink.task.value = { id: 'DV-2', type: 'FIELD_DEVIATION', service_item_id: 'SI-2' }
+    state.approvalDeepLink.serviceItem.value = { id: 'SI-2', project_id: 'PJ-2' }
+    state.approvalDeepLink.canProcess.value = true
+    state.pendingDeviations.value = [
+      { service_item_id: 'SI-2', payload: { deviation_id: 'DV-new' } },
+      { service_item_id: 'SI-2', payload: { deviation_id: 'DV-2' } },
+    ]
+    state.loading.value = false; state.workspaceReady.value = true
+    await nextTick()
+    assert.equal(state.operationForm.value.deviationID, 'DV-2')
+    state.route.query.deviation_id = 'DV-old'
+    state.approvalDeepLink.task.value = { id: 'DV-old', type: 'FIELD_DEVIATION', service_item_id: 'SI-2', status: 'APPROVED' }
+    state.approvalDeepLink.canProcess.value = false
+    await nextTick()
+    assert.deepEqual(state.selectedServiceItemIDs.value, [])
+    assert.equal(state.operationForm.value.deviationID, '')
+    state.saving.value = true
+    state.route.query.deviation_id = 'DV-2'
+    state.approvalDeepLink.canProcess.value = true
+    await nextTick()
+    assert.deepEqual(state.selectedServiceItemIDs.value, [])
+  } finally { state.stop() }
+})
+
+test('旧偏离通知只有服务项编号时仅定位服务项，不用当前另一偏离代替原实例', async () => {
+  const state = mountNotificationSelection({ section: 'exceptions' })
+  try {
+    state.pendingDeviations.value = [{ service_item_id: 'SI-2', payload: { deviation_id: 'DV-new' } }]
+    state.loading.value = false; state.workspaceReady.value = true
+    await nextTick()
+    assert.deepEqual(state.selectedServiceItemIDs.value, ['SI-2'])
+    assert.equal(state.operationForm.value.deviationID, '')
+  } finally { state.stop() }
+})
 
 test('通知服务项深链等工作区及节点数据就绪后选中真实候选，同页query变化再次定位', async () => {
   const state = mountNotificationSelection()
@@ -130,7 +175,7 @@ test('通知目标已离开当前节点或不在授权快照时提示原因，�
   }
 })
 
-test('节点读取失败不误报目标不存在，读取恢复后才定位并填入该服务项偏离ID', async () => {
+test('节点读取失败不误报目标不存在，读取恢复后只定位旧通知的服务项', async () => {
   const state = mountNotificationSelection({ section: 'exceptions' })
   try {
     state.workspaceReady.value = true
@@ -146,7 +191,7 @@ test('节点读取失败不误报目标不存在，读取恢复后才定位并�
     state.sectionExtrasError.value = ''
     await nextTick()
     assert.deepEqual(state.selectedServiceItemIDs.value, ['SI-2'])
-    assert.equal(state.operationForm.value.deviationID, 'DV-2')
+    assert.equal(state.operationForm.value.deviationID, '', '缺少偏离坐标时不得猜测当前实例')
   } finally { state.stop() }
 })
 
@@ -195,7 +240,7 @@ test('同页服务项参数重复或为空时立即清除旧选择及偏离目�
     state.loading.value = false
     await nextTick()
     assert.deepEqual(state.selectedServiceItemIDs.value, ['SI-2'])
-    assert.equal(state.operationForm.value.deviationID, 'DV-2')
+    assert.equal(state.operationForm.value.deviationID, '', '旧服务项链接不代选偏离实例')
     for (const invalid of [['SI-1', 'SI-3'], null, '  ']) {
       state.selectedServiceItemIDs.value = ['SI-2']
       state.selectedDecompositionProjectID.value = 'PJ-old'
