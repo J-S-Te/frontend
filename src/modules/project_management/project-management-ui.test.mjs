@@ -471,7 +471,8 @@ test('所有业务节点只展示当前归属项目并在回退后清除原节�
   assert.match(focusedItems, /return \[\.\.\.serviceItems\.value\.filter\(\(row\) => row\.id !== item\.id\), item\]/)
   assert.match(source, /const exceptionItems = computed\(\(\) => workflowServiceItems\.value\.filter\(\(item\) => item\.status === '异常处理中' && projectAllowsNode\(item, 'exceptions'\)\)\)/)
   assert.match(source, /exceptionItemIDs\.value\.has\(event\.service_item_id\)/)
-  assert.match(source, /const activeNodeItems = computed\(\(\) => \(\{/)
+  assert.match(source, /const activeNodeItems = computed\(\(\) => \{/)
+  assert.match(source, /return items\.filter\(\(item\) => item\.report_status !== 'ARCHIVED'\)/)
   for (const node of ['allocation', 'inbox', 'planning', 'preparation', 'assignments', 'methods', 'exceptions', 'reports', 'implementation']) {
     assert.match(source, new RegExp(`${node}: \\w+Items\\.value`))
   }
@@ -479,6 +480,7 @@ test('所有业务节点只展示当前归属项目并在回退后清除原节�
   assert.match(source, /ServiceItemPicker v-else :items="activeNodeItems"/)
   assert.match(source, /watch\(\[activeSection, activeNodeItems, loading, sectionExtrasLoading, workspaceReady\],[\s\S]*selectedServiceItemIDs\.value = selectedServiceItemIDs\.value\.filter/)
   assert.match(source, /\['现场实施完成', '报告编制', '已完成'\]\.includes\(projectStatus\)/)
+  assert.match(source, /if \(item\.report_status === 'ARCHIVED'\) return false/)
   // 进度总览覆盖报告及完成阶段，现场办理仍使用严格的 implementationItems。
   assert.match(source, /const implementationKanbanColumns = computed/)
   assert.match(source, /implementationProgressColumns\(projects\.value, implementationItems\.value\)/)
@@ -683,6 +685,10 @@ test('服务项操作台使用可搜索的服务项卡片选择器而不是原�
   assert.doesNotMatch(source, /class="pm-selection-row"/)
   // 选择器自身提供搜索、卡片与选中态。
   assert.match(pickerSource, /class="pm-picker-search"/)
+  assert.match(pickerSource, /class="pm-picker-filter"/)
+  assert.match(pickerSource, /const statusFilter = ref\(''\)/)
+  assert.match(pickerSource, /statusOptions/)
+  assert.match(styles, /\.pm-picker-filter \{/)
   assert.match(pickerSource, /class="pm-picker-card"/)
   assert.match(pickerSource, /:class="\{ selected: isSelected\(item\) \}"/)
   assert.match(pickerSource, /role="option"/)

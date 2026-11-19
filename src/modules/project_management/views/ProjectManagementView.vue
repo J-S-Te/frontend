@@ -1185,6 +1185,7 @@ const reportPhaseNext = { NONE: 'RECTIFYING', RECTIFYING: 'COMPILING', COMPILING
 const reportPhaseAction = { RECTIFYING: '开始整改', COMPILING: '开始编制', REVIEWED: '确认审核完成', ISSUED: '确认签发', ARCHIVED: '确认归档' }
 const reportItems = computed(() => serviceItems.value.filter((item) => {
   const projectStatus = projectByID.value.get(item.project_id)?.status
+  if (item.report_status === 'ARCHIVED') return false
   return ['现场实施完成', '报告编制', '已完成'].includes(projectStatus) && (item.status === '现场实施完成' || (item.report_status && item.report_status !== 'NONE'))
 }))
 const personnelLoading = ref(false)
@@ -1539,17 +1540,21 @@ const pendingDeviations = computed(() => {
 })
 const methodItems = computed(() => workflowServiceItems.value.filter((item) => projectAllowsNode(item, 'methods') && item.status === '待分配' && item.special === '是' && ['PENDING', 'REJECTED'].includes(item.tech_review_status)))
 const assignmentItems = computed(() => allocationCandidates.value.filter((item) => item.team_lead_id && item.conflict_status !== 'PASSED'))
-const activeNodeItems = computed(() => ({
-  allocation: allocationItems.value,
-  inbox: inboxWorkflowItems.value,
-  planning: planningItems.value,
-  preparation: preparationItems.value,
-  assignments: assignmentItems.value,
-  methods: methodItems.value,
-  exceptions: exceptionItems.value,
-  reports: reportItems.value,
-  implementation: implementationItems.value,
-}[activeSection.value] || serviceItems.value))
+const activeNodeItems = computed(() => {
+  const items = {
+    allocation: allocationItems.value,
+    inbox: inboxWorkflowItems.value,
+    planning: planningItems.value,
+    preparation: preparationItems.value,
+    assignments: assignmentItems.value,
+    methods: methodItems.value,
+    exceptions: exceptionItems.value,
+    reports: reportItems.value,
+    implementation: implementationItems.value,
+  }[activeSection.value] || serviceItems.value
+  // 服务项队列只承载仍需处理的工作；归档报告留在项目/归档目录中，不再回到操作台。
+  return items.filter((item) => item.report_status !== 'ARCHIVED')
+})
 const completedProjectCount = computed(() => projects.value.filter((project) => project.status === projectStatusCompleted).length)
 const currentUserName = useLoginUsername(session)
 // 与客户与商机系统的账号行保持一致：首字头像 + 账号名 + 角色名。
@@ -1782,7 +1787,7 @@ const serviceFlow = computed(() => [
   { key: '待分配', color: 'slate', count: allocationItems.value.length, route: 'allocation' },
   { key: '待实施', color: 'violet', count: preparationItems.value.length, route: 'preparation' },
   { key: '实施中', color: 'amber', count: implementationItems.value.length, route: 'implementation' },
-  { key: '报告编制', color: 'blue', count: reportItems.value.filter((item) => item.report_status !== 'ARCHIVED').length, route: 'reports' },
+  { key: '报告编制', color: 'blue', count: reportItems.value.length, route: 'reports' },
   { key: '已完成', color: 'green', count: serviceItems.value.filter((item) => item.report_status === 'ARCHIVED' || (['现场实施完成', '已完成'].includes(item.status) && (!item.report_status || item.report_status === 'NONE'))).length, route: 'implementation' },
 ])
 const selectedDecompositionProjectID = ref('')
