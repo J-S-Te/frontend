@@ -1024,13 +1024,13 @@ function formatFileSize(bytes) {
   max-height: min(900px, calc(100vh - 40px));
   overflow: hidden;
   border-color: #dce5f1;
-  background: #fff;
+  background: var(--surface-card);
 }
 
 .iam-batch-import-modal > header {
   align-items: center;
   padding: 24px 28px;
-  background: linear-gradient(135deg, #fff 0%, #f8fbff 72%, #eef5ff 100%);
+  background: linear-gradient(135deg, #fff 0%, var(--surface-tint) 72%, #eef5ff 100%);
 }
 
 .iam-batch-import-heading {
@@ -1045,7 +1045,7 @@ function formatFileSize(bytes) {
   height: 44px;
   flex: 0 0 auto;
   place-items: center;
-  color: #fff;
+  color: var(--on-primary);
   border-radius: 12px;
   background: linear-gradient(145deg, var(--brand-3, #3b82f6), var(--brand-1, #1e40af));
   box-shadow: 0 10px 24px rgba(37, 99, 235, .22);
@@ -1072,7 +1072,7 @@ function formatFileSize(bytes) {
   color: var(--ink-4, #94a3b8);
   font-size: 12.5px;
   border-bottom: 1px solid var(--line-2, #eef2f7);
-  background: #fff;
+  background: var(--surface-card);
 }
 .iam-batch-import-steps li {
   position: relative;
@@ -1106,12 +1106,12 @@ function formatFileSize(bytes) {
 .iam-batch-import-steps li.active b {
   background: var(--brand-1, #2563eb);
   border-color: var(--brand-1, #2563eb);
-  color: #fff;
+  color: var(--on-primary);
   box-shadow: 0 0 0 4px rgba(37, 99, 235, .1);
 }
 .iam-batch-import-steps li.done b {
   color: var(--brand-1, #1e40af);
-  border-color: #bfdbfe;
+  border-color: var(--primary-border);
   background: var(--brand-soft, #eff6ff);
 }
 .iam-batch-import-steps li.active { color: var(--ink-1, #111827); }
@@ -1151,7 +1151,7 @@ function formatFileSize(bytes) {
   padding: 34px 24px;
   border: 1.5px dashed #b9cce7;
   border-radius: 14px;
-  background: linear-gradient(180deg, #fbfdff 0%, #f5f8fd 100%);
+  background: linear-gradient(180deg, var(--surface-tint) 0%, #f5f8fd 100%);
   color: var(--ink-2, #374151);
   cursor: pointer;
   transition: border-color 160ms, background 160ms, box-shadow 160ms, transform 160ms;
@@ -1174,7 +1174,7 @@ function formatFileSize(bytes) {
   color: var(--brand-2, #2563eb);
   border: 1px solid #d5e3fb;
   border-radius: 14px;
-  background: #fff;
+  background: var(--surface-card);
   box-shadow: 0 8px 22px rgba(37, 99, 235, .12);
 }
 .iam-batch-import-upload-icon svg { width: 25px; height: 25px; }
@@ -1183,7 +1183,7 @@ function formatFileSize(bytes) {
 .iam-batch-import-dropzone small b { color: var(--brand-2, #2563eb); font-weight: 600; }
 .iam-batch-import-dropzone em { color: var(--ink-4, #94a3b8); font-size: 11.5px; font-style: normal; }
 .iam-batch-import-dropzone code {
-  background: #fff;
+  background: var(--surface-card);
   border: 1px solid #dce5f1;
   border-radius: 6px;
   padding: 0 4px;
@@ -1192,8 +1192,8 @@ function formatFileSize(bytes) {
 
 .iam-batch-import-error {
   background: var(--danger-soft, #fee2e2);
-  border: 1px solid #fecaca;
-  color: #b91c1c;
+  border: 1px solid var(--danger-border);
+  color: var(--danger);
   padding: 12px 14px;
   border-radius: 10px;
   font-size: 13px;
@@ -1277,7 +1277,7 @@ function formatFileSize(bytes) {
   justify-content: space-between;
   gap: 18px;
   padding: 14px 16px;
-  background: linear-gradient(135deg, #fbfdff, #f5f8fd);
+  background: linear-gradient(135deg, var(--surface-tint), #f5f8fd);
   border: 1px solid var(--line-1, #e6e9ef);
   border-radius: 12px;
 }
@@ -1291,7 +1291,7 @@ function formatFileSize(bytes) {
   color: var(--brand-2, #2563eb);
   border: 1px solid #d7e4f7;
   border-radius: 8px;
-  background: #fff;
+  background: var(--surface-card);
 }
 .iam-batch-import-file > span svg { width: 18px; height: 18px; }
 .iam-batch-import-file > div { min-width: 0; }
@@ -1313,13 +1313,13 @@ function formatFileSize(bytes) {
   min-width: 72px;
   padding: 8px 10px;
   border-radius: 8px;
-  background: #fff;
+  background: var(--surface-card);
   border: 1px solid var(--line-1, #e6e9ef);
 }
 .iam-batch-import-stats .stat b { font-size: 16px; line-height: 1; }
 .iam-batch-import-stats .stat small { margin: 0; font-size: 11px; color: var(--ink-3, #6b7280); }
-.iam-batch-import-stats .stat.valid b { color: #15803d; }
-.iam-batch-import-stats .stat.invalid b { color: #b91c1c; }
+.iam-batch-import-stats .stat.valid b { color: var(--success); }
+.iam-batch-import-stats .stat.invalid b { color: var(--danger); }
 .iam-batch-import-stats .stat.selected b { color: var(--brand-1, #2563eb); }
 
 .iam-batch-import-toolbar {
@@ -1373,7 +1373,7 @@ function formatFileSize(bytes) {
   color: var(--ink-2, #1e293b);
   border: 1px solid var(--line-1, #e6e9ef);
   border-radius: 8px;
-  background: #fff;
+  background: var(--surface-card);
 }
 .iam-batch-import-filter select:focus {
   border-color: var(--brand-2, #2563eb);
@@ -1456,13 +1456,13 @@ function formatFileSize(bytes) {
 .iam-batch-import-result .iam-form-alert { width: min(620px, 100%); justify-content: center; }
 .iam-batch-import-result .iam-form-alert.success {
   background: #f0fdf4;
-  border-color: #bbf7d0;
+  border-color: var(--success-border);
   color: #14532d;
 }
 .iam-batch-import-result .iam-form-alert.danger {
   background: #fef2f2;
-  border-color: #fecaca;
-  color: #b91c1c;
+  border-color: var(--danger-border);
+  color: var(--danger);
 }
 
 .iam-batch-import-modal > footer {
