@@ -2,6 +2,11 @@
 # target configuration and issue non-Secure replacement cookies; existing
 # Secure cookies can still reach the HTTPS listener until the persisted drain
 # deadline. HSTS is intentionally absent in this temporary state.
+map "$server_port:$uri" $ip_sso_private_route {
+    default 0;
+    ~*^444:/(admin|metrics|health)(/|$) 1;
+}
+
 server {
     listen 80 default_server;
     server_name ${PUBLIC_PLATFORM_HOST};
@@ -77,7 +82,7 @@ server {
 
 server {
     listen 80;
-    server_name ${PUBLIC_SSO_HOST};
+    server_name ${PUBLIC_SSO_HTTP_HOST};
     resolver 127.0.0.11 valid=10s ipv6=off;
     set $keycloak_backend keycloak:8080;
     location / {
@@ -170,7 +175,7 @@ server {
 }
 
 server {
-    listen 443 ssl;
+    listen ${PUBLIC_SSO_TLS_LISTEN} ssl;
     http2 on;
     server_name ${PUBLIC_SSO_HOST};
     resolver 127.0.0.11 valid=10s ipv6=off;
@@ -181,10 +186,12 @@ server {
     ssl_session_cache shared:sso_tls:10m;
     ssl_session_timeout 1d;
     location / {
-        proxy_set_header Host $host;
+        if ($ip_sso_private_route) { return 404; }
+        proxy_set_header Host ${PUBLIC_SSO_HTTPS_AUTHORITY};
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Host $host;
+        proxy_set_header X-Forwarded-Host ${PUBLIC_SSO_HTTPS_AUTHORITY};
+        proxy_set_header X-Forwarded-Port ${PUBLIC_SSO_HTTPS_PORT};
         proxy_set_header X-Forwarded-Proto https;
         proxy_pass http://$keycloak_backend;
     }
