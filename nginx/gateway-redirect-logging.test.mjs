@@ -17,7 +17,8 @@ test('跳转服务器按路径脱敏文件网关票据 query', () => {
 })
 
 test('脱敏只影响日志，跳转仍携带原始请求 URI', () => {
-  assert.match(template, /return 308 https:\/\/\$host\$request_uri;/)
+  assert.match(template, /return 308 https:\/\/\$public_https_redirect_authority\$request_uri;/)
+  assert.match(template, /default \$\{PUBLIC_PLATFORM_HTTPS_AUTHORITY\};/)
   assert.match(template, /default\s+\$request_uri;/)
 })
 
@@ -26,7 +27,7 @@ test('脱敏日志指令位于跳转服务器的 server 级 return 之前', () =
   assert.ok(serverStart > 0, '未找到 80 端口跳转服务器')
   const serverBlock = template.slice(serverStart)
   const accessLogIndex = serverBlock.indexOf('access_log /var/log/nginx/access.log redirect_no_ticket;')
-  const serverReturnIndex = serverBlock.indexOf('\n    return 308 https://$host$request_uri;')
+  const serverReturnIndex = serverBlock.indexOf('\n    return 308 https://$public_https_redirect_authority$request_uri;')
   assert.ok(accessLogIndex > 0, '跳转服务器缺少 server 级脱敏 access_log')
   assert.ok(serverReturnIndex > accessLogIndex, 'access_log 必须在 server 级 return 之前声明')
 })
