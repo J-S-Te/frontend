@@ -11,3 +11,11 @@
 - 完成前运行与变更相关的真实验证，报告命令、结果和限制；源码完成、测试通过、真实业务验收和部署成功不可混淆。
 - 凭据、Token、私钥、运行配置及客户敏感内容不得写入日志、上下文或测试证据；许可证/运行批准门禁不得绕过。
 
+## E2E 测试约定
+
+- 跑用例统一走 `bash scripts/e2e.sh run`：它会校验 Node 版本并注入 `.e2e-secrets`；直接用 `npx e2e run` 不加载凭据，会得到 `INVALID_CONFIG`。
+- 传参也必须走脚本，如 `bash scripts/e2e.sh run --headed`；`npm run test:e2e -- --headed` 会把 `--headed` 当成文件路径。
+- 用例失败先读 `.e2e/results/<case>/trace.md` 与同目录截图，判断是代码错还是用例期望错，**不要改 `src/` 让用例变绿**。
+- 缺 `E2E_ADMIN_PASSWORD` 时登录用例自动跳过，属预期行为，不算失败；无 agent 步骤的用例完全不调用模型。
+- 视觉断言（Midscene）需外部共享浏览器：先 `npm run e2e:browser` 拿到端点，再带 `E2E_CDP_ENDPOINT` 运行；缺模型配置时同样自动跳过。产物统一落在 `.e2e/midscene`。
+

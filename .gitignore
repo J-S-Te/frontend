@@ -9,6 +9,13 @@ coverage/
 .vite/
 *.tsbuildinfo
 
+# e2e 运行产物与回放缓存
+.e2e/
+# Midscene 运行产物（截图、dump、report 可能含账号信息）
+midscene_run/
+# e2e 本地测试凭据（禁止入库）
+.e2e-secrets
+
 # Local environment files (keep the documented template)
 .env
 .env.*
