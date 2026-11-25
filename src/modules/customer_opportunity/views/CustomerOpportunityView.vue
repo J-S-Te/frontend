@@ -473,12 +473,18 @@ const teamDirectoryError = ref('')
 const teamDirectoryLoadSequence = ref(0)
 const teamCandidate = reactive({ user_id: '', role: 'TECHNICAL_SUPPORT' })
 const opportunityTeam = ref([])
+const opportunityTeamExpanded = ref(false)
+const visibleOpportunityTeam = computed(() =>
+  opportunityTeamExpanded.value ? opportunityTeam.value : opportunityTeam.value.slice(0, 3),
+)
 const opportunityTeamDirectoryAvailable = ref(true)
 const opportunityMemberTerms = ref([])
 const opportunityMemberTermsLoading = ref(false)
 const opportunityMemberTermsError = ref('')
 const opportunityMemberTermsPage = reactive({ number: 1, size: 10, total: 0 })
 const opportunityTermsOpen = ref(false)
+const opportunityTermsEntryRef = ref(null)
+const opportunityTermsCloseRef = ref(null)
 const opportunityMemberTermLoads = createMemberTermLoadState()
 const opportunityPresales = ref([])
 const opportunityPresaleLoading = ref(false)
@@ -1978,6 +1984,7 @@ async function openOpportunity(id) {
   const loadSequence = ++opportunityDetailLoadSequence.value
   opportunityDetailTab.value = 'overview'
   opportunityTermsOpen.value = false
+  opportunityTeamExpanded.value = false
   selectedOpportunity.value = null
   selectedOpportunityCustomerCredit.value = null
   selectedOpportunityOwnerOrgID.value = ''
@@ -2928,11 +2935,34 @@ function handleRuleConfigPointer(event) {
   }
 }
 
+// 用途：使用 Esc 关闭当前抽屉或规则配置菜单。
+// 参数：event 为页面捕获到的键盘事件。
+// 返回值：无。
 function handleRuleConfigKeydown(event) {
-  if (event.key === 'Escape') {
-    showRuleConfigMenu.value = false
-    if (showRuleDrawer.value) closeApprovalRuleDrawer()
+  if (event.key !== 'Escape') return
+  showRuleConfigMenu.value = false
+  if (opportunityTermsOpen.value) {
+    closeOpportunityTermsDrawer()
+    return
   }
+  if (showRuleDrawer.value) closeApprovalRuleDrawer()
+}
+
+// 用途：打开商机团队任期抽屉并将键盘焦点移到关闭按钮。
+// 参数：无。
+// 返回值：抽屉渲染且焦点转移后完成。
+async function openOpportunityTermsDrawer() {
+  opportunityTermsOpen.value = true
+  await nextTick()
+  opportunityTermsCloseRef.value?.focus()
+}
+
+// 用途：关闭团队任期抽屉并将键盘焦点还给原入口。
+// 参数：无。
+// 返回值：无。
+function closeOpportunityTermsDrawer() {
+  opportunityTermsOpen.value = false
+  opportunityTermsEntryRef.value?.focus()
 }
 
 const notificationUnreadCount = useNotificationBadge({
@@ -3618,7 +3648,7 @@ onMounted(async () => {
         @clear-target="clearCreditApprovalTarget" />
       <CreditRuleSettingsPanel v-if="activeSection === 'credit-rules'" @notice="notice = $event" @error="error = $event" />
 
-      <section v-if="activeSection === 'customers'" class="crm-panel table-panel"><ListState v-if="customersListState" :loading="loading" :error="listError" error-title="客户列表加载失败" empty-title="暂无符合条件的客户" @retry="loadCurrent"><template #empty-action><button type="button" class="crm-state-action" @click="resetCustomerFilters">重置筛选</button></template></ListState><table v-else-if="customerFilters.view === 'table'" class="crm-data-table"><thead><tr><th scope="col">客户编号</th><th scope="col">客户名称</th><th scope="col">信用等级</th><th scope="col">类型</th><th scope="col">行业 / 区域</th><th scope="col">负责人</th><th scope="col">状态</th><th scope="col" title="包含客户沟通记录和关联商机跟进记录">最近跟进（含商机）</th><th scope="col">商机金额汇总</th><th scope="col">操作</th></tr></thead><tbody><tr v-for="item in customers" :key="item.id" @click="openCustomer(item.id)"><td>{{ item.customer_no }}</td><td>{{ item.name }}</td><td><span class="crm-credit-level crm-credit-level--inline" :class="`is-${String(item.credit_level || 'B').toLowerCase()}`">{{ creditLevelLabel(item.credit_level) }}</span></td><td>{{ item.customer_type }}</td><td>{{ item.industry }} / {{ item.region }}</td><td>{{ ownerLabel(item) }}</td><td><span class="crm-badge" :class="customerStatusTone(item.status)">{{ customerStatusText(item.status) }}</span></td><td>{{ formatDate(item.last_followup_at) }}</td><td>{{ formatAmount(item.opportunity_amount_sum) }}</td><td class="crm-table-actions"><button type="button" class="crm-table-link" @click.stop="openCustomer(item.id)">查看</button><button type="button" class="crm-table-link" @click.stop="editCustomerFromList(item)">编辑</button></td></tr></tbody></table>      <div v-else class="crm-customer-cards" :data-quick-filter="customerFilters.quick_filter">
+      <section v-if="activeSection === 'customers'" class="crm-panel table-panel"><ListState v-if="customersListState" :loading="loading" :error="listError" error-title="客户列表加载失败" empty-title="暂无符合条件的客户" @retry="loadCurrent"><template #empty-action><button type="button" class="crm-state-action" @click="resetCustomerFilters">重置筛选</button></template></ListState><table v-else-if="customerFilters.view === 'table'" class="crm-data-table"><thead><tr><th scope="col">客户编号</th><th scope="col">客户名称</th><th scope="col">信用等级</th><th scope="col">类型</th><th scope="col">行业 / 区域</th><th scope="col">负责人</th><th scope="col">状态</th><th scope="col" title="包含客户沟通记录和关联商机跟进记录">最近跟进（含商机）</th><th scope="col">商机金额汇总</th><th scope="col">操作</th></tr></thead><tbody><tr v-for="item in customers" :key="item.id" @click="openCustomer(item.id)"><td>{{ item.customer_no }}</td><td><span class="ui-record-name" :title="item.name">{{ item.name }}</span></td><td><span class="crm-credit-level crm-credit-level--inline" :class="`is-${String(item.credit_level || 'B').toLowerCase()}`">{{ creditLevelLabel(item.credit_level) }}</span></td><td>{{ item.customer_type }}</td><td>{{ item.industry }} / {{ item.region }}</td><td>{{ ownerLabel(item) }}</td><td><span class="crm-badge" :class="customerStatusTone(item.status)">{{ customerStatusText(item.status) }}</span></td><td>{{ formatDate(item.last_followup_at) }}</td><td>{{ formatAmount(item.opportunity_amount_sum) }}</td><td class="crm-table-actions"><button type="button" class="crm-table-link" @click.stop="openCustomer(item.id)">查看</button><button type="button" class="crm-table-link" @click.stop="editCustomerFromList(item)">编辑</button></td></tr></tbody></table>      <div v-else class="crm-customer-cards" :data-quick-filter="customerFilters.quick_filter">
         <article
           v-for="item in customers"
           :key="item.id"
@@ -3633,7 +3663,7 @@ onMounted(async () => {
         >
           <header class="crm-customer-card-head">
             <div class="crm-customer-card-identity">
-              <strong class="crm-customer-card-name" :title="item.name">{{ item.name }}</strong>
+              <strong class="crm-customer-card-name ui-record-name" :title="item.name">{{ item.name }}</strong>
               <span class="crm-customer-card-no">{{ item.customer_no }}</span>
             </div>
             <span class="crm-badge" :class="customerStatusTone(item.status)">{{ customerStatusText(item.status) }}</span>
@@ -3669,7 +3699,7 @@ onMounted(async () => {
         </article>
       </div>
       <PaginationBar class="crm-pagination" label="客户列表分页" :page="renderedPage.number" :total="renderedPage.total" :page-size-options="[20, 50, 100]" :page-size="renderedPage.size" :loading="loading" @change="changeCustomerPage" @change-page-size="changeCustomerPageSize" /></section>
-      <section v-if="activeSection === 'opportunities' && !boardMode" class="crm-panel table-panel"><ListState v-if="opportunitiesListState" :loading="loading" :error="listError" error-title="商机列表加载失败" empty-title="暂无符合条件的商机" @retry="loadCurrent"><template #empty-action><button type="button" class="crm-state-action" @click="resetOpportunityFilters">重置筛选</button></template></ListState><table v-else class="crm-data-table"><thead><tr><th scope="col">商机编号</th><th scope="col">名称</th><th scope="col">客户</th><th scope="col">预计金额</th><th scope="col">预计签单</th><th scope="col">阶段</th><th scope="col">状态</th><th scope="col">负责人</th><th scope="col">已签约合同</th><th scope="col">终态待办</th></tr></thead><tbody><tr v-for="item in opportunities" :key="item.id" @click="openOpportunity(item.id)"><td>{{ item.opportunity_no }}</td><td>{{ item.name }}</td><td>{{ item.customer_name || `客户 #${item.customer_id}` }}</td><td>{{ formatAmount(item.expected_amount) }}</td><td>{{ formatDate(item.expected_sign_date) }}</td><td><span class="crm-badge" :class="opportunityStageTone(item.current_stage)">{{ item.current_stage }}</span></td><td><span class="crm-badge" :class="opportunityStatusTone(item.opp_status)">{{ opportunityStatusText(item.opp_status) }}</span></td><td>{{ ownerLabel(item.owner_user_id) }}</td><td>{{ formatSignedContractCount(item.signed_contract_count) }}</td><td><span v-if="item.terminal_pending_type && item.terminal_pending_type !== 'NONE'" class="crm-badge crm-badge--warning">{{ terminalPendingText(item.terminal_pending_type) }}</span><span v-else class="crm-note">—</span></td></tr></tbody></table><PaginationBar class="crm-pagination" label="商机列表分页" :page="renderedPage.number" :total="renderedPage.total" :page-size-options="[20, 50, 100]" :page-size="renderedPage.size" :loading="loading" @change="changeOpportunityPage" @change-page-size="changeOpportunityPageSize" /></section>
+      <section v-if="activeSection === 'opportunities' && !boardMode" class="crm-panel table-panel"><ListState v-if="opportunitiesListState" :loading="loading" :error="listError" error-title="商机列表加载失败" empty-title="暂无符合条件的商机" @retry="loadCurrent"><template #empty-action><button type="button" class="crm-state-action" @click="resetOpportunityFilters">重置筛选</button></template></ListState><table v-else class="crm-data-table"><thead><tr><th scope="col">商机编号</th><th scope="col">名称</th><th scope="col">客户</th><th scope="col">预计金额</th><th scope="col">预计签单</th><th scope="col">阶段</th><th scope="col">状态</th><th scope="col">负责人</th><th scope="col">已签约合同</th><th scope="col">终态待办</th></tr></thead><tbody><tr v-for="item in opportunities" :key="item.id" @click="openOpportunity(item.id)"><td>{{ item.opportunity_no }}</td><td><span class="ui-record-name" :title="item.name">{{ item.name }}</span></td><td><span class="ui-record-name" :title="item.customer_name || `客户 #${item.customer_id}`">{{ item.customer_name || `客户 #${item.customer_id}` }}</span></td><td>{{ formatAmount(item.expected_amount) }}</td><td>{{ formatDate(item.expected_sign_date) }}</td><td><span class="crm-badge" :class="opportunityStageTone(item.current_stage)">{{ item.current_stage }}</span></td><td><span class="crm-badge" :class="opportunityStatusTone(item.opp_status)">{{ opportunityStatusText(item.opp_status) }}</span></td><td>{{ ownerLabel(item.owner_user_id) }}</td><td>{{ formatSignedContractCount(item.signed_contract_count) }}</td><td><span v-if="item.terminal_pending_type && item.terminal_pending_type !== 'NONE'" class="crm-badge crm-badge--warning">{{ terminalPendingText(item.terminal_pending_type) }}</span><span v-else class="crm-note">—</span></td></tr></tbody></table><PaginationBar class="crm-pagination" label="商机列表分页" :page="renderedPage.number" :total="renderedPage.total" :page-size-options="[20, 50, 100]" :page-size="renderedPage.size" :loading="loading" @change="changeOpportunityPage" @change-page-size="changeOpportunityPageSize" /></section>
       <div v-if="activeSection === 'opportunities' && boardMode && !opportunityBoardState" class="crm-board-summary">
         <span>总商机 <strong>{{ boardSummary.count }}</strong></span>
         <span>管道金额 <strong>{{ formatBoardAmount(boardSummary.amount) }}</strong></span>
@@ -3684,7 +3714,7 @@ onMounted(async () => {
             <div class="crm-board-column-body">
               <p v-if="!column.items?.length" class="crm-board-empty">暂无商机</p>
               <button v-for="item in column.items" :key="item.id" type="button" class="crm-board-card" @click="openOpportunity(item.id)">
-                <span class="crm-board-card-head"><strong :title="item.name">{{ item.name }}</strong><span v-if="boardIsStale(item)" class="crm-board-stale">停滞</span></span>
+                <span class="crm-board-card-head"><strong class="ui-record-name" :title="item.name">{{ item.name }}</strong><span v-if="boardIsStale(item)" class="crm-board-stale">停滞</span></span>
                 <span class="crm-board-customer">{{ item.customer_name || ('客户 #' + item.customer_id) }}</span>
                 <span class="crm-board-card-row"><strong class="crm-board-amount" :title="formatAmount(item.expected_amount)">{{ formatBoardAmount(item.expected_amount) }}</strong><span :class="{ 'is-overdue': boardIsOverdue(item) }">{{ boardDateLabel(item) }}</span></span>
                 <span class="crm-board-owner" :class="{ 'is-warning': boardOwnerMissing(item) }"><span class="crm-avatar crm-avatar--sm" aria-hidden="true">{{ personInitial(ownerLabel(item.owner_user_id)) }}</span><span>{{ ownerLabel(item.owner_user_id) }}</span><span v-if="boardIsStale(item)" class="crm-board-age">停滞 {{ boardUpdatedDays(item) }} 天</span><span v-else-if="boardUpdatedDays(item) !== null && boardUpdatedDays(item) >= 7" class="crm-board-age">{{ boardUpdatedLabel(item) }}</span></span>
@@ -4328,19 +4358,32 @@ onMounted(async () => {
         <span class="crm-avatar" aria-hidden="true">人</span>
         <span>当前无辅助团队成员<br>来自基础平台权威目录</span>
       </div>
-      <ul v-else class="crm-team-summary">
-        <li v-for="member in opportunityTeam.slice(0, 3)" :key="member.user_id">
+      <ul v-else id="crm-opportunity-team-summary" class="crm-team-summary">
+        <li v-for="member in visibleOpportunityTeam" :key="member.user_id">
           <strong>{{ platformUserName(member) }}</strong> · {{ teamRoleText(member.role) }}
           <br><small>{{ teamMemberOrganizations(member) }}</small>
           <em v-if="member.directory_status === 'NOT_AVAILABLE'">已停用或不再具有本应用授权</em>
         </li>
       </ul>
-      <p v-if="opportunityTeam.length > 3" class="crm-note">另有 {{ opportunityTeam.length - 3 }} 名成员，维护团队中可查看全部。</p>
+      <button
+        v-if="opportunityTeam.length > 3"
+        type="button"
+        class="crm-link-button"
+        aria-controls="crm-opportunity-team-summary"
+        :aria-expanded="opportunityTeamExpanded"
+        @click="opportunityTeamExpanded = !opportunityTeamExpanded"
+      >{{ opportunityTeamExpanded ? '收起' : `查看全部 ${opportunityTeam.length} 人` }}</button>
     </aside>
     <!-- 三个 .crm-opportunity-attachment-panel 共享 .crm-opportunity-side-rail 宿主，
          一对渐隐伪元素只能对齐一个矩形；这里只标记真正含宽表格、会横向滚动的任期明细。 -->
     <aside v-if="selectedOpportunity" class="crm-opportunity-attachment-panel crm-opportunity-terms-entry" aria-label="团队任期明细入口">
-      <button type="button" @click="opportunityTermsOpen = true">
+      <button
+        ref="opportunityTermsEntryRef"
+        type="button"
+        aria-haspopup="dialog"
+        :aria-expanded="opportunityTermsOpen"
+        @click="openOpportunityTermsDrawer"
+      >
         <span><strong>团队任期明细</strong><small>{{ opportunityMemberTermsPage.total }} 条记录</small></span>
         <span aria-hidden="true">›</span>
       </button>
@@ -4436,11 +4479,11 @@ onMounted(async () => {
       <button v-else type="button" class="primary" @click="changeOpportunityStatus('restore')">恢复</button>
     </div>
   </div>
-  <div v-if="opportunityTermsOpen" class="crm-opportunity-terms-backdrop" @click.self="opportunityTermsOpen = false">
+  <div v-if="opportunityTermsOpen" class="crm-opportunity-terms-backdrop" @click.self="closeOpportunityTermsDrawer">
     <aside class="crm-opportunity-terms-drawer" role="dialog" aria-modal="true" aria-labelledby="opportunity-terms-title">
       <header>
         <div><p>关键资料</p><h2 id="opportunity-terms-title">团队任期明细</h2></div>
-        <button type="button" aria-label="关闭团队任期明细" @click="opportunityTermsOpen = false"><ConsoleIcon name="close" /></button>
+        <button ref="opportunityTermsCloseRef" type="button" aria-label="关闭团队任期明细" @click="closeOpportunityTermsDrawer"><ConsoleIcon name="close" /></button>
       </header>
       <div class="crm-opportunity-terms-body">
         <p class="crm-note">每次加入、移出、重新加入和角色变化独立记录；“迁移快照”仅代表账本启用时观察到的状态，加入和移出时间未知，不推测更早历史。</p>

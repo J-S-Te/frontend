@@ -81,10 +81,23 @@ export function cancelPersonnelChange(changeId) {
   return request(`/personnel-changes/${encodeURIComponent(changeId)}/cancel`, { method: 'POST', body: '{}' })
 }
 
-export function transitionPersonnelChange(changeId, toStatus, approvalReference = '', { immediate = false } = {}) {
+/**
+ * 用途：请求推进人员异动状态，按需提交超管例外审批的独立留痕原因。
+ * 参数：changeId 为异动单 ID，toStatus 为目标状态，approvalReference 为审批或交接凭据、
+ *       驳回原因，options 支持立即执行标记和例外审批原因。
+ * 返回值：更新后的异动单，校验、权限或流程冲突时拒绝。
+ */
+export function transitionPersonnelChange(
+  changeId, toStatus, approvalReference = '', { immediate = false, exceptionReason = '' } = {},
+) {
   return request(`/personnel-changes/${encodeURIComponent(changeId)}/transition`, {
     method: 'POST',
-    body: JSON.stringify({ to_status: toStatus, approval_reference: approvalReference, immediate }),
+    body: JSON.stringify({
+      to_status: toStatus,
+      approval_reference: approvalReference,
+      immediate,
+      ...(exceptionReason ? { exception_reason: exceptionReason } : {}),
+    }),
   })
 }
 

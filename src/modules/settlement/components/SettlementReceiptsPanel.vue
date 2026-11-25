@@ -157,7 +157,7 @@ defineEmits(['reload','submit-receipt','sync-customer','select-match','navigate'
               <td class="settlement-contract-cell">
                 {{ item.receipt_no }}
               </td>
-              <td>{{ item.customer_name }}</td>
+              <td><span class="ui-record-name" :title="item.customer_name">{{ item.customer_name }}</span></td>
               <td class="settlement-money">
                 {{ money(item.amount, item.currency) }}
               </td>

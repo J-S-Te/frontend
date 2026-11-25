@@ -138,7 +138,7 @@ function statusTone(status) {
         <tbody>
           <tr v-for="contract in filteredContracts" :key="contract.recordId">
             <td class="mono">{{ contract.id }}</td>
-            <td><strong>{{ contract.name }}</strong></td>
+            <td><strong class="ui-record-name" :title="contract.name">{{ contract.name }}</strong></td>
             <td>{{ contract.type }}</td>
             <td>{{ contract.serviceType }}</td>
             <td>{{ contract.customerCreditLevel }}</td>

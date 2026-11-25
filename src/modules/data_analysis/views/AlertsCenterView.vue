@@ -317,7 +317,7 @@ onBeforeUnmount(() => { alertLoadSequence++ })
           <tbody>
             <tr v-for="item in filteredAlerts" :key="item.id" :class="{ risk: String(item.severity).toUpperCase() === 'CRITICAL', 'da-alert-selected': selectedAlert && String(selectedAlert.id) === String(item.id) }">
               <td><span class="da-alert-severity-pill" :class="item.severity.toLowerCase()">{{ SEVERITY_LABELS[String(item.severity).toUpperCase()] || item.severity }}</span></td>
-              <td><b>{{ item.title }}</b><small>{{ alertTypeLabel(item.alert_type) }}</small></td>
+              <td><b class="ui-record-name" :title="item.title">{{ item.title }}</b><small>{{ alertTypeLabel(item.alert_type) }}</small></td>
               <td>{{ item.target_ref || '—' }}</td>
               <td><span class="mono">{{ item.rule_code || '—' }}</span></td>
               <td>{{ item.due_date || '无期限' }}</td>

@@ -1011,6 +1011,7 @@
 .pm-table-footer .ui-pager { flex: 0 1 auto; min-width: 0; max-width: 100%; }
 
 .pm-project-link { display: flex; flex-direction: column; gap: 3px; padding: 0; border: 0; background: transparent; color: var(--pm-body); text-align: left; }
+.pm-table .pm-project-link { min-width: 0; max-width: 100%; }
 .pm-project-link b { color: var(--pm-blue-text); overflow-wrap: anywhere; word-break: break-word; }
 .pm-inline-progress { width: 90px; display: inline-block; vertical-align: middle; }
 .pm-progress-cell { display: flex; align-items: center; gap: var(--pm-sp-2); min-width: 112px; }

@@ -149,7 +149,7 @@ function financialSourceLabel(item, fallback = '—') {
               <td class="settlement-contract-cell">
                 {{ financialSourceLabel(plan) }}
               </td>
-              <td>{{ plan.customer_name || "—" }}</td>
+              <td><span class="ui-record-name" :title="plan.customer_name || undefined">{{ plan.customer_name || "—" }}</span></td>
               <td>第 {{ plan.installment_no || "—" }} 期</td>
               <td>{{ plan.due_date }}</td>
               <td class="settlement-money">
@@ -216,7 +216,7 @@ function financialSourceLabel(item, fallback = '—') {
                 {{ item.receivable_no }}
               </td>
               <td>{{ financialSourceLabel(item) }}</td>
-              <td>{{ item.customer_name }}</td>
+              <td><span class="ui-record-name" :title="item.customer_name">{{ item.customer_name }}</span></td>
               <td>{{ item.due_date }}</td>
               <td class="settlement-money">
                 {{ money(item.original_amount) }}

@@ -38,11 +38,12 @@ test('打开另一商机时清除上一个商机已选择但尚未上传的文�
     'opportunityMemberTermsError', 'opportunityMemberTermsLoading', 'opportunityExternalStatus',
     'opportunityQuoteAmountCheck', 'opportunityExternalStatusError', 'opportunityPresales',
     'opportunityPresaleError', 'opportunityAttachments', 'opportunityAttachmentCapabilities',
-    'opportunityAttachmentError', 'opportunityAttachmentLoading', 'opportunityTermsOpen', 'error',
+    'opportunityAttachmentError', 'opportunityAttachmentLoading', 'opportunityTermsOpen',
+    'opportunityTeamExpanded', 'error',
   ].map(name => [name, ref(name === 'opportunityDetailLoadSequence' ? 1 : null)]))
   const oldFile = { name: 'A报价.pdf' }
   Object.assign(dependencies, {
-    opportunityAttachmentFile: ref(oldFile),
+    opportunityAttachmentFile: ref(oldFile), opportunityTeamExpanded: ref(true),
     opportunityMemberTermsPage: {}, opportunityPresalePage: {},
     getOpportunity: async () => { throw new Error('隔离详情读取') },
     getOpportunityStageHistory: async () => ({}), listOpportunityFollowups: async () => ({}),
@@ -50,6 +51,7 @@ test('打开另一商机时清除上一个商机已选择但尚未上传的文�
   })
   await actualFunctions(['openOpportunity'], dependencies).openOpportunity(2)
   assert.equal(dependencies.opportunityAttachmentFile.value, null)
+  assert.equal(dependencies.opportunityTeamExpanded.value, false)
 })
 
 test('A上传在途时切换到B，旧完成回调不能清掉B文件或覆盖B提示和加载状态', async () => {

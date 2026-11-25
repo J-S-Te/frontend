@@ -356,7 +356,9 @@ test('商机详情看板先展示核心指标，再按概览/售前/跟进分区
 test('商机关键资料栏不再承载任期宽表，任期明细进入抽屉', () => {
   assert.match(view, /class="crm-opportunity-side-rail"/)
   assert.match(view, /class="[^"]*crm-opportunity-terms-entry/)
-  assert.match(view, /opportunityTermsOpen = true/)
+  assert.match(view, /@click="openOpportunityTermsDrawer"/)
+  assert.match(view, /opportunityTermsCloseRef.value\?\.focus\(\)/)
+  assert.match(view, /opportunityTermsEntryRef.value\?\.focus\(\)/)
   assert.match(view, /teamRoleText\(term\.role\)/)
   assert.match(view, /data-table-scroll/)
   assert.match(style, /\.crm-opportunity-terms-drawer\s*\{/)

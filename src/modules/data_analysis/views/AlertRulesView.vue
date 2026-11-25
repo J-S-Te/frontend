@@ -578,7 +578,7 @@ onBeforeUnmount(() => window.clearTimeout(toastTimer))
           <div v-if="previewResult.sample?.length" class="alert-rule-preview-scroll">
             <table class="da-table"><thead><tr><th>合同</th><th>归属组织</th><th>客户类型</th><th>金额</th><th>到期日</th></tr></thead><tbody>
               <tr v-for="item in previewResult.sample" :key="item.contract_id">
-                <td>{{ item.title }}<small>{{ item.contract_id }}</small></td>
+                <td><span class="ui-record-name" :title="item.title">{{ item.title }}</span><small>{{ item.contract_id }}</small></td>
                 <td>{{ item.owner_org_id || '—' }}</td>
                 <td>{{ item.customer_type || '—' }}</td>
                 <td>{{ (Number(item.amount_minor || 0) / 100).toFixed(2) }}</td>

@@ -166,7 +166,7 @@ const policyRecipientAccount = computed({
             <tr v-for="item in dunningCases" :key="item.id">
               <td class="settlement-contract-cell">{{ item.id }}</td>
               <td>{{ item.receivable_no }}</td>
-              <td>{{ item.customer_name }}</td>
+              <td><span class="ui-record-name" :title="item.customer_name">{{ item.customer_name }}</span></td>
               <td>{{ item.aging_days }} 天</td>
               <td class="settlement-money">{{ formatSettlementAmount(item.open_amount) }}</td>
               <td>{{ item.level || 0 }} 级</td>

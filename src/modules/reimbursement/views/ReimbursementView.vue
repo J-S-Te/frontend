@@ -4003,7 +4003,7 @@ onBeforeUnmount(() => {
                 </td>
                 <td>
                   {{ row.claim_no || row.invoice_number || row.claim_id || row.id }}
-                  <small>
+                  <small class="ui-record-name" :title="row.title || row.fee_type || row.node_code || row.name">
                     {{ row.title || row.fee_type || row.node_code || row.name }}
                   </small>
                 </td>

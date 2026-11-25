@@ -298,11 +298,14 @@ test('项目列表系统名称按项目汇总去重，忽略空名称并保留�
 test('项目列表原合同列主显示项目系统名称，合同号保留为次要小字', async () => {
   const start = source.indexOf('<tr v-for="project in pagedProjects"')
   const row = baseParse(source.slice(start, source.indexOf('</tr>', start) + 5)).children[0]
-  const cell = row.children.filter(node => node.tag === 'td')[2]
-  const html = await renderFragment(cell.loc.source, {
+  const [, customerCell, projectCell] = row.children.filter(node => node.tag === 'td')
+  const html = await renderFragment(customerCell.loc.source + projectCell.loc.source, {
     project, projectSystemsByProject: display.projectSystemNamesByProject?.(items) || new Map(),
+    openProject: () => {},
   })
-  assert.match(html, /<b>合成展示项目 · 档案系统、办公系统<\/b>/)
+  assert.match(html, /<b class="ui-record-name" title="合成客户">合成客户<\/b>/)
+  const projectLabel = '合成展示项目 · 档案系统、办公系统'
+  assert.ok(html.includes(`<b class="ui-record-name" title="${projectLabel}">${projectLabel}</b>`))
   assert.match(html, /<small[^>]*class="[^"]*pm-service-code[^"]*"[^>]*>合同编号：HT-DISPLAY<\/small>/)
   assert.doesNotMatch(html, /<b[^>]*>HT-DISPLAY/)
 })
@@ -314,7 +317,7 @@ test('项目列表名称不可见或空白时明确提示，合同号为空时�
   const html = await renderFragment(cell.loc.source, {
     project: { ...project, name: ' ', contract: '' }, projectSystemsByProject: new Map(),
   })
-  assert.match(html, /<b>未提供项目名称 · 暂无可见系统名称<\/b>/)
+  assert.match(html, /<b[^>]*>未提供项目名称 · 暂无可见系统名称<\/b>/)
   assert.match(html, /合同编号：—/)
   assert.doesNotMatch(html, /undefined|null/)
 })

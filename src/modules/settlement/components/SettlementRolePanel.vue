@@ -401,7 +401,7 @@ watch(() => props.section, load, { immediate: true })
       <tbody>
       <tr v-for="item in references" :key="item.id">
       <td>{{ item.contract_no }}</td>
-      <td>{{ item.customer_name }}</td>
+      <td><span class="ui-record-name" :title="item.customer_name">{{ item.customer_name }}</span></td>
       <td>{{ item.project_id || '待补齐' }}</td>
       </tr>
       </tbody>

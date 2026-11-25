@@ -82,6 +82,39 @@ jobs:
           retention-days: 7
           if-no-files-found: warn
 
+  # 端到端测试：与 test/layout 并列，不进 image/deploy 的 needs 链。
+  # 只跑不依赖后端的用例（外壳、登录页结构、未登录门禁）；未配置测试账号时登录用例自动跳过。
+  # 仅在 PR 与手动触发时执行，push main 的发布链路保持原有耗时。
+  e2e:
+    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "24"
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: ms-playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+      - name: Install Chromium for E2E
+        run: npx playwright install --with-deps chromium
+      - name: End-to-end tests
+        run: bash scripts/e2e.sh run
+      - name: Upload e2e evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-results
+          path: .e2e/
+          retention-days: 7
+          if-no-files-found: warn
+
   image:
     if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
     needs: test

@@ -309,6 +309,10 @@
 }
 .contract-ledger-table thead th:first-child { background: var(--surface-head); }
 .contract-ledger-table tbody tr:hover td:first-child { background: var(--surface-tint); }
+.contract-data-table .contract-entity-link {
+  min-width: 0;
+  max-width: min(100%, 245px);
+}
 .contract-cell-sub {
   display: block;
   margin-top: 2px;
