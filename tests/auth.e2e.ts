@@ -1,4 +1,5 @@
 import { credentials, expect, test } from 'e2e'
+import { mockGuestSession } from './support/guestSession'
 
 /**
  * 用途：判断当前运行环境是否已提供可用的测试账号，未提供时跳过需要登录的用例。
@@ -64,7 +65,8 @@ async function signIn(app, browser) {
  * 参数：无，使用 e2e 注入的 app、browser 与 screen fixture。
  * 返回值：无，断言不成立时抛出错误。
  */
-test('未登录访问子系统门户会被挡回登录页', { tags: ['backend'] }, async ({ app, browser, screen }) => {
+test('未登录访问子系统门户会被挡回登录页', { tags: ['smoke'] }, async ({ app, browser, screen }) => {
+  await mockGuestSession(browser)
   await app.open('/portal')
 
   await expect(browser).toHaveURL(/\/login/)

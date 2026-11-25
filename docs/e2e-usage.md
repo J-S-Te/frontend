@@ -6,7 +6,7 @@
 
 | 命令 | 跑什么 | 依赖 | 耗时 |
 |---|---|---|---|
-| `npm run e2e:smoke` | 纯前端渲染，2 条 | 只要 Node 24 | ~5s |
+| `npm run e2e:smoke` | 前端渲染与访客门禁，4 条 | 只要 Node 24 | ~5s |
 | `npm run e2e:full` | 全部（含视觉断言），打 `localhost:8081` | 本地 Docker 栈在线 + 模型配置 | ~13s |
 | `npm run e2e:browser` | 单独起共享浏览器（调试用） | — | — |
 
@@ -20,10 +20,10 @@
 
 | 标签 | 用例 | 前置条件 |
 |---|---|---|
-| `#smoke` | 登录页渲染、路由别名 | 无 |
+| `#smoke` | 应用外壳、登录页、路由别名与访客门禁 | 无 |
 | `#cdp` | 同页混用校验 | `E2E_VISUAL=1` |
 | `#visual` | Midscene 视觉断言 | `E2E_VISUAL=1` + 模型配置 |
-| `#backend` | 登录链路、应用外壳 | 后端 8080 在线 |
+| `#backend` | 真实账号登录 | 配置测试账号且后端在线 |
 | `#signin` | 线上登录 + 进门户 | `E2E_ONLINE=1` + 线上凭据 |
 | `#business` | 线上进入业务子系统 | 同上，可用 `E2E_ONLINE_SUBSYSTEM` 换目标 |
 | `#online` | 线上实例冒烟 | `E2E_ONLINE=1` + `APP_URL` |
