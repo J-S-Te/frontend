@@ -169,8 +169,8 @@ test('项目列表 KPI、趋势图、资质筛选与空态不发生视觉回归'
 
 test('执行总览的在途项目以项目名称为主信息并悬停提示项目编号', () => {
   assert.match(source, /<th scope="col">项目名称<\/th><th scope="col">客户<\/th>/)
-  assert.match(source, /:title="`项目编号：\$\{project\.id\}`"/)
-  assert.match(source, /<b>\{\{ project\.name \|\| '未命名项目' \}\}<\/b>/)
+  assert.match(source, /:title="`\$\{project\.name \|\| '未命名项目'\}，项目编号：\$\{project\.id\}`"/)
+  assert.match(source, /<b class="ui-record-name">\{\{ project\.name \|\| '未命名项目' \}\}<\/b>/)
   assert.match(source, /:aria-label="`\$\{project\.name \|\| '未命名项目'\}，项目编号：\$\{project\.id\}`"/)
   assert.match(source, /\[project\.name, project\.id, project\.customer/)
   assert.match(source, /placeholder="搜索项目名称 \/ 项目编号 \/ 客户名称 \/ 服务项"/)

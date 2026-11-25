@@ -408,7 +408,7 @@ function hasInvoiceRowAction(item) {
                 {{ item.request_no }}
               </td>
               <td>{{ item.contract_no || "—" }}</td>
-              <td>{{ item.buyer_name || "—" }}</td>
+              <td><span class="ui-record-name" :title="item.buyer_name">{{ item.buyer_name || "—" }}</span></td>
               <td>{{ item.buyer_tax_no_masked || "—" }}</td>
               <td class="settlement-money">
                 {{ money(item.amount_incl_tax) }}
@@ -492,7 +492,7 @@ function hasInvoiceRowAction(item) {
               </td>
               <td>{{ item.invoice_code }}</td>
               <td>{{ item.contract_no || "—" }}</td>
-              <td>{{ item.buyer_name || "—" }}</td>
+              <td><span class="ui-record-name" :title="item.buyer_name">{{ item.buyer_name || "—" }}</span></td>
               <td>{{ item.issue_date }}</td>
               <td class="settlement-money">
                 {{ money(item.amount_incl_tax) }}

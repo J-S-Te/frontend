@@ -96,6 +96,20 @@ select { overflow-x: clip; }
 :is(.console-table-scroll, .contract-table-scroll, .pm-table-scroll,
     .settlement-table-scroll, .da-table-scroll) { min-width: 0; max-width: 100%; }
 
+/* 业务名称可以在自己的列或列表项内断行。仅用于文本节点，保留相邻操作控件。 */
+:where(td):has(.ui-record-name) { min-inline-size: 9rem; }
+:root .ui-record-name {
+  display: -webkit-box;
+  min-inline-size: 0;
+  max-inline-size: 100%;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  text-overflow: ellipsis;
+  white-space: normal;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
 :is(.console-page-head, .contract-page-head, .pm-page-head, .crm-page-head,
     .portal-title, .settlement-panel-head, .da-page-head) {
   min-width: 0;

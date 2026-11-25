@@ -175,7 +175,8 @@
 
 .dictionary-table-wrap { min-height: 0; flex: 1; }
 .dictionary-items-table { min-width: 790px; }
-.dictionary-items-table td { white-space: nowrap; }
+.dictionary-items-table td { overflow-wrap: anywhere; }
+.dictionary-items-table :is(.console-actions-cell, td:nth-last-child(2)) { white-space: nowrap; }
 .dictionary-items-table .console-actions-cell { min-width: 70px; }
 
 .dictionary-items-panel__placeholder,

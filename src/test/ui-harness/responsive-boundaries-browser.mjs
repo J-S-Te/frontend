@@ -110,6 +110,15 @@ function moduleMarkup(item) {
   const metrics = chrome.metric
     ? `<p data-boundary="metrics"><span class="${chrome.metric}">单据 128</span>
       <span class="${chrome.metric}">超标 ${token}</span></p>` : ''
+  const recordNames = `<div class="${scroll}" data-scroll><table class="${table}${item[0] === 'contract' ? ' contract-ledger-table' : ''}" data-record-names>
+      <thead><tr><th>编号</th><th>名称</th><th>客户</th><th>金额</th>
+        <th>状态</th><th>开始日期</th><th>结束日期</th><th>操作</th></tr></thead>
+      <tbody>${[longText, token, '技术服务合同'].map(name => `<tr>
+        <td><span class="mono">HT-20261125-001</span></td>
+        <td><strong class="ui-record-name" title="${name}">${name}</strong></td>
+        <td>示例客户名称</td><td>¥48,000.00</td><td>已生效</td><td>2026-11-25</td>
+        <td>2027-11-25</td><td><button type="button">详情</button></td></tr>`).join('')}</tbody>
+      </table></div>`
   // 宽表按单据列表的真实列数合成：窄屏下应由滚动容器承接，而不是把整页撑宽。
   const wideTable = chrome.wideTable
     ? `<div class="${scroll}" data-scroll data-wide-table><table${tableClass}>
@@ -134,9 +143,35 @@ function moduleMarkup(item) {
       ${metrics}
       <div class="${scroll}" data-scroll><table${tableClass}><thead><tr><th>编号</th><th>说明</th><th>操作</th></tr></thead>
         <tbody><tr><td>${token}</td><td>${longText}</td><td><button>查看详情</button></td></tr></tbody></table></div>
+      ${recordNames}
       ${wideTable}
       <pre data-scroll>${token.repeat(3)}\n  第二行保留缩进</pre>
     </section></main>`
+}
+
+// 用途：验证各模块长名称可换行且不会侵占相邻客户列。
+// 参数：page 为包含合成长短名称表格的浏览器页面。
+// 返回值：名称排版违反预期的描述。
+async function recordNameViolations(page) {
+  return page.locator('[data-record-names] tbody tr').evaluateAll(rows => {
+    const errors = []
+    const shortHeight = rows.at(-1).querySelector('strong').getBoundingClientRect().height
+    for (const [index, row] of rows.entries()) {
+      const title = row.querySelector('strong')
+      const titleCell = row.cells[1].getBoundingClientRect()
+      const customerCell = row.cells[2].getBoundingClientRect()
+      const titleBox = title.getBoundingClientRect()
+      if (titleBox.left < titleCell.left - 1 || titleBox.right > customerCell.left + 1
+        || title.scrollWidth > title.clientWidth + 1) {
+        errors.push(`record name ${index + 1} exceeds its column`)
+      }
+      if (index < rows.length - 1 && (titleBox.height < shortHeight * 1.8
+        || titleBox.height > shortHeight * 2.2)) {
+        errors.push(`record name ${index + 1} must wrap to two lines`)
+      }
+    }
+    return errors
+  })
 }
 
 // 用途：拼出真实组件要的六行许可事实，交给浏览器里挂载的 LicenseAppCard 渲染。
@@ -480,6 +515,7 @@ try {
         + (item[0] === 'platform' ? '' : await load(item[1]))
       await page.setContent(`<style>${css}</style><div id="app">${moduleMarkup(item)}</div>`)
       const result = { module: item[0], width, height, order: 'module-only', errors: await violations(page) }
+      result.errors.push(...await recordNameViolations(page))
       if (item[0] === 'reimbursement') {
         result.metrics = await reimbursementTableMetrics(page)
         assert.ok(result.metrics, '报销骨架必须包含按真实列数合成的宽表')

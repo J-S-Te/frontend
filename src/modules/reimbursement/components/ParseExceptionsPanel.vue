@@ -41,7 +41,7 @@ onMounted(()=>load())
       <button class="expense-button" :disabled="busy" @click="load(true)">查询解析异常</button></div>
     <ErrorState v-if="error" compact title="解析异常读取失败" :error="error" retry-text="重新读取解析异常" @retry="load()" />
     <div class="expense-table"><table class="expense-table-body"><thead><tr><th scope="col">原件</th><th scope="col">状态与原因</th><th scope="col">候选组</th><th scope="col">运行时间</th><th scope="col">处理</th></tr></thead><tbody>
-      <tr v-for="row in rows" :key="row.parse_run_id"><td>{{ row.original_name || row.document_id }}</td>
+      <tr v-for="row in rows" :key="row.parse_run_id"><td><span class="ui-record-name" :title="row.original_name || row.document_id">{{ row.original_name || row.document_id }}</span></td>
         <td>{{ statuses[row.parse_status] || '状态待确认' }} · {{ row.error_code ? failureMessage(row.error_code) : '请对照原件核对缺失或冲突字段' }}</td>
         <td>{{ row.parsed_candidate_count }} 组待核对；尚无可用业务发票</td>
         <td>{{ formatBusinessDateTime(row.created_at) }}</td><td>

@@ -144,7 +144,7 @@ defineEmits(['navigate'])
                     >{{ index + 1 }}</span
                   >
                 </td>
-                <td>{{ item.customer_name }}</td>
+                <td><span class="ui-record-name" :title="item.customer_name">{{ item.customer_name }}</span></td>
                 <td>{{ item.contract_no || "—" }}</td>
                 <td>{{ item.receivable_no }}</td>
                 <td class="settlement-money">

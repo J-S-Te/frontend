@@ -544,7 +544,7 @@ watch(canReadDictionaries, (granted, previouslyGranted) => {
                 <thead><tr><th scope="col">显示名称</th><th scope="col">项编码</th><th scope="col">实际值</th><th scope="col">排序</th><th scope="col">状态</th><th scope="col">更新时间</th><th scope="col" class="console-actions-cell">操作</th></tr></thead>
                 <tbody>
                   <tr v-for="item in items" :key="itemID(item)">
-                    <td><strong class="console-entity-name">{{ item.label }}</strong></td><td class="console-mono">{{ item.code }}</td><td class="console-mono">{{ item.value }}</td><td>{{ item.sort_order }}</td>
+                    <td><strong class="ui-record-name console-entity-name" :title="item.label">{{ item.label }}</strong></td><td class="console-mono">{{ item.code }}</td><td class="console-mono">{{ item.value }}</td><td>{{ item.sort_order }}</td>
                     <td><span class="console-badge" :class="item.status === 'ACTIVE' ? 'status-active' : 'status-disabled'">{{ item.status === 'ACTIVE' ? '启用' : '停用' }}</span></td>
                     <td>{{ formatDate(item.updated_at) }}</td><td class="console-actions-cell"><button v-if="canUpdateItem" class="console-text-button" type="button" @click="openEditItem(item)">编辑</button><button v-if="canDeleteItem" class="console-text-button danger" type="button" @click="requestDeleteItem(item)">删除</button><span v-if="!canUpdateItem && !canDeleteItem">—</span></td>
                   </tr>
