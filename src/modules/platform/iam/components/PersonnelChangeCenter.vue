@@ -8,7 +8,7 @@ import { RELATED_DATA } from '../../shared/utils/relatedDataInvalidation.js'
 import { getApplicationAccess } from '../api/authorization.js'
 import { listApplications } from '../../applications/api/applications.js'
 import ConsoleIcon from '../../shared/components/ConsoleIcon.vue'
-import { hasPermission } from '../../auth/utils/principal.js'
+import { hasPermission, useCurrentPrincipal } from '../../auth/utils/principal.js'
 import { useDictionaryOptions } from '../../dictionaries/composables/useDictionaryOptions.js'
 import { formatUserError } from '../../../shared/utils/userError.js'
 
@@ -49,6 +49,16 @@ const authorizationError = ref('')
 const workflowAction = ref(null)
 const workflowReference = ref('')
 const workflowSaving = ref(false)
+const { principal } = useCurrentPrincipal()
+const requiresWorkflowExceptionReason = computed(() => {
+  const action = workflowAction.value
+  const userId = principal.value?.user?.id
+  if (action?.kind !== 'approval' || !userId) return false
+  const isSelfApproval = action.item.submitted_by === userId || action.item.user_id === userId
+  return isSelfApproval && (principal.value?.roles?.some(
+    (role) => String(role?.code || '').trim().toLowerCase() === 'platform-super-admin',
+  ) ?? false)
+})
 const handoverItems = ref([])
 const handoverItemsLoaded = ref(false)
 const handoverCrossSystemEnabled = ref(false)
@@ -324,6 +334,11 @@ async function openReferencedRequest(value) {
   }
 }
 
+/**
+ * 用途：打开异动审批或交接弹窗，并为本次审批初始化例外原因。
+ * 参数：item 为列表中的人员异动单，含当前流程状态及相关人员。
+ * 返回值：弹窗及必要目录加载完成后兑现，加载失败显示在页面上。
+ */
 async function openWorkflowAction(item) {
   const status = String(item.status || '').toUpperCase()
   if (status === 'DRAFT') {
@@ -333,7 +348,11 @@ async function openWorkflowAction(item) {
   if (!canProcessApproval.value) return
   const termination = String(item.change_type || item.type || '').toUpperCase() === 'TERMINATION'
   if (status === 'PENDING_APPROVAL') {
-    workflowAction.value = { item, kind: 'approval', toStatus: termination ? 'PENDING_HANDOVER' : 'SCHEDULED', title: '审批人员异动', prefix: '' }
+    workflowAction.value = {
+      item, kind: 'approval', toStatus: termination ? 'PENDING_HANDOVER' : 'SCHEDULED',
+      title: '审批人员异动', prefix: '', exceptionReason: '',
+    }
+    error.value = ''
   } else if (status === 'PENDING_HANDOVER') {
     // 交接凭据编号由服务端在排期时自动生成，操作者只选择接收人并确认。
     workflowAction.value = { item, kind: 'handover', toStatus: 'SCHEDULED', title: '确认交接完成并排期', prefix: '', autoReference: true }
@@ -390,6 +409,30 @@ function closeWorkflowAction() {
   workflowAction.value = null; workflowReference.value = ''; handoverItems.value = []; handoverItemsLoaded.value = false; handoverRetryPending.value = false; handoverTargetUserId.value = ''
 }
 
+/**
+ * 用途：按后端审批规则校验并提取当前弹窗的独立例外原因。
+ * 参数：无。
+ * 返回值：去除首尾空白的例外原因，无需填写时为空字符串，校验失败时提示并返回 null。
+ */
+function readWorkflowExceptionReason() {
+  if (!requiresWorkflowExceptionReason.value) return ''
+  const reason = workflowAction.value.exceptionReason.trim()
+  if (!reason) {
+    error.value = '请填写例外审批原因'
+    return null
+  }
+  if ([...reason].length > 500) {
+    error.value = '例外审批原因最多 500 个字符'
+    return null
+  }
+  return reason
+}
+
+/**
+ * 用途：提交当前弹窗的确认操作，包括审批通过、交接排期、取消和立即执行。
+ * 参数：无。
+ * 返回值：操作处理完成后兑现，校验或请求失败时在弹窗显示提示。
+ */
 async function confirmWorkflowAction() {
   if (workflowAction.value?.kind === 'cancel') {
     workflowSaving.value = true; error.value = ''
@@ -411,6 +454,8 @@ async function confirmWorkflowAction() {
   const reference = workflowReference.value.trim()
   if (!autoReference && !reference) { error.value = '请填写审批或交接凭据编号'; return }
   if (!autoReference && workflowAction.value?.prefix && !reference.toUpperCase().startsWith(workflowAction.value.prefix)) { error.value = `凭据必须以 ${workflowAction.value.prefix} 开头`; return }
+  const exceptionReason = readWorkflowExceptionReason()
+  if (exceptionReason === null) return
   workflowSaving.value = true; error.value = ''
   let completedHandoverCount = 0
   try {
@@ -442,7 +487,12 @@ async function confirmWorkflowAction() {
         completedHandoverCount += 1
       }
     }
-    const result = await transitionPersonnelChange(recordId(workflowAction.value.item), workflowAction.value.toStatus, autoReference ? '' : reference)
+    const result = await transitionPersonnelChange(
+      recordId(workflowAction.value.item),
+      workflowAction.value.toStatus,
+      autoReference ? '' : reference,
+      { exceptionReason },
+    )
     const generatedReference = result?.handover_reference || result?.handoverReference || ''
     emit('toast', autoReference ? `交接完成并已排期，交接凭据 ${generatedReference || '已由系统生成'}` : `${workflowAction.value.title}成功`)
     workflowAction.value = null; workflowReference.value = ''; handoverItems.value = []; handoverItemsLoaded.value = false; handoverRetryPending.value = false; handoverTargetUserId.value = ''
@@ -459,12 +509,21 @@ async function confirmWorkflowAction() {
   finally { workflowSaving.value = false }
 }
 
+/**
+ * 用途：驳回待审批异动单，并在超管例外场景中单独提交例外审批原因。
+ * 参数：无。
+ * 返回值：操作处理完成后兑现，校验或请求失败时在弹窗显示提示。
+ */
 async function rejectWorkflowAction() {
   const reference = workflowReference.value.trim()
   if (!reference) { error.value = '请填写驳回原因或审批记录编号'; return }
+  const exceptionReason = readWorkflowExceptionReason()
+  if (exceptionReason === null) return
   workflowSaving.value = true; error.value = ''
   try {
-    await transitionPersonnelChange(recordId(workflowAction.value.item), 'REJECTED', reference)
+    await transitionPersonnelChange(
+      recordId(workflowAction.value.item), 'REJECTED', reference, { exceptionReason },
+    )
     emit('toast', '异动单已驳回')
     workflowAction.value = null; workflowReference.value = ''
     await load()
@@ -661,7 +720,19 @@ onBeforeUnmount(() => { requestReferenceSeq++ })
   <div v-if="workflowAction" class="console-modal-backdrop" role="presentation" @click.self="closeWorkflowAction">
     <section class="console-detail-modal personnel-workflow-modal" role="dialog" aria-modal="true" :aria-label="workflowAction.title">
       <header><div><p class="console-modal-eyebrow">人员异动流程</p><h2>{{ workflowAction.title }}</h2><p>凭据将随状态流转留存，用于审批和交接审计。</p></div><button class="console-modal-close" type="button" :disabled="workflowSaving" @click="closeWorkflowAction">×</button></header>
-      <div class="console-modal-body"><p v-if="error" class="login-target-module__error" role="alert">{{ error }}</p><p v-if="workflowAction.kind === 'cancel'" class="console-card-hint">取消后该异动单不可恢复，也不会在生效日期执行。</p><p v-else-if="workflowAction.kind === 'execute'" class="console-card-hint">立即执行会马上变更该人员的任职与权限，并注销其现有登录会话（含下游单点登录），对方需重新登录获取新身份；执行后不可撤销，请确认审批与交接均已完成。</p><template v-else><div v-if="workflowAction.kind === 'handover'" class="personnel-handover-panel"><label v-if="!handoverNothingPending" class="console-form-item"><span>责任接收人 *</span><select v-model="handoverTargetUserId"><option value="">请选择在职接收人</option><option v-for="user in users.filter((candidate) => String(candidate.status || '').toUpperCase() === 'ACTIVE' && String(candidate.id || candidate.user_id) !== String(workflowAction.item.user_id))" :key="user.id || user.user_id" :value="user.id || user.user_id">{{ userLabel(user) }}</option></select></label><ul class="personnel-handover-list"><li v-for="item in handoverItems" :key="item.id"><span>{{ item.system }} · {{ item.resource_type }}</span><strong>{{ handoverStatusLabel(item) }}</strong><small v-if="item.next_retry_at">下次重试：{{ item.next_retry_at }}</small><small v-if="item.last_error_code">{{ item.last_error_code }}</small></li></ul><p v-if="handoverNothingPending" class="console-card-hint" role="status">责任交接项已全部完成，可直接点击「完成交接并排期」重试排期；系统会核对权威交接状态，不会重复写入已完成项。</p><p class="console-card-hint">本地责任由管理员确认；远端责任按机器协议转移并核对回执，全部成功后才允许排期离职，并自动生成交接凭据，无需手工填写编号；排期未成功时可直接重试，已完成项不会重复提交。</p></div><label v-if="!workflowAction.autoReference" class="console-form-item"><span>{{ workflowAction.prefix ? '交接凭据编号' : '审批凭据或驳回原因' }} *</span><input v-model="workflowReference" :placeholder="workflowAction.prefix ? '例如 HANDOVER-20260918-001' : '通过时填写审批记录编号，驳回时填写原因'"  maxlength="128"/></label></template></div>
+      <div class="console-modal-body"><p v-if="error" class="login-target-module__error" role="alert">{{ error }}</p><p v-if="workflowAction.kind === 'cancel'" class="console-card-hint">取消后该异动单不可恢复，也不会在生效日期执行。</p><p v-else-if="workflowAction.kind === 'execute'" class="console-card-hint">立即执行会马上变更该人员的任职与权限，并注销其现有登录会话（含下游单点登录），对方需重新登录获取新身份；执行后不可撤销，请确认审批与交接均已完成。</p><template v-else><div v-if="workflowAction.kind === 'handover'" class="personnel-handover-panel"><label v-if="!handoverNothingPending" class="console-form-item"><span>责任接收人 *</span><select v-model="handoverTargetUserId"><option value="">请选择在职接收人</option><option v-for="user in users.filter((candidate) => String(candidate.status || '').toUpperCase() === 'ACTIVE' && String(candidate.id || candidate.user_id) !== String(workflowAction.item.user_id))" :key="user.id || user.user_id" :value="user.id || user.user_id">{{ userLabel(user) }}</option></select></label><ul class="personnel-handover-list"><li v-for="item in handoverItems" :key="item.id"><span>{{ item.system }} · {{ item.resource_type }}</span><strong>{{ handoverStatusLabel(item) }}</strong><small v-if="item.next_retry_at">下次重试：{{ item.next_retry_at }}</small><small v-if="item.last_error_code">{{ item.last_error_code }}</small></li></ul><p v-if="handoverNothingPending" class="console-card-hint" role="status">责任交接项已全部完成，可直接点击「完成交接并排期」重试排期；系统会核对权威交接状态，不会重复写入已完成项。</p><p class="console-card-hint">本地责任由管理员确认；远端责任按机器协议转移并核对回执，全部成功后才允许排期离职，并自动生成交接凭据，无需手工填写编号；排期未成功时可直接重试，已完成项不会重复提交。</p></div><label v-if="!workflowAction.autoReference" class="console-form-item"><span>{{ workflowAction.prefix ? '交接凭据编号' : '审批凭据或驳回原因' }} *</span><input v-model="workflowReference" :placeholder="workflowAction.prefix ? '例如 HANDOVER-20260918-001' : '通过时填写审批记录编号，驳回时填写原因'"  maxlength="128"/></label></template>
+        <label v-if="requiresWorkflowExceptionReason" class="console-form-item">
+          <span>例外审批原因 *</span>
+          <!-- 原生 maxlength 按 UTF-16 计数，提交时按后端的 500 个 Unicode 字符校验。 -->
+          <textarea
+            v-model="workflowAction.exceptionReason"
+            rows="3"
+            maxlength="1000"
+            required
+            placeholder="说明由本人处理此异动的原因，最多 500 个字符"
+          />
+        </label>
+      </div>
       <footer class="console-form-actions"><button class="console-button ghost" type="button" :disabled="workflowSaving" @click="closeWorkflowAction">返回</button><button v-if="workflowAction.kind === 'approval'" class="console-button danger" type="button" :disabled="workflowSaving" @click="rejectWorkflowAction">驳回</button><button class="console-button primary" type="button" :disabled="workflowSaving" @click="confirmWorkflowAction">{{ workflowSaving ? '处理中…' : (workflowAction.kind === 'cancel' ? '取消异动单' : (workflowAction.kind === 'execute' ? '立即执行异动' : (workflowAction.kind === 'handover' ? '完成交接并排期' : (workflowAction.kind === 'approval' ? '通过' : '确认完成')))) }}</button></footer>
     </section>
   </div>

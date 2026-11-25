@@ -25,6 +25,7 @@ function component(api = {}, permissions = true) {
     onBeforeUnmount: callback => unmountCallbacks.push(callback),
     defineEmits: () => (...args) => events.push(args),
     defineProps: () => ({ prefillUserId: '', initialRequestId: '' }), hasPermission: () => permissions,
+    useCurrentPrincipal: () => ({ principal: ref(null) }),
     // 关联数据失效订阅：沙箱只验证组件逻辑，订阅本身由 relatedDataRefresh.test.mjs 覆盖。
     useRelatedDataInvalidation: () => () => {}, RELATED_DATA, loadAllCatalogPages,
     useDictionaryOptions: (_key, options) => ({ options: ref(options.fallback) }), formatUserError,
