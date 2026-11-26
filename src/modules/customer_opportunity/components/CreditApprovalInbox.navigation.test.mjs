@@ -9,9 +9,9 @@ import { usePromptDialog } from '../../shared/composables/usePromptDialog.js'
 const source = readFileSync(new URL('./CreditApprovalInbox.vue', import.meta.url), 'utf8')
 
 // 用途：执行信用待办真实组件 setup，仅替换 HTTP 与人员目录边界。
-// 参数：target 为通知坐标，read 为授权待办接口的受控响应。
+// 参数：target 为通知坐标，read 和 readOwner 提供受控待办及目录响应。
 // 返回值：组件响应式状态、可变入参与销毁方法。
-function harness(target, read) {
+function harness(target, read, readOwner = async () => ({ items: [] })) {
   const props = Vue.reactive({ permissions: ['customer.credit.approve'], roles: [],
     applicationId: '', customerId: '', ...target })
   const script = compileScript(parse(source).descriptor, { id: 'credit-navigation' }).content
@@ -20,7 +20,7 @@ function harness(target, read) {
     crmResourceID: navigation.crmResourceID, usePromptDialog,
     PromptDialog: {}, formatCRMError: value => value.message,
     formatBusinessDateTime: value => value, listPendingCustomerCreditApplications: read,
-    listOwnerDirectory: async () => ({ items: [] }), createIdempotencyKey: () => 'isolated',
+    listOwnerDirectory: readOwner, createIdempotencyKey: () => 'isolated',
     approveCustomerCreditApplication: () => assert.fail('导航不得提交审批'),
     rejectCustomerCreditApplication: () => assert.fail('导航不得驳回申请') }
   const component = new Function(...Object.keys(bindings), script
@@ -110,5 +110,23 @@ test('切换通知目标时取消旧申请的审批输入，避免在新卡片�
     assert.equal(h.state.promptDialog.value, null)
     await deciding
     assert.equal(h.state.actionID.value, '')
+  } finally { h.stop() }
+})
+
+
+test('信用待办立即展示已授权姓名，只有旧接口缺名时才查目录', async () => {
+  const lookups = []
+  const h = harness({}, async () => ({ items: [
+    { id: 8, applicant_id: 'sales-a', applicant_name: '服务器申请人', status: 'PENDING' },
+    { id: 9, applicant_id: 'sales-b', status: 'PENDING' },
+  ] }), ({ user_id }) => new Promise(resolve => lookups.push({ user_id, resolve })))
+  try {
+    await flush()
+    assert.deepEqual(h.state.visibleItems.value.map(item => item.id), [8, 9])
+    assert.deepEqual(lookups.map(row => row.user_id), ['sales-b'])
+    assert.equal(h.state.applicantLabel(h.state.visibleItems.value[0]), '服务器申请人')
+    lookups[0].resolve({ items: [{ user_id: 'sales-b', display_name: '旧申请人' }] })
+    await flush()
+    assert.equal(h.state.applicantLabel(h.state.visibleItems.value[1]), '旧申请人')
   } finally { h.stop() }
 })

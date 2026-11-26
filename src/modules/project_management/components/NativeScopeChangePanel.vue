@@ -2,6 +2,7 @@
 import { computed, onMounted, reactive, watch } from 'vue'
 import { getNativeProjectScope, requestNativeProjectScope, decideNativeProjectScope, withdrawNativeProjectScope } from '../api/projectManagement.js'
 import { useNativeScopeChange } from '../composables/useNativeScopeChange.js'
+import { approvalApplicantLabel } from '../approvalTasks.js'
 
 const props = defineProps({ projectId: { type: String, required: true },
   changeId: { type: String, default: '' }, categories: { type: Array, default: () => [] },
@@ -78,7 +79,7 @@ onMounted(load)
       <p v-if="!visibleChanges.length">{{ changeId ? '未能定位指定提案，请刷新核对或返回审批待办。' : '暂无范围变更记录。' }}</p>
       <article v-for="change in visibleChanges" :key="change.id" class="pm-native-change">
         <h5>{{ statusNames[change.status] || '未知状态，禁止操作' }} · 基于 v{{ change.base_scope_version }}<span v-if="change.applied_scope_version"> → v{{ change.applied_scope_version }}</span></h5>
-        <p>原操作号 {{ change.operation_id }} · 申请人 {{ change.requested_by }} · {{ change.reason }}</p>
+        <p>原操作号 {{ change.operation_id }} · 申请人 {{ approvalApplicantLabel(change.requested_by_display_name, change.requested_by) }} · {{ change.reason }}</p>
         <p v-if="change.decided_by">决定人 {{ change.decided_by }} · {{ change.comment }}</p>
         <details><summary>冻结送审范围（{{ change.scope_hash }}）</summary><ul><li v-for="item in change.service_items" :key="item.source_service_id">{{ item.source_service_id }} · {{ item.batch }} · {{ item.site }} · {{ item.category }} · {{ item.test_mode }} · {{ item.system }} · {{ item.system_level }} · {{ item.system_standard }} · {{ (item.required_codes || []).join('、') }} · {{ item.requirement }}</li></ul></details>
         <template v-if="change.status === 'PENDING'">

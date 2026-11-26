@@ -32,7 +32,7 @@ test('信用审批待办通过人员目录显示申请人名称，不向业务�
   assert.match(inbox, /listOwnerDirectory/)
   assert.match(inbox, /applicantLabel\(item\)/)
   assert.match(inbox, /applicantNames\.value\[id\]/)
-  assert.match(inbox, /未命名用户/)
+  assert.match(inbox, /姓名未记录/)
 	assert.match(inbox, /不向业务用户暴露内部 ID/)
 })
 

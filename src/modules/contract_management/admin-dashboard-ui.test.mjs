@@ -31,7 +31,10 @@ test('dashboard header and todo list follow the prototype information density', 
   assert.ok(source.includes('<p>{{ pageDescription }}</p>'))
   assert.ok(source.includes('class="contract-card contract-dashboard-todo"'))
   assert.ok(source.includes('我的待办'))
-  assert.ok(source.includes('approvals.slice(0, 5)'))
+  const pendingTasks = source.slice(source.indexOf('class="contract-dashboard-todo-list"'))
+    .split('当前没有待处理审批')[0]
+  assert.match(pendingTasks, /approvals\.slice\(0, 5\)/)
+  assert.match(pendingTasks, /申请人 \{\{ approval\.applicant \}\}/)
   assert.ok(source.includes('@click="openApproval(approval)"'))
   assert.ok(source.includes("can('approval.process') ? '处理' : '查看'"))
   // 原型的问候信息由页头承载；旧的整块欢迎横幅不再保留。

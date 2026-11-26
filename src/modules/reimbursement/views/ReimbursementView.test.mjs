@@ -1811,7 +1811,8 @@ test('列表不再出现开发文案，被禁用的发票勾选给出具体原�
   }, 'claims')
   try {
     const html = await claims.html()
-    assert.match(html, /本任务范围未提供/)
+    assert.match(html, /差旅 \/ 姓名未记录/)
+    assert.doesNotMatch(html, /本任务范围未提供/)
     assert.doesNotMatch(html, /按任务可见/)
   } finally { claims.unmount() }
 })
@@ -2238,4 +2239,49 @@ test('报销列表独立读取，候选服务失败不阻断列表', async () =>
   assert.equal(h.state.listError.value,'')
   assert.ok(h.state.editorOptionsError.value)
  } finally {h.unmount()}
+})
+
+test('待办、任务详情和我的提交显示原申请人，旧任务姓名缺失时不显示受理人为申请人', async () => {
+  const approval = { id: 'task-applicant', claim_id: 'claim-applicant', round: 1, version: 1,
+    status: 'PENDING', node_code: 'ACCOUNTANT', assignee_subject_id: 'assigned-reviewer',
+    snapshot: { version: 2, items: [], applicant_name: '核验申请人', applicant_subject_id: 'originator' } }
+  const legacy = { ...approval, id: 'task-legacy', claim_id: 'claim-legacy',
+    snapshot: { version: 2, items: [], applicant_subject_id: 'historical-subject' } }
+  const request = async (path) => {
+    if (path.startsWith('/approval-tasks?')) return { items: [approval, legacy], total: 2 }
+    if (path === '/approval-tasks/task-applicant') return approval
+    if (path === '/approval-tasks/task-legacy') return legacy
+    if (path === '/dashboard') return { pending_approvals: 1, pending_tasks: [approval] }
+    const claim = { ...approval.snapshot, id: approval.claim_id, status: 'IN_APPROVAL' }
+    if (path.startsWith('/claims?')) return { items: [claim], total: 1 }
+    if (path === '/claims/' + approval.claim_id) return claim
+    return { items: [], total: 0 }
+  }
+  const permissions = ['expense.claim.read', 'expense.approval.act']
+  const inbox = await mountPage(permissions, request, 'approvals')
+  try {
+    const list = await inbox.html()
+    assert.match(list, /类型 \/ 申请人/)
+    assert.match(list, /核验申请人/)
+    assert.match(list, /姓名未记录/)
+    assert.doesNotMatch(list, /assigned-reviewer|historical-subject/)
+    await inbox.state.openApproval(approval.id)
+    assert.match(await inbox.html(), /申请人\s+核验申请人/)
+    await inbox.state.openApproval(legacy.id)
+    assert.match(await inbox.html(), /申请人\s+姓名未记录/)
+  } finally { inbox.unmount() }
+
+  const dashboard = await mountPage(permissions, request)
+  try {
+    const html = await dashboard.html()
+    assert.match(html, /<th scope="col">申请人<\/th>/)
+    assert.match(html, /核验申请人/)
+  } finally { dashboard.unmount() }
+
+  const submitted = await mountPage(permissions, request, 'submitted')
+  try {
+    assert.match(await submitted.html(), /核验申请人/)
+    await submitted.state.openClaim(approval.claim_id)
+    assert.match(await submitted.html(), /报销人<\/span><span[^>]*>核验申请人/)
+  } finally { submitted.unmount() }
 })

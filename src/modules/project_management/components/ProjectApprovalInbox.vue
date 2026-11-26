@@ -2,7 +2,7 @@
 import { computed, onMounted, ref, toRef, watch } from 'vue'
 import { listApprovalTasks, decideRollback, decideReportCorrection } from '../api/projectManagement.js'
 import { useProjectApprovalInbox } from '../composables/useProjectApprovalInbox.js'
-import { approvalOwnerLabel, approvalStatusLabel, approvalTypeLabel } from '../approvalTasks.js'
+import { approvalApplicantLabel, approvalOwnerLabel, approvalStatusLabel, approvalTypeLabel } from '../approvalTasks.js'
 import { reportStatusLabel } from '../projectDisplay.js'
 import { formatBusinessDateTime } from '../../shared/utils/businessTime.js'
 import PaginationBar from '../../shared/components/PaginationBar.vue'
@@ -93,7 +93,7 @@ onMounted(load)
           <div><dt>申请编号</dt><dd>{{ detail.id }}</dd></div>
           <div><dt>项目 / 服务项</dt><dd>{{ detail.project_id }} / {{ detail.service_item_id }}</dd></div>
           <div><dt>现场地点</dt><dd>{{ detail.site || '未提供' }}</dd></div>
-          <div><dt>申请人</dt><dd>{{ detail.requester_user_id || '未提供' }}</dd></div>
+          <div><dt>申请人</dt><dd>{{ approvalApplicantLabel(detail.requester_display_name, detail.requester_user_id) }}</dd></div>
           <div><dt>审批归属</dt><dd>{{ approvalOwnerLabel(detail) }}</dd></div>
           <div><dt>申请时间</dt><dd>{{ displayTime(detail.created_at) }}</dd></div>
           <div><dt>服务项状态</dt><dd>{{ detail.service_item_status || '—' }}</dd></div>
@@ -134,7 +134,8 @@ onMounted(load)
             <div><h3>{{ approvalTypeLabel(task.type) }} · {{ task.service_item_id }}</h3>
               <p>{{ task.project_id }} · {{ task.site || '地点未提供' }}</p>
               <p class="pm-approval-text">{{ task.reason }}</p>
-              <small>审批归属：{{ approvalOwnerLabel(task) }} · {{ displayTime(task.created_at) }}</small>
+              <small>申请人：{{ approvalApplicantLabel(task.requester_display_name, task.requester_user_id) }}
+                · 审批归属：{{ approvalOwnerLabel(task) }} · {{ displayTime(task.created_at) }}</small>
             </div>
             <button type="button" class="pm-button" :disabled="saving" @click="openRequest(task)">
               查看申请

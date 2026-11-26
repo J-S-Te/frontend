@@ -132,3 +132,18 @@ test('普通审批人的请求不携带超管例外原因，交由后端判定�
     to_status: 'REJECTED', approval_reference: '复核未通过', immediate: false,
   }])
 })
+
+test('人员异动申请人独立于异动对象，历史记录只用已加载目录补齐', async (context) => {
+  const { state } = await mountApproval(context)
+  state.users.value = [
+    { id: 'submitter-1', display_name: '旧版目录的申请人' },
+    { id: 'employee-1', display_name: '异动人员' },
+  ]
+  assert.equal(state.applicantLabel({
+    ...independentChange, submitted_by_display_name: '服务端确认的申请人', user_display_name: '异动人员',
+  }), '服务端确认的申请人')
+  assert.equal(state.applicantLabel(independentChange), '旧版目录的申请人')
+  assert.equal(state.applicantLabel({
+    ...independentChange, submitted_by: 'missing-user', user_display_name: '异动人员',
+  }), '姓名未记录')
+})

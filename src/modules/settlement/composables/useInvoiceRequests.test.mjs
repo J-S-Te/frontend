@@ -151,9 +151,9 @@ test('submitInvoice：未选可开票应收只提示；选中后按应收组装�
 
 test('审核：approveInvoice 装载审核项并打开；驳回必须填原因；批准 / 驳回分别调用对应接口并关闭', async () => {
   const h = harness()
-  h.approveInvoice({ id: 'R1', version: 2, request_no: 'REQ-001' })
+  h.approveInvoice({ id: 'R1', version: 2, request_no: 'REQ-001', applicant_name: '开票经办人' })
   assert.equal(h.invoiceReviewOpen.value, true)
-  assert.deepEqual(h.invoiceReview.value, { id: 'R1', version: 2, request_no: 'REQ-001', reason: '' })
+  assert.deepEqual(h.invoiceReview.value, { id: 'R1', version: 2, request_no: 'REQ-001', applicant_name: '开票经办人', reason: '' })
 
   await h.submitInvoiceReview('reject')
   assert.deepEqual(h.calls.notify, ['驳回开票申请时必须填写驳回原因。'])
