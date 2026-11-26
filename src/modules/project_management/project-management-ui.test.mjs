@@ -76,7 +76,7 @@ test('等保附属渗透测试以专项卡片呈现且不混入服务项统计',
   assert.match(penetrationWorkPackageSource, /execution_status/)
   assert.match(penetrationWorkPackageSource, /report_status/)
   assert.match(penetrationWorkPackageSource, /expected_version: workPackage\.value\.version/)
-  assert.match(penetrationWorkPackageSource, /选择具备 PENETRATION_TEST 能力的人员/)
+  assert.match(penetrationWorkPackageSource, /选择具备渗透测试资质的人员/)
   assert.match(penetrationWorkPackageSource, /取消专项并归入不开展/)
 })
 
@@ -520,7 +520,8 @@ test('专项计划独立于任务分配岗位目录，候选使用有效人员�
   assert.match(source, /penetrationEngineerCandidates\(\{\s*capabilities: capabilities\.value,\s*\}\)/)
   assert.doesNotMatch(source, /roles\.push\(PROJECT_ROLE_CODES\.penetrationEngineer\)/)
   assert.match(penetrationWorkPackageSource, /:options="engineerSelectOptions"/)
-  assert.match(penetrationWorkPackageSource, /搜索姓名、资质编号或能力编码/)
+  assert.match(penetrationWorkPackageSource, /搜索用户名、姓名、资质编号或能力编码/)
+  assert.match(penetrationWorkPackageSource, /@search="searchEngineerUsername"/)
   assert.match(penetrationWorkPackageSource, /project\.implementation\.plan/)
   assert.match(penetrationWorkPackageSource, /engineer_ids: plan\.value\.engineerIDs/)
 })

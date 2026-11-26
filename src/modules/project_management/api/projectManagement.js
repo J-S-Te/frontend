@@ -939,6 +939,15 @@ export function getPenetrationWorkPackage(itemID) {
   return request(`/service-items/${encodeURIComponent(itemID)}/penetration-work-package`)
 }
 
+// 用途：在当前专项内按登录用户名精确查询可指派的人员。
+// 参数：itemID 为父服务项标识，username 为待查找的登录用户名。
+// 返回值：包含合格人员平台用户 ID 的响应承诺；无匹配时 ID 为空。
+export function findPenetrationEngineerByUsername(itemID, username) {
+  const query = new URLSearchParams({ username })
+  const path = `/service-items/${encodeURIComponent(itemID)}/penetration-work-package/engineer-by-username`
+  return request(`${path}?${query}`)
+}
+
 export function ensurePenetrationWorkPackage(itemID, expectedVersion, idempotencyKey = '') {
   return penetrationCommand(itemID, '', 'POST', { expected_version: Number(expectedVersion) || 0 }, idempotencyKey)
 }

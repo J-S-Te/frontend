@@ -99,9 +99,13 @@ function show() {
     searchInput.value?.focus({ preventScroll: true })
   })
 }
+// 用途：关闭面板并清除本次搜索状态。
+// 参数：无。
+// 返回值：无；本地模式清空输入时同步通知补充搜索的调用方。
 function hide() {
   open.value = false
   menuPositioned.value = false
+  if (!props.remote && keyword.value) emit('search', '')
   keyword.value = ''
   activeIndex.value = -1
 }
@@ -152,9 +156,10 @@ function onKeydown(event) {
     if (option) choose(option)
   }
 }
-// 远程模式把输入丢给父组件（父组件负责防抖与请求合并），组件不发请求。
+// 用途：通知调用方搜索词变化，支持本地搜索与额外目录匹配并行。
+// 参数：无；读取搜索框当前输入。
+// 返回值：无。
 function onSearchInput() {
-  if (!props.remote) return
   emit('search', keyword.value)
 }
 function loadMore() {
@@ -231,7 +236,7 @@ onBeforeUnmount(() => {
             <span class="pm-search-select-check" aria-hidden="true">{{ isSelected(option) ? '✓' : '' }}</span>
             <span><b>{{ optionLabel(option) }}</b><small v-if="optionDescription(option)">{{ optionDescription(option) }}</small></span>
           </button>
-          <p v-if="remote && loading && !filteredOptions.length" class="pm-search-select-empty">正在搜索…</p>
+          <p v-if="loading && !filteredOptions.length" class="pm-search-select-empty">正在搜索…</p>
           <p v-else-if="!filteredOptions.length" class="pm-search-select-empty">{{ emptyText }}</p>
           <button
             v-if="remote && hasMore"
