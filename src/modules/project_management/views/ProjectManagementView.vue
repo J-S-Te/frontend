@@ -1205,7 +1205,7 @@ const capabilityPersonnelError = ref('')
 const personnelScope = createRequestScope()
 
 
-const emptyPersonnelByRole = () => ({ [PROJECT_ROLE_CODES.teamLead]: [], [PROJECT_ROLE_CODES.projectManager]: [], [PROJECT_ROLE_CODES.engineer]: [], [PROJECT_ROLE_CODES.penetrationEngineer]: [] })
+const emptyPersonnelByRole = () => ({ [PROJECT_ROLE_CODES.teamLead]: [], [PROJECT_ROLE_CODES.projectManager]: [], [PROJECT_ROLE_CODES.engineer]: [] })
 const personnelByRole = ref(emptyPersonnelByRole())
 
 // 用途：按已确认项目会话能力加载人员目录。
@@ -1217,9 +1217,6 @@ async function loadPersonnel() {
   const roles = canExecutionAssign.value
     ? [PROJECT_ROLE_CODES.teamLead, PROJECT_ROLE_CODES.projectManager, PROJECT_ROLE_CODES.engineer]
     : [PROJECT_ROLE_CODES.teamLead]
-  // 渗透测试工程师只服务渗透专项指派（project.implementation.plan + 专项卡片），
-  // 没有该权限的账号不额外请求这一角色的目录，避免无谓的候选查询。
-  if (canPlanImplementation.value) roles.push(PROJECT_ROLE_CODES.penetrationEngineer)
   const ticket = personnelScope.begin(`PERSONNEL:${roles.join('+')}`)
   personnelLoading.value = true
   personnelError.value = ''
@@ -1323,14 +1320,9 @@ const engineerSelection = computed({
   set: (values) => { operationForm.value.engineerIDs = values.join(',') },
 })
 const engineerOptions = computed(() => roleOptions(PROJECT_ROLE_CODES.engineer, engineerSelection.value))
-// 渗透专项卡片与任务分配表单是两处独立指派：这里提交的是专项计划的 engineer_ids。
-// 后端按「实施工程师 ∪ 渗透测试工程师」合并校验角色，候选因此取两个角色目录的并集，
-// 再按 PENETRATION_TEST 能力过滤——只认单一角色会出现“后端放行、页面选不到”。
+// 专项计划按有效能力档案提供候选，任务分配继续按岗位目录校验。
 const penetrationEngineerOptions = computed(() => penetrationEngineerCandidates({
-  personnelByRole: personnelByRole.value,
   capabilities: capabilities.value,
-  selectedIDs: serviceItems.value.flatMap((item) => item.penetration_work_package?.engineer_ids || []),
-  resolveName: personFallbackName,
 }))
 // 工程师使用与团队负责人、项目经理一致的下拉样式：展开后逐项勾选，
 // 不要求用户按住 ⌘/Ctrl 做加选，选中结果仍写回逗号分隔的 ID 列表。
@@ -1997,6 +1989,7 @@ const referencedPersonnelIDs = computed(() => {
     push(item.team_lead_id)
     push(item.project_manager_id)
     for (const id of item.engineer_ids || []) push(id)
+    for (const id of item.penetration_work_package?.engineer_ids || []) push(id)
   }
   for (const event of deliveryEvents.value) {
     push(event.actor_user_id)
@@ -4693,7 +4686,7 @@ onBeforeUnmount(() => {
               </tbody></table></div>
             </article>
             <section v-if="detailTab === 'plan' && detailItems.some(isEmbeddedPenetrationItem)" class="pm-detail-penetration-list">
-              <PenetrationWorkPackageCard v-for="item in detailItems.filter(isEmbeddedPenetrationItem)" :key="item.id" :item="item" :session="session" :engineer-options="penetrationEngineerOptions" compact @updated="updatePenetrationPackage" @notify="notifyFromPenetration" />
+              <PenetrationWorkPackageCard v-for="item in detailItems.filter(isEmbeddedPenetrationItem)" :key="item.id" :item="item" :session="session" :engineer-options="penetrationEngineerOptions" :resolve-engineer-name="personFallbackName" compact @updated="updatePenetrationPackage" @notify="notifyFromPenetration" />
             </section>
             <article v-if="detailTab === 'report'" class="pm-table-panel">
               <header><div><p class="pm-panel-kicker">报告</p><h2>服务项报告进度</h2></div><span>{{ detailItems.filter((item) => item.report_status).length }} 项进入报告阶段</span></header>
@@ -4882,7 +4875,7 @@ onBeforeUnmount(() => {
               :disabled="saving || fieldSyncing"
               @click="returnSelectedFieldToPreparation"
             >退回实施准备</button>
-            <PenetrationWorkPackageCard v-if="selectedServiceItem && isEmbeddedPenetrationItem(selectedServiceItem)" :item="selectedServiceItem" :session="session" :engineer-options="penetrationEngineerOptions" @updated="updatePenetrationPackage" @notify="notifyFromPenetration" />
+            <PenetrationWorkPackageCard v-if="selectedServiceItem && isEmbeddedPenetrationItem(selectedServiceItem)" :item="selectedServiceItem" :session="session" :engineer-options="penetrationEngineerOptions" :resolve-engineer-name="personFallbackName" @updated="updatePenetrationPackage" @notify="notifyFromPenetration" />
             <button v-if="selectedServiceItem && selectedServiceItem.status === '实施准备中' && canExecuteField" class="pm-button primary" :disabled="saving" @click="runOperation('field-start')">进入实施中</button>
             <div v-if="selectedServiceItem && selectedServiceItem.status === '实施中' && canExecuteField" class="pm-field-workflow">
               <section class="pm-field-step pm-field-checkin">
@@ -5112,7 +5105,7 @@ onBeforeUnmount(() => {
                     </template>
                   </div>
                 </section>
-            <PenetrationWorkPackageCard v-if="activeSection !== 'allocation' && selectedServiceItem && isEmbeddedPenetrationItem(selectedServiceItem)" :item="selectedServiceItem" :session="session" :engineer-options="penetrationEngineerOptions" :auto-ensure="activeSection === 'planning'" @updated="updatePenetrationPackage" @notify="notifyFromPenetration" />
+            <PenetrationWorkPackageCard v-if="activeSection !== 'allocation' && selectedServiceItem && isEmbeddedPenetrationItem(selectedServiceItem)" :item="selectedServiceItem" :session="session" :engineer-options="penetrationEngineerOptions" :resolve-engineer-name="personFallbackName" :auto-ensure="activeSection === 'planning'" @updated="updatePenetrationPackage" @notify="notifyFromPenetration" />
             <div v-if="activeSection === 'allocation' && selectedServiceItems.length" class="pm-panel-actions">
               <button v-if="canManageDecomposition" type="button" class="pm-button" :disabled="saving" @click="returnSelectedToDecomposition()">退回拆解确认</button>
               <button v-if="canRevokeExecution" type="button" class="pm-button" :disabled="saving" @click="revokeSelectedAssignment('execution')">撤销执行团队</button>

@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import { filterSearchableOptions } from './components/searchableSelect.js'
 import {
   PROJECT_ROLE_CODES,
   capabilityCodeKey,
@@ -15,7 +16,6 @@ import {
   monitoringSlaLabel,
   monitoringStatusBuckets,
   multiSummary,
-  penetrationCapableUserIDs,
   penetrationEngineerCandidates,
   planEquipmentFor,
   planImplementerUserIDs,
@@ -297,36 +297,24 @@ test('项目角色码与拆解调整表单工厂保持稳定契约', () => {
   assert.equal(form.items[0].testMode, 'STANDARD')
 })
 
-test('渗透工作包候选取实施工程师 ∪ 渗透测试工程师，同人去重并保留已保存指派', () => {
-  const personnelByRole = {
-    [PROJECT_ROLE_CODES.engineer]: [
-      { id: 'u1', name: '实施甲', description: 'RES-1 · ENV_SAMPLING' },
-      { id: 'u2', name: '实施乙', description: 'RES-2 · ENV_SAMPLING' },
-    ],
-    [PROJECT_ROLE_CODES.penetrationEngineer]: [
-      { id: 'u3', name: '渗透丙', description: 'RES-3 · PENETRATION_TEST' },
-      { id: 'u1', name: '实施甲', description: 'RES-1 · ENV_SAMPLING' },
-    ],
+test('专项指派使用有效人员能力档案，即使没有角色候选也能按姓名查询', () => {
+  const activePerson = {
+    resource_type: 'PERSON', status: 'ACTIVE', identity_status: 'ACTIVE',
+    codes: [' penetration_test '],
   }
   const capabilities = [
-    { resource_type: 'PERSON', user_id: 'u1', resource_id: 'RES-1', codes: ['PENETRATION_TEST'] },
-    { resource_type: 'PERSON', user_id: 'u2', resource_id: 'RES-2', codes: ['ENV_SAMPLING'] },
-    // 能力码来自档案，大小写不敏感；设备能力不能充当人员能力。
-    { resource_type: 'PERSON', user_id: 'u3', resource_id: 'RES-3', codes: ['penetration_test'] },
-    { resource_type: 'EQUIPMENT', user_id: 'u4', resource_id: 'RES-4', codes: ['PENETRATION_TEST'] },
+    { ...activePerson, user_id: 'u1', resource_id: 'RES-1', resource_name: '专项甲', valid_until: '2020-01-01' },
+    { ...activePerson, user_id: 'u1', resource_id: 'RES-2', resource_name: '专项甲' },
+    { ...activePerson, user_id: 'u2', resource_id: 'RES-3', status: 'DISABLED' },
+    { ...activePerson, user_id: 'u3', resource_id: 'RES-4', identity_status: 'MISSING' },
+    { ...activePerson, user_id: 'u4', resource_id: 'RES-5', codes: ['CISP'] },
+    { ...activePerson, resource_id: 'RES-6', identity_status: 'UNLINKED' },
+    { ...activePerson, user_id: 'u5', resource_id: 'RES-7', resource_type: 'EQUIPMENT' },
   ]
-  const resolveName = (id) => `解析中 ${id}`
-  // 只具备渗透测试工程师角色的人（u3）必须出现在候选里，这正是本次修复的缺口。
-  const options = penetrationEngineerCandidates({ personnelByRole, capabilities, selectedIDs: ['u9'], resolveName })
-  assert.deepEqual(options.map((option) => option.id), ['u1', 'u3', 'u9'])
-  assert.equal(options[0].name, '实施甲')
-  assert.equal(options[1].name, '渗透丙')
-  assert.equal(options[2].name, '解析中 u9')
-  // 已保存但能力档案里没有 PENETRATION_TEST 的指派不能被静默清空。
-  const kept = penetrationEngineerCandidates({ personnelByRole, capabilities, selectedIDs: ['u2'], resolveName })
-  assert.deepEqual(kept.map((option) => option.id), ['u1', 'u2', 'u3'])
-  // 空输入不制造候选，也不抛错。
-  assert.deepEqual(penetrationEngineerCandidates({}), [])
+  const options = penetrationEngineerCandidates({ capabilities })
+  assert.deepEqual(options.map(({ id, name }) => [id, name]), [['u1', '专项甲']])
+  assert.match(options[0].description, /RES-1.*PENETRATION_TEST/i)
+  assert.deepEqual(filterSearchableOptions(options, 'RES-2'), [options[0]])
+  assert.deepEqual(filterSearchableOptions(options, 'RES-3'), [])
   assert.deepEqual(penetrationEngineerCandidates(), [])
-  assert.deepEqual(penetrationCapableUserIDs([]), new Set())
 })
