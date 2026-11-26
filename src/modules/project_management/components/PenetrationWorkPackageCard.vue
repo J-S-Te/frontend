@@ -18,6 +18,7 @@ const props = defineProps({
   item: { type: Object, required: true },
   session: { type: Object, default: () => ({}) },
   engineerOptions: { type: Array, default: () => [] },
+  resolveEngineerName: { type: Function, default: () => '历史指派人员' },
   autoEnsure: { type: Boolean, default: false },
   compact: { type: Boolean, default: false },
 })
@@ -34,6 +35,15 @@ const retryCommands = new Map()
 const decision = ref({ status: 'REQUIRED', customerContact: '', communicatedAt: '', summary: '', changeReason: '' })
 const plan = ref({ plannedStart: '', plannedEnd: '', engineerIDs: [], authDocNo: '', authStart: '', authEnd: '', authScope: '', testScope: '', testWindow: '', emergencyContact: '', rollbackPlan: '' })
 const cancellation = ref({ reason: '', customerContact: '', communicatedAt: '', summary: '' })
+
+const engineerSelectOptions = computed(() => {
+  const current = new Set(props.engineerOptions.map((option) => option.id))
+  // 保留当前专项的历史指派以便查看或移除。
+  const historical = (workPackage.value?.engineer_ids || [])
+    .filter((id) => plan.value.engineerIDs.includes(id) && !current.has(id))
+    .map((id) => ({ id, name: props.resolveEngineerName(id), description: '历史指派，当前资质不可用' }))
+  return [...props.engineerOptions, ...historical]
+})
 
 const permissionSet = computed(() => new Set(Array.isArray(props.session?.permissions) ? props.session.permissions : []))
 const currentUserID = computed(() => String(props.session?.user_id || ''))
@@ -283,7 +293,13 @@ watch(() => [props.item?.id, props.item?.penetration_work_package || null], ([it
         <div v-if="canManage && ['NOT_STARTED', 'CANCELLED'].includes(workPackage.execution_status)" class="pen-form">
           <label><span>计划开始 *</span><input v-model="plan.plannedStart" type="datetime-local" /></label>
           <label><span>计划结束 *</span><input v-model="plan.plannedEnd" type="datetime-local" /></label>
-          <div class="pen-field wide"><span>渗透测试工程师 *</span><SearchableSelect v-model="plan.engineerIDs" :options="engineerOptions" value-key="id" label-key="name" description-key="description" multiple placeholder="选择实施工程师或渗透测试工程师（需具备 PENETRATION_TEST 能力）" search-placeholder="搜索实施工程师或渗透测试工程师" /></div>
+          <div class="pen-field wide">
+            <span>渗透测试工程师 *</span>
+            <SearchableSelect v-model="plan.engineerIDs" :options="engineerSelectOptions" value-key="id"
+              label-key="name" description-key="description" multiple aria-label="选择渗透测试工程师"
+              placeholder="选择具备 PENETRATION_TEST 能力的人员" search-placeholder="搜索姓名、资质编号或能力编码"
+              empty-text="没有匹配的有效渗透测试人员" />
+          </div>
           <label><span>授权书编号 *</span><input v-model.trim="plan.authDocNo"  maxlength="128"/></label>
           <label><span>授权生效 *</span><input v-model="plan.authStart" type="datetime-local" /></label>
           <label><span>授权截止 *</span><input v-model="plan.authEnd" type="datetime-local" /></label>

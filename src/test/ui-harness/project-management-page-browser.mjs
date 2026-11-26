@@ -29,6 +29,7 @@ const cases = [
   { key: 'allocation', section: 'allocation' },
   { key: 'inbox', section: 'inbox' },
   { key: 'planning', section: 'planning' },
+  { key: 'penetration-personnel', section: 'implementation' },
   { key: 'preparation', section: 'preparation' },
   { key: 'qualifications', section: 'qualifications' },
   { key: 'equipment', section: 'equipment' },
@@ -101,6 +102,7 @@ const fieldReturnReason = '现场条件变化，需重新核验设备'
 const PEOPLE = {
   'u-lead-1': '李伟', 'u-lead-2': '周敏', 'u-pm-1': '张磊', 'u-pm-2': '王明', 'u-pm-3': '李娜',
   'u-eng-1': '陈静', 'u-eng-2': '赵磊', 'u-eng-3': '孙悦', 'u-eng-4': '刘洋', 'u-eng-5': '吴倩',
+  'u-legacy-pen': '历史专项人员',
   'u-tech-1': '郑昊',
 }
 const session = {
@@ -419,11 +421,15 @@ function jsonResponse(value) {
 }
 
 // 用途：为项目页面夹具提供隔离的 API 数据。
-// 参数：pathname 和 search 为请求路径及筛选，长文案与退回标识为独立夹具场景。
+// 参数：pathname 和 search 为请求路径及筛选，其余参数标记独立夹具场景。
 // 返回值：匹配的模拟响应，未覆盖的只读路径返回空集合。
-function projectFixture(pathname, search, { longDecomposition, fieldReturned }) {
+function projectFixture(pathname, search, { longDecomposition, fieldReturned, penetrationPersonnel }) {
   const path = pathname.slice('/project_management/api/v1'.length)
-  if (path === '/auth/me') return session
+  if (path === '/auth/me') {
+    if (!penetrationPersonnel) return session
+    return { ...session, roles: ['project_manager'],
+      permissions: session.permissions.filter((permission) => permission !== 'project.execution.assign') }
+  }
   if (path === '/navigation') return {
     roles: session.roles,
     sections: ['dashboard', 'monitoring', 'notifications', 'projects', 'decomposition', 'allocation', 'inbox', 'planning', 'preparation', 'qualifications', 'equipment', 'assignments', 'methods', 'implementation', 'exceptions', 'standards', 'reports', 'split-rules', 'configuration-center', 'capability-codes', 'warning-rules', 'automations', 'permissions', 'sla'],
@@ -444,10 +450,19 @@ function projectFixture(pathname, search, { longDecomposition, fieldReturned }) 
     return { items: rows, total: rows.length, page: 1, page_size: rows.length, truncated: false }
   }
   if (path === '/service-items') {
-    const items = longDecomposition ? longDecompositionItems : serviceItems.map(item =>
-      fieldReturned && item.id === fieldReturnItemID
+    const items = longDecomposition ? longDecompositionItems : serviceItems.map((item) => {
+      if (item.id !== fieldReturnItemID) return item
+      if (penetrationPersonnel) return {
+        ...item, project_manager_id: session.user_id,
+        penetration_work_package: {
+          decision_status: 'REQUIRED', execution_status: 'NOT_STARTED', version: 1,
+          engineer_ids: ['u-legacy-pen'],
+        },
+      }
+      return fieldReturned
         ? { ...item, status: '实施准备中', preparation_confirmed: false, version: item.version + 1 }
-        : item)
+        : item
+    })
     return { items, total: items.length, page: 1, page_size: items.length, truncated: false }
   }
   // 退回事件可被最近事件窗口淘汰，实施准备队列仍须由服务项状态恢复。
@@ -467,7 +482,11 @@ function projectFixture(pathname, search, { longDecomposition, fieldReturned }) 
   if (path === '/split-policy') return splitPolicy
   if (path === '/split-overrides') return splitOverrides
   if (path === '/detection-categories') return { items: detectionCategories, total: detectionCategories.length }
-  if (path === '/capabilities') return capabilities
+  if (path === '/capabilities') return penetrationPersonnel ? [...capabilities, {
+    id: 'CAP-PEN-FIXTURE', resource_type: 'PERSON', resource_id: 'RES-PEN-FIXTURE',
+    user_id: 'u-pen-fixture', resource_name: '合格专项工程师', codes: ['PENETRATION_TEST'],
+    status: 'ACTIVE', identity_status: 'ACTIVE',
+  }] : capabilities
   if (path === '/equipment') return { items: capabilities.filter((item) => item.resource_type === 'EQUIPMENT'), total: 3, page: 1, page_size: 20 }
   if (path === '/personnel') return { items: personnel, total: personnel.length, page: 1, page_size: personnel.length }
   if (path === '/qualified-personnel') return { items: personnel.filter((person) => person.role_code !== 'team_lead').map((person) => ({
@@ -561,6 +580,30 @@ async function exerciseFieldReturn(page) {
   await page.getByRole('heading', { name: '实施准备', exact: true }).waitFor({ timeout: 5000 })
   await card().waitFor({ timeout: 5000 })
 }
+// 用途：在专项卡片按姓名和资质编号搜索目录中有能力但无岗位候选的合成人员。
+// 参数：page 为隔离项目页面。
+// 返回值：操作完成；搜索、选择或筛选断言失败时抛错。
+async function exercisePenetrationPersonnel(page) {
+  await page.locator('.pm-picker-card').filter({ hasText: fieldReturnItemID }).click({ timeout: 5000 })
+  const selector = page.getByRole('combobox', { name: '选择渗透测试工程师' })
+  await selector.click({ timeout: 5000 })
+  const search = page.getByRole('searchbox', { name: '搜索姓名、资质编号或能力编码' })
+  const qualified = page.getByRole('option', { name: /合格专项工程师/ })
+  await search.fill('合格专项')
+  await qualified.waitFor({ timeout: 5000 })
+  await search.fill('RES-PEN-FIXTURE')
+  await qualified.click()
+  if (await qualified.getAttribute('aria-selected') !== 'true') throw new Error('能力合格的人员未正确选中')
+  await search.fill('陈静')
+  await page.getByText('没有匹配的有效渗透测试人员', { exact: true }).waitFor({ timeout: 5000 })
+  await search.press('Escape')
+  await page.getByRole('button', { name: '移除 历史专项人员' }).click({ timeout: 5000 })
+  await selector.click()
+  await search.fill('历史专项人员')
+  await page.getByText('没有匹配的有效渗透测试人员', { exact: true }).waitFor({ timeout: 5000 })
+  await search.press('Escape')
+}
+
 try {
   for (const width of widthList) {
     for (const theme of themes) {
@@ -569,6 +612,7 @@ try {
         const errors = []
         const longDecomposition = item.key === 'decomposition-long-text'
         const fieldReturnCase = item.key === 'implementation-field-return'
+        const penetrationPersonnel = item.key === 'penetration-personnel'
         let fieldReturned = false
         let fieldReturnCalls = 0
         page.on('pageerror', error => errors.push(error.message))
@@ -593,7 +637,7 @@ try {
             return route.fulfill(jsonResponse({ status: '实施准备中' }))
           }
           const data = url.pathname.startsWith('/project_management/api/v1')
-            ? projectFixture(url.pathname, url.searchParams, { longDecomposition, fieldReturned })
+            ? projectFixture(url.pathname, url.searchParams, { longDecomposition, fieldReturned, penetrationPersonnel })
             : platformFixture(url.pathname, url.searchParams)
           return route.fulfill(jsonResponse(data))
         })
@@ -646,6 +690,7 @@ try {
           await exerciseFieldReturn(page)
           if (fieldReturnCalls !== 1) errors.push('确认退回应当只发出一次业务请求')
         }
+        if (penetrationPersonnel) await exercisePenetrationPersonnel(page)
         const metrics = await page.evaluate(() => ({
           scrollWidth: document.documentElement.scrollWidth,
           clientWidth: document.documentElement.clientWidth,
