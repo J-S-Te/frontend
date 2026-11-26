@@ -508,7 +508,9 @@ watch(() => props.section, load, { immediate: true })
       <td>{{ item.receipt_id }}</td>
       <td>{{ item.kind }}</td>
       <td>{{ item.amount }}</td>
-      <td>{{ item.reason }}</td>
+      <td>{{ item.reason }}<br>
+        <small>申请人：{{ item.applicant_name || "姓名未记录" }}</small>
+      </td>
       <td>{{ item.status }}</td>
       <td>{{ item.resolution }}</td>
       <td>{{ item.refund_reference || '—' }}</td>

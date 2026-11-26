@@ -93,7 +93,7 @@ const task = {
   node_code: 'TECHNICAL_DIRECTOR', status: 'PENDING', assignee: 'actor-demo', urgency: 'NORMAL',
   allowed_actions: ['APPROVE', 'RETURN', 'TRANSFER'], created_at: '2026-11-10T09:00:00+08:00',
   pending_since: '2026-11-10T09:00:00+08:00',
-  snapshot: { version: 3, scope_limited: false, items: claim.items },
+  snapshot: { version: 3, scope_limited: false, items: claim.items, applicant_name: '合成报销申请人' },
 }
 const claimRow = { id: 'claim-1', claim_no: 'BX-2026-0001', title: '北京项目差旅', status: 'IN_APPROVAL',
   version: 3, claim_type: 'TRAVEL', payable_minor: '128800', applicant_subject_id: 'actor-demo',
@@ -394,6 +394,9 @@ try {
           const path = new URL(route.request().url()).pathname
           if (path === '/') return route.fulfill({ contentType: 'text/html', body:
             '<style>html,body{margin:0;background:#f1f5f9}' + css + scopedCss + '</style><div id="app"></div>' })
+          if (path === '/api/v1/notifications/inbox/stream') {
+            return route.fulfill({ contentType: 'text/event-stream', body: ': 隔离通知\n\n' })
+          }
           if (path === '/api/v1/auth/me') return route.fulfill({ json: {
             tenant_id: 'tenant-demo', user_id: 'actor-demo', account: { name: 'fixture.reader' },
           } })
@@ -430,13 +433,19 @@ try {
           catch (error) { errors.push(error.message) }
         }
         // 桌面侧栏常驻才做折叠交互；窄屏侧栏在抽屉里，截图保留默认态。
-        if (item.click && width >= 821) {
+        if (item.click && (width >= 821 || item.key === 'approval-detail')) {
           const button = page.getByRole('button', { name: item.click }).first()
           if (await button.count()) { await button.click(); await page.waitForTimeout(700) }
         }
         if (item.hideAfterClick && width >= 821) {
           const hidden = await page.getByRole('button', { name: item.hideAfterClick, exact: true }).count()
           if (hidden) errors.push('折叠后仍渲染入口：' + item.hideAfterClick)
+        }
+        if (item.key === 'approvals' || item.key === 'approval-detail') {
+          const applicant = item.key === 'approval-detail'
+            ? page.locator('.expense-detail-meta').filter({ hasText: '申请人 合成报销申请人' })
+            : page.getByText('合成报销申请人')
+          if (!await applicant.first().isVisible()) errors.push('审批页面没有显示快照中保存的申请人姓名')
         }
         const metrics = await page.evaluate(() => ({
           scrollWidth: document.documentElement.scrollWidth,

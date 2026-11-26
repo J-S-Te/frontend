@@ -939,8 +939,12 @@ async function confirmReasonDialog() {
   reasonDialogError.value = ''
   if (onSubmit) await onSubmit(reason)
 }
+// 用途：展示售前申请人姓名，兼容仅有申请人标识的历史记录。
+// 参数：item 为授权范围内的售前申请。
+// 返回值：权威姓名、已精确匹配的目录姓名或缺名提示。
 function applicantLabel(item) {
-  return String(item?.applicant_name || '').trim() || ownerLabel(item?.applicant_id)
+  return String(item?.applicant_name || '').trim()
+    || ownerDirectoryNames.value[item?.applicant_id] || '姓名未记录'
 }
 function presalePersonOptionLabel(item) {
   return String(item?.label || '').trim() || ownerLabel(item?.value)
@@ -4579,7 +4583,9 @@ onMounted(async () => {
     <div v-if="selectedPresale" class="console-modal-backdrop" :class="{ nested: !!selectedOpportunity }" role="presentation" @click.self="closePresale">
       <article class="console-detail-modal crm-presale-console-detail" role="dialog" aria-modal="true" aria-label="售前申请详情">
         <header>
-          <div class="crm-presale-detail-heading"><p class="console-modal-eyebrow">售前申请详情</p><div><h2 :title="selectedPresale.opportunity_name || selectedPresale.request.request_no">{{ selectedPresale.opportunity_name || selectedPresale.request.request_no }}</h2><span class="crm-presale-status-badge" :data-status="selectedPresale.request.status">{{ requestStatusText(selectedPresale.request.status) }}</span></div><small>申请编号 {{ selectedPresale.request.request_no }} · 关联商机 {{ selectedPresale.request.opportunity_no }} · {{ selectedPresale.overdue ? '当前已逾期' : '当前未逾期' }}</small></div>
+          <div class="crm-presale-detail-heading"><p class="console-modal-eyebrow">售前申请详情</p><div><h2 :title="selectedPresale.opportunity_name || selectedPresale.request.request_no">{{ selectedPresale.opportunity_name || selectedPresale.request.request_no }}</h2><span class="crm-presale-status-badge" :data-status="selectedPresale.request.status">{{ requestStatusText(selectedPresale.request.status) }}</span></div><small>申请编号 {{ selectedPresale.request.request_no }} · 关联商机 {{ selectedPresale.request.opportunity_no }} · {{ selectedPresale.overdue ? '当前已逾期' : '当前未逾期' }}</small>
+            <small>申请人：{{ applicantLabel(selectedPresale.request) }}</small>
+          </div>
           <button class="console-modal-close" type="button" aria-label="关闭售前申请详情" @click="closePresale"><ConsoleIcon name="close" /></button>
         </header>
         <div class="console-detail-grid crm-presale-summary">

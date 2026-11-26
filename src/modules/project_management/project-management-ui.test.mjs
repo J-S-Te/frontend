@@ -862,7 +862,7 @@ test('团队负责人、项目经理、工程师显示姓名而不是平台 ID',
   assert.doesNotMatch(source, /person\.display_name \|\| person\.user_id/)
   // 列表与详情一律走姓名渲染：每个 owner 值都必须是姓名渲染（或本来就是姓名的字段），
   // 不得再出现 owner: xxx_id 这种直接渲染平台 ID 的写法。
-  const ownerValues = [...source.matchAll(/owner: (personLabel\(|personListLabel\(|p\.manager|c\.resource_type)/g)]
+  const ownerValues = [...source.matchAll(/owner: (personLabel\(|personListLabel\(|eventApplicantLabel\(|p\.manager|c\.resource_type)/g)]
   const ownerTotal = [...source.matchAll(/owner: /g)]
   assert.equal(ownerValues.length, ownerTotal.length, 'every owner value must render a person name or a name field')
   assert.match(source, /\{ label: '团队负责人', value: personLabel\(record\.team_lead_id, '待分配'\) \}/)

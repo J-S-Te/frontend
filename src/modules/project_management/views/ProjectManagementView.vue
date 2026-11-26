@@ -11,7 +11,7 @@ import PaginationBar from '@/modules/shared/components/PaginationBar.vue'
 import { computed, defineAsyncComponent, defineComponent, h, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import { formatUserError } from '../../shared/utils/userError.js'
 import { openNotificationTarget } from '../../shared/utils/notificationNavigation.js'
-import { approvalTaskTarget, approvalStatusLabel, approvalTypeLabel, projectApprovalTarget } from '../approvalTasks.js'
+import { approvalApplicantLabel, approvalTaskTarget, approvalStatusLabel, approvalTypeLabel, projectApprovalTarget } from '../approvalTasks.js'
 import { useProjectApprovalDeepLink } from '../composables/useProjectApprovalDeepLink.js'
 import { createRequestScope } from '../../platform/shared/composables/requestScope.js'
 import { useConfirmDialog } from '../../shared/composables/useConfirmDialog.js'
@@ -1551,7 +1551,8 @@ const pendingDeviations = computed(() => {
   if (task?.type !== 'FIELD_DEVIATION' || task.status !== 'PENDING') return rows
   return [...rows.filter((event) => event.payload?.deviation_id !== task.id), {
     id: task.id, type: 'DEVIATION_REPORTED', service_item_id: task.service_item_id,
-    actor_user_id: task.requester_user_id, created_at: task.created_at,
+    actor_user_id: task.requester_user_id, requester_display_name: task.requester_display_name,
+    created_at: task.created_at,
     payload: { deviation_id: task.id, description: task.reason, severity: task.severity },
   }]
 })
@@ -1594,6 +1595,12 @@ function personLabel(userID, fallback = '待指派') {
   const id = String(userID || '').trim()
   if (!id) return fallback
   return personnelNames.names.value.get(id) || '—'
+}
+// 用途：展示已授权事件的真实申请人，避免把负责人姓名或内部编号当作申请人。
+// 参数：event 为业务事件，userID 为可选的原申请人编号（默认事件操作者）。
+// 返回值：来自审批回读或人员目录的姓名，缺失时使用明确提示。
+function eventApplicantLabel(event, userID = event?.actor_user_id) {
+  return approvalApplicantLabel(event?.requester_display_name || personnelNames.names.value.get(userID), userID)
 }
 function personListLabel(ids, fallback = '未指派') {
   const list = (Array.isArray(ids) ? ids : []).map((id) => String(id || '').trim()).filter(Boolean)
@@ -1869,7 +1876,7 @@ const operationRows = computed(() => ({
   qualifications: capabilities.value.map((c) => ({ id: c.resource_id, name: c.resource_name, detail: c.codes, owner: c.resource_type === 'PERSON' ? '人员资质' : '设备能力', state: capabilityStatusLabel(c), warning: c.status_reason || '', progress: capabilityEffectiveStatus(c) === 'ACTIVE' ? 100 : 0, due: c.resource_type === 'PERSON' ? '不限制' : formatBusinessDate(c.valid_until) || '长期' })),
   assignments: assignmentItems.value.map((s) => ({ id: s.id, name: `${s.id} · ${s.site}`, detail: `${s.engineer_ids?.length || 0} 人 / ${(s.implementation_plan?.equipment || []).length} 台设备`, owner: personLabel(s.project_manager_id), state: s.conflict_status === 'CONFLICT' ? '排期冲突' : '待校验', progress: 30, due: '待排期' })),
   methods: methodItems.value.map((s) => ({ id: s.id, name: `${s.id} · ${s.category}`, detail: `${s.site} / ${s.system || '—'}`, owner: personLabel(s.project_manager_id), state: reportTechReviewLabel(s.tech_review_status), progress: s.tech_review_status === 'PENDING' ? 50 : 0, due: formatBusinessDate(s.planned_end) || '待排期', review: s.tech_review_status, comment: s.tech_review_comment, reviewedAt: s.tech_reviewed_at })),
-  exceptions: pendingDeviations.value.map((e) => ({ id: e.id, name: `${e.payload?.deviation_id} · ${e.service_item_id}`, detail: e.payload?.description || '现场偏离', owner: personLabel(e.actor_user_id, '—'), state: '待评审', progress: 0, due: formatDateTime(e.created_at) })),
+  exceptions: pendingDeviations.value.map((e) => ({ id: e.id, name: `${e.payload?.deviation_id} · ${e.service_item_id}`, detail: e.payload?.description || '现场偏离', owner: eventApplicantLabel(e), state: '待评审', progress: 0, due: formatDateTime(e.created_at) })),
   standards: [],
   reports: reportItems.value.map((item) => { const project = projectByID.value.get(item.project_id); return { id: item.id, name: `${item.id} · ${item.site}`, detail: `${project?.customer || item.project_id} / 报告${reportStatusLabel[item.report_status] || item.report_status}`, owner: personLabel(item.project_manager_id, project?.manager || '待指派'), state: reportStatusLabel[item.report_status] || item.report_status, progress: (reportStatusRank[item.report_status] || 0) * 20, due: item.report_updated_at ? formatBusinessDate(item.report_updated_at) || '待排期' : formatBusinessDate(item.planned_end) || '待排期', report_status: item.report_status } }),
 }[activeSection.value] || []))
@@ -1991,7 +1998,10 @@ const referencedPersonnelIDs = computed(() => {
     push(item.project_manager_id)
     for (const id of item.engineer_ids || []) push(id)
   }
-  for (const event of deliveryEvents.value) push(event.actor_user_id)
+  for (const event of deliveryEvents.value) {
+    push(event.actor_user_id)
+    if (event.type === 'SPECIAL_METHOD_REVIEWED') push(event.payload?.review_requester_user_id)
+  }
   for (const row of monitoringRows.value) for (const id of row.project_manager_ids || []) push(id)
   for (const event of monitoringSnapshot.value.recent_events || []) push(event.actor_user_id)
   return ids
@@ -2038,6 +2048,8 @@ const capabilityTabs = computed(() => [
 
 // 特殊方法复核（PG-RES-08）：待复核表 + 复核历史表（历史来自服务端事件流）。
 const methodHistory = computed(() => deliveryEvents.value.filter((event) => event.type === 'SPECIAL_METHOD_REVIEWED'))
+const selectedMethodRequest = computed(() => deliveryEvents.value.find((event) =>
+  event.type === 'SPECIAL_METHOD_REVIEW_REQUESTED' && event.service_item_id === selectedServiceItem.value?.id))
 
 // 异常评审（PG-IMP-06）：按偏离编号串联上报 → 评审 → 结论的审批流节点。
 const selectedDeviation = computed(() => {
@@ -2055,7 +2067,7 @@ const exceptionFlow = computed(() => {
   const decision = reviewed?.payload?.decision
   const decisionLabel = { RELEASE: '放行 · 继续实施', RETEST: '重测 · 退回实施前', TERMINATE: '终止服务项' }[decision] || '待结论'
   return [
-    { title: personLabel(deviation.actor_user_id, '现场工程师'), when: `${formatDateTime(deviation.created_at)} · 上报`, note: `偏离编号 ${deviation.payload?.deviation_id || '—'} · ${deviation.payload?.severity || '未分级'}`, state: 'done' },
+    { title: eventApplicantLabel(deviation), when: `${formatDateTime(deviation.created_at)} · 上报`, note: `偏离编号 ${deviation.payload?.deviation_id || '—'} · ${deviation.payload?.severity || '未分级'}`, state: 'done' },
     { title: personLabel(item?.team_lead_id, '团队负责人'), when: reviewed ? formatDateTime(reviewed.created_at) : '评审中', note: reviewed ? decisionLabel : '放行 / 重测 / 终止', state: reviewed ? 'done' : 'doing' },
     { title: '技术总监', when: decision === 'TERMINATE' ? '需复核' : '按需介入', note: decision === 'TERMINATE' ? '终止决策需技术总监复核' : '重大异常升级复核', state: decision === 'TERMINATE' ? 'done' : 'idle' },
     { title: '结论归档', when: decision ? '已归档' : '待定', note: decisionLabel, state: decision ? 'done' : 'idle' },
@@ -4397,7 +4409,7 @@ onBeforeUnmount(() => {
           <template v-if="focusedApprovalTask">
             <h2>{{ approvalTypeLabel(focusedApprovalTask.type) }} · {{ approvalStatusLabel(focusedApprovalTask.status) }}</h2>
             <p>申请 {{ focusedApprovalTask.id }} · 项目 {{ focusedApprovalTask.project_id }}<span v-if="focusedApprovalTask.service_item_id"> · 服务项 {{ focusedApprovalTask.service_item_id }}</span></p>
-            <p>申请人 {{ focusedApprovalTask.requester_user_id || '未提供' }} · {{ formatDateTime(focusedApprovalTask.created_at) }}</p>
+            <p>申请人 {{ approvalApplicantLabel(focusedApprovalTask.requester_display_name, focusedApprovalTask.requester_user_id) }} · {{ formatDateTime(focusedApprovalTask.created_at) }}</p>
             <p>{{ focusedApprovalTask.reason || '未提供申请原因' }}</p>
             <p v-if="focusedApprovalTask.severity">严重度：{{ focusedApprovalTask.severity }}</p>
             <p v-if="focusedApprovalTask.status !== 'PENDING'">处理结果：{{ { RELEASE: '放行', RETEST: '重测', TERMINATE: '终止' }[focusedApprovalTask.decision] || approvalStatusLabel(focusedApprovalTask.status) }} · {{ focusedApprovalTask.decision_comment || '未提供处理意见' }}<span v-if="focusedApprovalTask.decided_at"> · {{ formatDateTime(focusedApprovalTask.decided_at) }}</span></p>
@@ -5118,6 +5130,7 @@ onBeforeUnmount(() => {
               <div v-for="request in pendingRollbackRequests" :key="request.id" class="pm-form-row">
                 <span>{{ request.service_item_id }} · {{ request.payload?.kind === 'FIELD_TO_PREPARATION'
                   ? '现场回退' : '报告返工' }} · {{ request.payload?.reason }}</span>
+                <span class="pm-form-hint">申请人：{{ eventApplicantLabel(request) }}</span>
                 <span class="pm-form-hint">审批归属：技术总监</span>
                 <button v-if="navigation.sections.includes('approvals')" type="button"
                   class="pm-button" :disabled="saving" @click="openApprovalRequest(request.id)">
@@ -5146,7 +5159,7 @@ onBeforeUnmount(() => {
                   <input :value="row.windowEnd" type="date" aria-label="使用时段结束"
                     @input="editPlanPersonnelDate(row, 'windowEnd', $event.target.value)" />
                 </div></td><td><input v-model.trim="row.note" placeholder="例如 备份"  maxlength="500"/></td><td><button type="button" class="pm-link danger" @click="removePlanPersonnel(index)">移除</button></td></tr><tr v-if="!operationForm.personnel.length"><td colspan="6" class="pm-empty-mini">请至少添加一名实施人员</td></tr></tbody></table></div></section><button v-if="canPlanImplementation" class="pm-button primary" :disabled="saving || !!planningBlocked" :title="planningBlocked ? planningBlocked.reason : ''" @click="runOperation('planning')">发布实施计划</button></template>
-              <template v-else-if="activeSection === 'methods'"><div class="pm-review-state"><span>复核状态</span><b class="pm-badge" :class="statusTone(item && reportTechReviewLabel(item.tech_review_status))">{{ item && reportTechReviewLabel(item.tech_review_status) }}</b></div><template v-if="item && ['PENDING', 'REJECTED'].includes(item.tech_review_status)"><label><span>复核意见</span><textarea v-model.trim="operationForm.reviewComment" rows="3" placeholder="填写风险说明或驳回原因" maxlength="1000"></textarea></label><div v-if="canReviewSpecialMethod" class="pm-form-row"><button class="pm-button primary" :disabled="saving" @click="runOperation('special-approve')">通过复核</button><button class="pm-button" :disabled="saving" @click="runOperation('special-reject')">驳回复核</button></div></template><template v-else-if="item && item.tech_review_status === 'APPROVED'"><p class="pm-form-hint">{{ item.tech_review_comment || '已通过复核，可发布实施计划' }}<span v-if="item.tech_reviewed_at"> · {{ formatDateTime(item.tech_reviewed_at) }} · {{ item.tech_reviewed_by }} </span></p></template><template v-else-if="item && item.tech_review_status === 'PENDING'"><p class="pm-form-hint">等待技术总监复核特殊方法。</p></template></template>
+              <template v-else-if="activeSection === 'methods'"><div class="pm-review-state"><span>复核状态</span><b class="pm-badge" :class="statusTone(item && reportTechReviewLabel(item.tech_review_status))">{{ item && reportTechReviewLabel(item.tech_review_status) }}</b></div><p v-if="item?.tech_review_status === 'PENDING' && !focusedApprovalTask" class="pm-form-hint">申请人：{{ eventApplicantLabel(selectedMethodRequest) }}</p><template v-if="item && ['PENDING', 'REJECTED'].includes(item.tech_review_status)"><label><span>复核意见</span><textarea v-model.trim="operationForm.reviewComment" rows="3" placeholder="填写风险说明或驳回原因" maxlength="1000"></textarea></label><div v-if="canReviewSpecialMethod" class="pm-form-row"><button class="pm-button primary" :disabled="saving" @click="runOperation('special-approve')">通过复核</button><button class="pm-button" :disabled="saving" @click="runOperation('special-reject')">驳回复核</button></div></template><template v-else-if="item && item.tech_review_status === 'APPROVED'"><p class="pm-form-hint">{{ item.tech_review_comment || '已通过复核，可发布实施计划' }}<span v-if="item.tech_reviewed_at"> · {{ formatDateTime(item.tech_reviewed_at) }} · {{ item.tech_reviewed_by }} </span></p></template><template v-else-if="item && item.tech_review_status === 'PENDING'"><p class="pm-form-hint">等待技术总监复核特殊方法。</p></template></template>
               <template v-else-if="activeSection === 'preparation'">
                 <section class="pm-plan-resources"><header><div><b>设备清单（选填）</b><small>无需设备的项目可留空；选择设备后仍会校验有效档案、检定有效期、在位状态及占用冲突</small></div><button type="button" class="pm-button" @click="openEquipmentPicker">＋ 添加设备</button></header><div class="pm-table-scroll"><table class="pm-table"><thead><tr><th scope="col">设备</th><th scope="col">能力码</th><th scope="col">检定有效期</th><th scope="col">使用时段</th><th scope="col">备注</th><th scope="col"></th></tr></thead><tbody><tr v-for="(row, index) in operationForm.equipment" :key="row.resourceID"><td>{{ planResourceName(row) }}</td><td><CodePills :codes="planResourceCodes(row)" /></td><td>{{ planResourceValidUntil(row) }}</td><td><div class="pm-plan-window"><input v-model="row.windowStart" type="date" aria-label="使用时段开始" /><span>~</span><input v-model="row.windowEnd" type="date" aria-label="使用时段结束" /></div></td><td><input v-model.trim="row.note" placeholder="例如 备用机"  maxlength="500"/></td><td><button type="button" class="pm-link danger" @click="removePlanEquipment(index)">移除</button></td></tr><tr v-if="!operationForm.equipment.length"><td colspan="6" class="pm-empty-mini">本服务项无需设备时可留空</td></tr></tbody></table></div></section>
                 <section class="pm-travel-arrangement">
@@ -5225,7 +5238,7 @@ onBeforeUnmount(() => {
                 <section v-if="selectedReportCorrectionRequests.length" class="pm-panel pm-approval-panel">
                   <header><div><p class="pm-panel-kicker">报告更正</p><h2>待处理更正申请</h2></div><span>{{ selectedReportCorrectionRequests.length }} 项</span></header>
                   <div v-for="request in selectedReportCorrectionRequests" :key="request.id" class="pm-form pm-report-form">
-                    <p class="pm-form-hint">R{{ Number(request.payload?.old_revision) || 0 }} · {{ request.payload?.reason }} · 申请人：{{ personLabel(request.actor_user_id, '未知') }}</p>
+                    <p class="pm-form-hint">R{{ Number(request.payload?.old_revision) || 0 }} · {{ request.payload?.reason }} · 申请人：{{ eventApplicantLabel(request) }}</p>
                     <p class="pm-form-hint">审批归属：技术总监。请进入审批待办查看申请和处理结果。</p>
                     <button v-if="navigation.sections.includes('approvals')" type="button"
                       class="pm-button" :disabled="saving" @click="openApprovalRequest(request.id)">
@@ -5254,7 +5267,7 @@ onBeforeUnmount(() => {
           </section>
           <section v-if="activeSection === 'methods'" class="pm-table-panel">
             <header><div><p class="pm-panel-kicker">复核历史</p><h2>复核历史</h2></div><span>{{ methodHistory.length }} 条复核记录</span></header>
-            <div class="pm-table-scroll"><table class="pm-table"><thead><tr><th scope="col">服务项</th><th scope="col">结论</th><th scope="col">复核意见</th><th scope="col">复核人</th><th scope="col">复核时间</th></tr></thead><tbody><tr v-for="event in methodHistory" :key="event.id"><td class="mono"><b>{{ event.service_item_id }}</b></td><td><span class="pm-badge" :class="event.payload?.decision === 'APPROVED' ? 'normal' : '风险'">{{ event.payload?.decision === 'APPROVED' ? '通过复核' : '已驳回' }}</span></td><td>{{ event.payload?.comment || '—' }}</td><td>{{ personLabel(event.actor_user_id, '—') }}</td><td>{{ formatDateTime(event.created_at) }}</td></tr><tr v-if="!methodHistory.length"><td colspan="5" class="pm-empty-mini">暂无特殊方法复核记录</td></tr></tbody></table></div>
+            <div class="pm-table-scroll"><table class="pm-table"><thead><tr><th scope="col">服务项</th><th scope="col">结论</th><th scope="col">复核意见</th><th scope="col">申请人</th><th scope="col">复核人</th><th scope="col">复核时间</th></tr></thead><tbody><tr v-for="event in methodHistory" :key="event.id"><td class="mono"><b>{{ event.service_item_id }}</b></td><td><span class="pm-badge" :class="event.payload?.decision === 'APPROVED' ? 'normal' : '风险'">{{ event.payload?.decision === 'APPROVED' ? '通过复核' : '已驳回' }}</span></td><td>{{ event.payload?.comment || '—' }}</td><td>{{ eventApplicantLabel(event, event.payload?.review_requester_user_id || '') }}</td><td>{{ personLabel(event.actor_user_id, '—') }}</td><td>{{ formatDateTime(event.created_at) }}</td></tr><tr v-if="!methodHistory.length"><td colspan="6" class="pm-empty-mini">暂无特殊方法复核记录</td></tr></tbody></table></div>
           </section>
           <section class="pm-table-panel"><div class="pm-table-scroll"><table class="pm-table"><thead><tr><th scope="col">事项 / 项目</th><th scope="col">内容摘要</th><th scope="col">负责人 / 归属</th><th scope="col">状态</th><th scope="col">{{ activeSection === 'allocation' ? '分配进度' : '完成度' }}</th><th scope="col">时限</th><th scope="col"></th></tr></thead><tbody><tr v-for="row in operationRows" :key="row.id"><td><b>{{ operationRowIdentity(row).label }}</b><small v-if="operationRowIdentity(row).code" class="pm-service-code mono">服务项编号：{{ operationRowIdentity(row).code }}</small></td><td><template v-if="Array.isArray(row.detail)"><span v-if="!row.detail.length">—</span><span v-else class="pm-code-pills"><span v-for="code in row.detail" :key="code" class="pm-code-pill">{{ code }}</span></span></template><template v-else>{{ row.detail }}</template><span v-if="row.warning" class="pm-cell-warning">{{ row.warning }}</span></td><td>{{ row.owner }}</td><td><span class="pm-badge-stack"><StatusTag v-if="row.priorState" family="pm" tone="neutral" :label="row.priorState" /><StatusTag family="pm" :tone="statusTone(row.state)" :label="row.state" /></span></td><td><div class="pm-inline-progress"><i :style="{ width: `${row.progress}%` }"></i></div><small>{{ row.progress }}%</small></td><td>{{ row.due }}</td><td class="pm-col-actions"><button class="pm-link" @click="openOperationDetail(row)">查看详情</button></td></tr></tbody></table></div><div v-if="!operationRows.length" class="pm-empty"><ConsoleIcon name="info" /><b>暂无数据</b><span>当前页面尚无待处理事项</span></div></section>
         </template>

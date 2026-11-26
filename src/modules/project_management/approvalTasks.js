@@ -75,6 +75,14 @@ export function approvalStatusLabel(status) {
     WITHDRAWN: '已撤回' }[status] || '状态未知'
 }
 
+// 用途：显示原申请人的已核实姓名，并区分系统发起与缺失姓名的历史记录。
+// 参数：name 为服务端或授权目录返回的姓名，actorID 仅用于识别系统主体。
+// 返回值：用于列表及详情的姓名或明确的历史提示。
+export function approvalApplicantLabel(name, actorID) {
+  const displayName = typeof name === 'string' ? name.trim() : ''
+  return displayName || (String(actorID || '').trim() === 'SYSTEM' ? '系统发起' : '姓名未记录')
+}
+
 // 用途：展示各类申请原业务流程的审批职责。
 // 参数：task 为服务端返回的申请，审批人标识可以为空。
 // 返回值：原业务审批归属说明；未知类型提示核对归属。

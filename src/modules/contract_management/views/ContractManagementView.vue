@@ -3259,7 +3259,11 @@ onBeforeUnmount(() => {
             <div v-if="approvals.length" class="contract-dashboard-todo-list">
               <article v-for="approval in approvals.slice(0, 5)" :key="approval.id" class="contract-dashboard-todo-item">
                 <span class="contract-badge warning"><i></i>待审批</span>
-                <div><strong>{{ approval.type }}</strong><small>任务创建于 {{ approval.submittedAt }} · 当前节点 {{ approval.step }}</small></div>
+                <div>
+                  <strong>{{ approval.type }}</strong>
+                  <small class="ui-record-name" :title="approval.applicant">申请人 {{ approval.applicant }}</small>
+                  <small>任务创建于 {{ approval.submittedAt }} · 当前节点 {{ approval.step }}</small>
+                </div>
                 <button class="contract-text-button" type="button" @click="openApproval(approval)">{{ can('approval.process') ? '处理' : '查看' }}</button>
               </article>
             </div>

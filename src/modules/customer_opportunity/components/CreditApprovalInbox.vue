@@ -42,11 +42,33 @@ const targetMessage = computed(() => {
 })
 // 审批时间按北京口径展示，24 小时制；非法取值保留破折号占位。
 function dateLabel(value) { return value ? (formatBusinessDateTime(value) || '—') : '—' }
-function rememberApplicantNames(users) { for (const user of users || []) { if (user?.user_id) applicantNames.value[user.user_id] = String(user.username || user.account_name || user.display_name || '').trim() || '未命名用户' } }
-function applicantLabel(item) { const id = String(item?.applicant_id || '').trim(); const snapshot = String(item?.applicant_name || '').trim(); return (snapshot && snapshot !== id ? snapshot : '') || applicantNames.value[id] || '未命名用户' }
-async function resolveApplicantNames(applicationItems) {
-  const IDs = [...new Set(applicationItems.map((item) => item?.applicant_id).filter((id) => id && !applicantNames.value[id]))]
-  await Promise.all(IDs.map(async (id) => { try { const result = await listOwnerDirectory({ user_id: id, page: 1, page_size: 1 }); rememberApplicantNames(result?.items || []) } catch { /* 目录不可用时显示通用名称，不向业务用户暴露内部 ID。 */ } }))
+// 用途：优先显示待办服务端已核验的名字，兼容旧版接口的目录结果。
+// 参数：item 为已经过授权过滤的信用待办。
+// 返回值：可显示姓名或缺名提示，不向业务用户暴露内部 ID。
+function applicantLabel(item) {
+  const id = String(item?.applicant_id || '').trim()
+  const name = String(item?.applicant_name || '').trim()
+  return (name !== id ? name : '') || applicantNames.value[id] || '姓名未记录'
+}
+
+// 用途：兼容仅返回申请人标识的旧版接口，异步读取缺名申请的姓名。
+// 参数：applicationItems 为当前待办，sequence 为当前加载代次。
+// 返回值：无；仅将精确身份匹配的姓名写入当前页面。
+async function resolveApplicantNames(applicationItems, sequence) {
+  const missing = applicationItems.filter((item) => {
+    const id = item?.applicant_id
+    const name = String(item?.applicant_name || '').trim()
+    return id && (!name || name === id) && !applicantNames.value[id]
+  })
+  const IDs = [...new Set(missing.map((item) => item.applicant_id))]
+  await Promise.all(IDs.map(async (id) => {
+    try {
+      const result = await listOwnerDirectory({ user_id: id, page: 1, page_size: 1 })
+      const user = result?.items?.find((entry) => entry.user_id === id)
+      const name = String(user?.display_name || user?.username || user?.account_name || '').trim()
+      if (name && sequence === loadSequence) applicantNames.value[id] = name
+    } catch { /* 人员目录失败时保留待办及缺名提示。 */ }
+  }))
 }
 // 用途：读取完整授权待审集合，并隔离通知切换或卸载后的迟到响应。
 // 参数：无；筛选坐标只控制展示，服务端仍按当前会话裁剪待办。
@@ -60,8 +82,9 @@ async function load() {
     // 此接口返回全部授权 PENDING 记录；不以第一页查找结果判断通知目标是否存在。
     const result = await listPendingCustomerCreditApplications()
     const records = Array.isArray(result?.items) ? result.items : Array.isArray(result) ? result : []
-    await resolveApplicantNames(records)
-    if (sequence === loadSequence) items.value = records
+    if (sequence !== loadSequence) return
+    items.value = records
+    void resolveApplicantNames(records, sequence)
   } catch (value) {
     if (sequence === loadSequence) error.value = value?.status === 403
       ? '当前账号无审批权限。' : formatCRMError(value, { fallback: '待审批列表加载失败。' })

@@ -5,6 +5,7 @@ import { parse, compileScript } from '@vue/compiler-sfc'
 import * as Vue from 'vue'
 import { renderToString } from '@vue/server-renderer'
 import { useNativeScopeChange } from './composables/useNativeScopeChange.js'
+import { approvalApplicantLabel } from './approvalTasks.js'
 
 // 用途：编译真实范围审批组件并仅隔离HTTP依赖。
 // 参数：无。
@@ -13,7 +14,7 @@ async function component() {
   const source = await readFile(new URL('./components/NativeScopeChangePanel.vue', import.meta.url), 'utf8')
   const { descriptor } = parse(source)
   const compiled = compileScript(descriptor, { id: 'native-scope-panel', inlineTemplate: true })
-  const bindings = { useNativeScopeChange, getNativeProjectScope: () => {}, requestNativeProjectScope: () => {}, decideNativeProjectScope: () => {}, withdrawNativeProjectScope: () => {} }
+  const bindings = { useNativeScopeChange, approvalApplicantLabel, getNativeProjectScope: () => {}, requestNativeProjectScope: () => {}, decideNativeProjectScope: () => {}, withdrawNativeProjectScope: () => {} }
   const body = compiled.content.replace(/import\s+\{([^}]+)\}\s+from\s+['"]([^'"]+)['"];?/g, (_, names, specifier) => {
     if (specifier === 'vue') for (const entry of names.split(',')) { const [name, alias = name] = entry.trim().split(/\s+as\s+/); bindings[alias] = Vue[name] }
     return ''
@@ -51,4 +52,18 @@ test('真实SFC显示冻结范围与来源行、转义文本，申请人不可�
   const approval = await renderToString(Vue.createSSRApp(panel, { projectId: 'PJ-1', initialState: state }))
   assert.match(approval, /批准并生效新版本/); assert.match(approval, /驳回/)
   assert.doesNotMatch(approval, /提交异人审批/)
+})
+
+test('范围审批以可信姓名展示申请人，历史缺名不渲染身份号', async () => {
+  const panel = await component()
+  const state = { project_id: 'PJ-1', project_version: 3, scope_version: 1, can_approve: true,
+    actor_id: 'director-id', service_items: [], changes: [
+      { id: 'c1', requested_by: 'private-identity-1', requested_by_display_name: '申请人张敏',
+        status: 'PENDING', service_items: [] },
+      { id: 'c2', requested_by: 'private-identity-2', status: 'APPROVED', service_items: [] },
+    ] }
+  const html = await renderToString(Vue.createSSRApp(panel, { projectId: 'PJ-1', initialState: state }))
+  assert.match(html, /申请人 申请人张敏/)
+  assert.match(html, /申请人 姓名未记录/)
+  assert.doesNotMatch(html, /private-identity/)
 })

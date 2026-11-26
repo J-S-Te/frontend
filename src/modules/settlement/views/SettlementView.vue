@@ -1098,6 +1098,7 @@ watch(invoiceDetailID, load);
 
         <article v-if="specialReview && can('settlement.invoice.special_approve')" class="settlement-panel" role="dialog" aria-label="总监特殊开票加签">
           <h2>总监特殊开票加签 · {{ specialReview.item.request_no }}</h2>
+          <p>申请人：{{ specialReview.item.applicant_name || "姓名未记录" }}</p>
           <p>特殊原因：{{ specialReview.item.special_reason || '金额超过普通授权阈值' }}</p>
           <textarea v-model.trim="specialReview.reason" maxlength="1000" placeholder="驳回原因必填" />
           <button :disabled="saving" @click="submitSpecialReview(true)">加签通过</button>

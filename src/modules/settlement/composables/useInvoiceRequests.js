@@ -58,7 +58,9 @@ export function useInvoiceRequests({
   const invoiceReviewOpen = ref(false);
   const invoiceKeyword = ref("");
   const invoiceStatusFilter = ref("");
-  const invoiceReview = ref({ id: "", version: 0, request_no: "", reason: "" });
+  const invoiceReview = ref({
+    id: "", version: 0, request_no: "", applicant_name: "", reason: "",
+  });
   const invoiceFieldErrors = ref({});
   const invoiceForm = ref({
     receivable_id: "",
@@ -184,11 +186,15 @@ export function useInvoiceRequests({
       invoiceComposerOpen.value = false;
     }, "开票申请已提交并锁定可开票余额。");
   }
+  // 用途：保留开票申请的审批坐标和申请人，供审核表单展示。
+  // 参数：item 为当前列表中获准访问的开票申请。
+  // 返回值：无。
   function approveInvoice(item) {
     invoiceReview.value = {
       id: item.id,
       version: item.version,
       request_no: item.request_no,
+      applicant_name: item.applicant_name || "",
       reason: "",
     };
     invoiceReviewOpen.value = true;

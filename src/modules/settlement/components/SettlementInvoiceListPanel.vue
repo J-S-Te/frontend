@@ -303,6 +303,7 @@ function hasInvoiceRowAction(item) {
         <div>
           <h2>审核开票申请</h2>
           <p>申请号 {{ invoiceReview.request_no }}</p>
+          <p>申请人：{{ invoiceReview.applicant_name || "姓名未记录" }}</p>
         </div>
         <button
           type="button"
@@ -393,6 +394,7 @@ function hasInvoiceRowAction(item) {
           <thead>
             <tr>
               <th scope="col">申请号</th>
+              <th scope="col">申请人</th>
               <th scope="col">合同号</th>
               <th scope="col">购方名称</th>
               <th scope="col">税号</th>
@@ -406,6 +408,9 @@ function hasInvoiceRowAction(item) {
             <tr v-for="item in visibleInvoiceRequests" :key="item.id">
               <td class="settlement-contract-cell">
                 {{ item.request_no }}
+              </td>
+              <td>
+                <span class="ui-record-name" :title="item.applicant_name">{{ item.applicant_name || "姓名未记录" }}</span>
               </td>
               <td>{{ item.contract_no || "—" }}</td>
               <td><span class="ui-record-name" :title="item.buyer_name">{{ item.buyer_name || "—" }}</span></td>
@@ -460,7 +465,7 @@ function hasInvoiceRowAction(item) {
               </td>
             </tr>
             <tr v-if="!visibleInvoiceRequests.length">
-              <td colspan="8" class="settlement-table-empty">
+              <td colspan="9" class="settlement-table-empty">
                 暂无匹配的开票申请
               </td>
             </tr>

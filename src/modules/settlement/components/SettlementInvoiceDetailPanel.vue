@@ -80,7 +80,9 @@ function chooseInvoiceDocument() {
         v-if="invoiceDetail.red_flush_request"
         class="settlement-detail-notice"
       >
-        红冲申请状态：{{ redFlushStatusLabel(invoiceDetail.red_flush_request.status) }}；原发票在收到有效税控回执前仍保持已开具状态。
+        红冲申请状态：{{ redFlushStatusLabel(invoiceDetail.red_flush_request.status) }}；
+        申请人：{{ invoiceDetail.red_flush_request.applicant_name || "姓名未记录" }}。
+        原发票在收到有效税控回执前仍保持已开具状态。
         <template v-if="invoiceDetail.red_flush_request.review_reason">
           驳回原因：{{ invoiceDetail.red_flush_request.review_reason }}。
         </template>

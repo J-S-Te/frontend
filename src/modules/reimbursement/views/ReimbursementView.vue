@@ -18,7 +18,7 @@ import BusinessObjectSelect from '../components/BusinessObjectSelect.vue'
 import BusinessAttachmentSelect from '../components/BusinessAttachmentSelect.vue'
 import FileDropzone from '../components/FileDropzone.vue'
 import CitySelect from '../components/CitySelect.vue'
-import { resolveDraftContext, draftOrganizations, financeEntityChoices, payeeChoices,
+import { claimApplicantLabel, resolveDraftContext, draftOrganizations, financeEntityChoices, payeeChoices,
   normalProjectReference, projectReferenceLabel } from '../claimPresentation.js'
 import InvoiceContentFields from '../components/InvoiceContentFields.vue'
 import InvoiceContentMappings from '../components/InvoiceContentMappings.vue'
@@ -593,9 +593,9 @@ const returnRatePercentText = computed(() => {
   const basisPoints = statistics.value?.return_rate_basis_points
   return basisPoints === null || basisPoints === undefined ? '—' : `${(Number(basisPoints) / 100).toFixed(2)}%`
 })
-const applicantName = computed(() => selected.value?.applicant_name ||
-  (selected.value?.applicant_subject_id && selected.value.applicant_subject_id !== editorOptions.value?.applicant?.id
-    ? '报销人姓名待核对' : editorOptions.value?.applicant?.name || session.value?.display_name || '本人姓名待核对'))
+const applicantName = computed(() => selected.value
+  ? claimApplicantLabel(selected.value)
+  : editorOptions.value?.applicant?.name || session.value?.display_name || '本人姓名待核对')
 const projectRouteHint = computed(() => !route.query.project_id ? '' : projectOptions.value.some(
   (row) => row.project_id === String(route.query.project_id))
   ? '已找到来源项目，请核对并选择具体项目或服务项。'
@@ -3162,11 +3162,12 @@ onBeforeUnmount(() => {
               <div v-if="dashboard?.pending_tasks?.length" class="expense-table">
                 <table class="expense-table-body expense-table-body--fit">
                   <thead>
-                    <tr><th scope="col">单号</th><th scope="col">当前节点</th><th scope="col">创建时间</th><th scope="col">操作</th></tr>
+                    <tr><th scope="col">单号</th><th scope="col">申请人</th><th scope="col">当前节点</th><th scope="col">创建时间</th><th scope="col">操作</th></tr>
                   </thead>
                   <tbody>
                     <tr v-for="task in dashboard.pending_tasks" :key="task.id">
                       <td><strong>{{ task.claim_no || task.claim_id }}</strong></td>
+                      <td>{{ claimApplicantLabel(task.snapshot) }}</td>
                       <td><span class="expense-badge info">{{ approvalNodeLabel(task.node_code) }}</span></td>
                       <td>{{ formatBusinessDateTime(task.created_at) }}</td>
                       <td><button type="button" class="expense-button" @click="goToApprovalTask(task)">查看审批</button></td>
@@ -3986,7 +3987,7 @@ onBeforeUnmount(() => {
                 <th scope="col">
                   {{ listAmountLabel }}
                 </th>
-                <th scope="col">{{ section === 'invoices' ? '类型 / 开票日期' : section === 'approvals' ? '类型 / 受理人' : '类型 / 报销人' }}</th>
+                <th scope="col">{{ section === 'invoices' ? '类型 / 开票日期' : '类型 / 申请人' }}</th>
                 <th v-if="listHasNodeColumn" scope="col">{{ listNodeLabel }}</th>
                 <th scope="col">创建时间</th><th scope="col">操作</th>
               </tr>
@@ -4016,7 +4017,8 @@ onBeforeUnmount(() => {
                 <td class="expense-num">
                   {{ section === 'invoices' ? moneyText(row.total_minor) : section === 'approvals' ? `第 ${row.round} 轮` : moneyText(row.payable_minor || row.limit_minor) }}
                 </td>
-                <td>{{ section === 'invoices' ? `${row.invoice_type || '待确认'} / ${row.invoice_date || '日期待确认'}` : `${claimTypes[row.claim_type] || '历史未分类'} / ${row.applicant_subject_id || row.assignee_subject_id || '本任务范围未提供'}` }}</td>
+                <td v-if="section === 'invoices'">{{ row.invoice_type || '待确认' }} / {{ row.invoice_date || '日期待确认' }}</td>
+                <td v-else>{{ claimTypes[(row.snapshot || row).claim_type] || '历史未分类' }} / {{ claimApplicantLabel(row.snapshot || row) }}</td>
                 <td v-if="section === 'invoices'">{{ row.seller_tax_id || '税号待核对' }} · <span class="expense-badge" :class="claimStatusTone(row.verification_status)">{{ statusLabel(row.verification_status) }}</span></td>
                 <td v-else-if="listHasNodeColumn">{{ row.current_approval_node || row.node_code ? approvalNodesLabel(row.current_approval_node || row.node_code) : '—' }}
                   <span v-if="section==='approvals' && row.urgency==='OVERDUE'" class="expense-flag danger">待办超48小时</span>
@@ -4072,7 +4074,8 @@ onBeforeUnmount(() => {
                 </h2>
                 <p class="expense-detail-meta">
                   固定快照版本 {{ approvalTask.snapshot?.version }} · 状态 {{ statusLabel(approvalTask.status) }}
-                  · 待办人 {{ approvalTask.assignee || '以服务端当前受理人为准' }}
+                  · 申请人 {{ claimApplicantLabel(approvalTask.snapshot) }}
+                  · 待办人 {{ approvalTask.assignee_subject_id || approvalTask.assignee || '以服务端当前受理人为准' }}
                 </p>
               </div>
               <button type="button" class="expense-button" @click="backToList('approval')">

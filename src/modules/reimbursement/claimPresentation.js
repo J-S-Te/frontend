@@ -1,3 +1,11 @@
+// 用途：展示单据保存的申请人姓名，旧快照缺姓名时给出明确提示。
+// 参数：claim 为已授权读取的单据或审批快照。
+// 返回值：已保存的姓名，或“姓名未记录”。
+export function claimApplicantLabel(claim) {
+  return typeof claim?.applicant_name === 'string' && claim.applicant_name.trim()
+    ? claim.applicant_name.trim() : '姓名未记录'
+}
+
 // 用途：读取真实任职与有效费用档案交集中的可选组织，不用裸组织ID作为显示名。
 // 参数：options为服务器当前本人草稿选项。
 // 返回值：具有真实名称且拥有当前有效费用档案的任职组织。

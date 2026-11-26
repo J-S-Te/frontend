@@ -54,13 +54,15 @@ test('财务面板保存真实白名单草稿，成功后才清空表单',async(
 
 test('财务面板隐藏本人独立确认，退回必须说明理由',async()=>{
   const own={id:'own',kind:'INCOME',status:'SUBMITTED',created_by:'maker',submitted_by:'maker',net_minor:100,tax_minor:0,currency:'CNY',recognition_date:'2026-11-01',occurred_date:'2026-10-30'}
-  const other={...own,id:'other',created_by:'another',submitted_by:'another'}
+  const other={...own,id:'other',created_by:'another',submitted_by:'another',applicant_name:'财务提交人'}
   const calls=[]
   const api={list:async()=>({items:[own,other],source_environment:'local'}),decision:async(id,input)=>{calls.push({id,input})}}
   const page=await mountRecognition(api,['settlement.recognition.read','settlement.recognition.review'])
   try{
     const html=await page.html()
     assert.equal((html.match(/>独立确认</g)||[]).length,1)
+    assert.match(html,/申请人：财务提交人/)
+    assert.match(html,/申请人：姓名未记录/)
     page.state.reviewNotes.other='需要真实凭证说明'
     await page.state.act({...other,version:2},'RETURNED')
     assert.deepEqual(calls,[{id:'other',input:{expected_version:2,note:'需要真实凭证说明',decision:'RETURNED'}}])
