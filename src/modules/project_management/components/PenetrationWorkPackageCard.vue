@@ -1,5 +1,6 @@
 <script setup>
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { createRequestScope } from '../../platform/shared/composables/requestScope.js'
 import { formatUserError } from '../../shared/utils/userError.js'
 import { businessWallClockToInstant, formatBusinessDateTime, instantToBusinessWallClock } from '../../shared/utils/businessTime.js'
 import SearchableSelect from './SearchableSelect.vue'
@@ -8,6 +9,7 @@ import {
   advancePenetrationExecution,
   advancePenetrationReport,
   ensurePenetrationWorkPackage,
+  findPenetrationEngineerByUsername,
   registerPenetrationReportArtifact,
   savePenetrationDecision,
   savePenetrationPlan,
@@ -35,6 +37,11 @@ const retryCommands = new Map()
 const decision = ref({ status: 'REQUIRED', customerContact: '', communicatedAt: '', summary: '', changeReason: '' })
 const plan = ref({ plannedStart: '', plannedEnd: '', engineerIDs: [], authDocNo: '', authStart: '', authEnd: '', authScope: '', testScope: '', testWindow: '', emergencyContact: '', rollbackPlan: '' })
 const cancellation = ref({ reason: '', customerContact: '', communicatedAt: '', summary: '' })
+const usernameSearchScope = createRequestScope()
+const usernameMatch = ref(null)
+const usernameSearchLoading = ref(false)
+const usernameSearchError = ref(false)
+let usernameSearchTimer
 
 const engineerSelectOptions = computed(() => {
   const current = new Set(props.engineerOptions.map((option) => option.id))
@@ -42,7 +49,10 @@ const engineerSelectOptions = computed(() => {
   const historical = (workPackage.value?.engineer_ids || [])
     .filter((id) => plan.value.engineerIDs.includes(id) && !current.has(id))
     .map((id) => ({ id, name: props.resolveEngineerName(id), description: '历史指派，当前资质不可用' }))
-  return [...props.engineerOptions, ...historical]
+  const candidates = props.engineerOptions.map((option) => (
+    option.id === usernameMatch.value?.userID ? { ...option, usernameKeyword: usernameMatch.value.keyword } : option
+  ))
+  return [...candidates, ...historical]
 })
 
 const permissionSet = computed(() => new Set(Array.isArray(props.session?.permissions) ? props.session.permissions : []))
@@ -51,6 +61,37 @@ const isProjectManager = computed(() => currentUserID.value && currentUserID.val
 const parentAllowsMutation = computed(() => penetrationParentAllows(props.item))
 const canChangeDecision = computed(() => penetrationParentAllows(props.item, 'decision'))
 const canManage = computed(() => parentAllowsMutation.value && isProjectManager.value && permissionSet.value.has('project.implementation.plan'))
+
+// 用途：防抖查询登录用户名，并将已通过资格校验的匹配加入本地下拉搜索。
+// 参数：input 为用户名、姓名或其他用户输入的搜索词。
+// 返回值：无；本地姓名、资质搜索保持即时，旧请求不得覆盖当前查询。
+function searchEngineerUsername(input) {
+  clearTimeout(usernameSearchTimer)
+  usernameSearchScope.invalidate()
+  usernameMatch.value = null
+  usernameSearchLoading.value = false
+  usernameSearchError.value = false
+  const keyword = input.trim()
+  if (!canManage.value || !props.engineerOptions.length || !/^[!-~]{1,128}$/.test(keyword)) return
+  const itemID = props.item.id
+  const ticket = usernameSearchScope.begin(itemID)
+  usernameSearchLoading.value = true
+  usernameSearchTimer = setTimeout(async () => {
+    try {
+      const result = await findPenetrationEngineerByUsername(itemID, keyword)
+      if (!usernameSearchScope.isCurrent(ticket)) return
+      usernameMatch.value = { keyword, userID: result?.user_id }
+    } catch {
+      if (usernameSearchScope.isCurrent(ticket)) usernameSearchError.value = true
+    } finally {
+      if (usernameSearchScope.isCurrent(ticket)) usernameSearchLoading.value = false
+    }
+  }, 250)
+}
+
+watch(() => [props.item.id, props.session?.tenant_id, currentUserID.value, canManage.value],
+  () => searchEngineerUsername(''))
+onBeforeUnmount(() => clearTimeout(usernameSearchTimer))
 const canExecute = computed(() => parentAllowsMutation.value && permissionSet.value.has('project.field.execute') && (workPackage.value?.engineer_ids || []).includes(currentUserID.value))
 const reportPermission = computed(() => ({
   DRAFTING: 'project.report.prepare', SUBMITTED: 'project.report.prepare', APPROVED: 'project.report.review',
@@ -297,8 +338,9 @@ watch(() => [props.item?.id, props.item?.penetration_work_package || null], ([it
             <span>渗透测试工程师 *</span>
             <SearchableSelect v-model="plan.engineerIDs" :options="engineerSelectOptions" value-key="id"
               label-key="name" description-key="description" multiple aria-label="选择渗透测试工程师"
-              placeholder="选择具备 PENETRATION_TEST 能力的人员" search-placeholder="搜索姓名、资质编号或能力编码"
-              empty-text="没有匹配的有效渗透测试人员" />
+              placeholder="选择具备渗透测试资质的人员" search-placeholder="搜索用户名、姓名、资质编号或能力编码"
+              :loading="usernameSearchLoading" @search="searchEngineerUsername"
+              :empty-text="usernameSearchError ? '用户名查询暂不可用，请按姓名或资质编号搜索' : '没有匹配的有效渗透测试人员'" />
           </div>
           <label><span>授权书编号 *</span><input v-model.trim="plan.authDocNo"  maxlength="128"/></label>
           <label><span>授权生效 *</span><input v-model="plan.authStart" type="datetime-local" /></label>

@@ -458,7 +458,7 @@ export function penetrationEngineerCandidates({ capabilities = [] } = {}) {
     const id = String(item.user_id || '').trim()
     if (!id) continue
     const codes = (item.codes || []).map((code) => String(code).trim())
-    if (!codes.some((code) => code.toUpperCase() === 'PENETRATION_TEST')) continue
+    if (!codes.some((code) => ['PENETRATION_TEST', '渗透测试工程师'].includes(capabilityCodeKey(code)))) continue
     const option = options.get(id) || { id, name: '', searchTerms: new Set() }
     option.name ||= item.resource_name
     for (const term of [item.resource_id, ...codes]) {

@@ -310,11 +310,14 @@ test('专项指派使用有效人员能力档案，即使没有角色候选也�
     { ...activePerson, user_id: 'u4', resource_id: 'RES-5', codes: ['CISP'] },
     { ...activePerson, resource_id: 'RES-6', identity_status: 'UNLINKED' },
     { ...activePerson, user_id: 'u5', resource_id: 'RES-7', resource_type: 'EQUIPMENT' },
+    { ...activePerson, user_id: 'u6', resource_id: 'RES-8', resource_name: '中文资质人员', codes: [' 渗透测试工程师 '] },
+    { ...activePerson, user_id: 'u7', resource_id: 'RES-9', codes: ['渗透测试工程师（培训）'] },
   ]
   const options = penetrationEngineerCandidates({ capabilities })
-  assert.deepEqual(options.map(({ id, name }) => [id, name]), [['u1', '专项甲']])
+  assert.deepEqual(options.map(({ id, name }) => [id, name]), [['u1', '专项甲'], ['u6', '中文资质人员']])
   assert.match(options[0].description, /RES-1.*PENETRATION_TEST/i)
   assert.deepEqual(filterSearchableOptions(options, 'RES-2'), [options[0]])
   assert.deepEqual(filterSearchableOptions(options, 'RES-3'), [])
+  assert.deepEqual(filterSearchableOptions(options, '渗透测试工程师'), [options[1]])
   assert.deepEqual(penetrationEngineerCandidates(), [])
 })

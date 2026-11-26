@@ -484,7 +484,7 @@ function projectFixture(pathname, search, { longDecomposition, fieldReturned, pe
   if (path === '/detection-categories') return { items: detectionCategories, total: detectionCategories.length }
   if (path === '/capabilities') return penetrationPersonnel ? [...capabilities, {
     id: 'CAP-PEN-FIXTURE', resource_type: 'PERSON', resource_id: 'RES-PEN-FIXTURE',
-    user_id: 'u-pen-fixture', resource_name: '合格专项工程师', codes: ['PENETRATION_TEST'],
+    user_id: 'u-pen-fixture', resource_name: '合格专项工程师', codes: ['渗透测试工程师'],
     status: 'ACTIVE', identity_status: 'ACTIVE',
   }] : capabilities
   if (path === '/equipment') return { items: capabilities.filter((item) => item.resource_type === 'EQUIPMENT'), total: 3, page: 1, page_size: 20 }
@@ -505,6 +505,10 @@ function projectFixture(pathname, search, { longDecomposition, fieldReturned, pe
   if (path.endsWith('/report-revisions')) return []
   if (path.endsWith('/report-reviews') || path.endsWith('/report-reviews/current')) return { items: [] }
   if (path.endsWith('/penetration-work-package')) return { decision_status: 'REQUIRED', execution_stage: 'EXECUTING', report_status: 'NONE', version: 2, plan: {}, decisions: [], revisions: [] }
+  if (path.endsWith('/penetration-work-package/engineer-by-username')) {
+    const username = search.get('username')
+    return { user_id: username === 'fixture_login' ? 'u-pen-fixture' : '' }
+  }
   if (path.startsWith('/projects/') && path.split('/').length === 3) return projects.find((project) => '/' + project.id === path) || projects[0]
   return { items: [], total: 0, page: 1 }
 }
@@ -587,9 +591,13 @@ async function exercisePenetrationPersonnel(page) {
   await page.locator('.pm-picker-card').filter({ hasText: fieldReturnItemID }).click({ timeout: 5000 })
   const selector = page.getByRole('combobox', { name: '选择渗透测试工程师' })
   await selector.click({ timeout: 5000 })
-  const search = page.getByRole('searchbox', { name: '搜索姓名、资质编号或能力编码' })
+  const search = page.getByRole('searchbox', { name: '搜索用户名、姓名、资质编号或能力编码' })
   const qualified = page.getByRole('option', { name: /合格专项工程师/ })
   await search.fill('合格专项')
+  await qualified.waitFor({ timeout: 5000 })
+  await search.fill('渗透测试工程师')
+  await qualified.waitFor({ timeout: 5000 })
+  await search.fill('fixture_login')
   await qualified.waitFor({ timeout: 5000 })
   await search.fill('RES-PEN-FIXTURE')
   await qualified.click()
