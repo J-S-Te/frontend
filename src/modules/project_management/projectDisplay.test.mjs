@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import { filterSearchableOptions } from './components/searchableSelect.js'
 import {
   PROJECT_ROLE_CODES,
   capabilityCodeKey,
@@ -313,5 +314,7 @@ test('专项指派使用有效人员能力档案，即使没有角色候选也�
   const options = penetrationEngineerCandidates({ capabilities })
   assert.deepEqual(options.map(({ id, name }) => [id, name]), [['u1', '专项甲']])
   assert.match(options[0].description, /RES-1.*PENETRATION_TEST/i)
+  assert.deepEqual(filterSearchableOptions(options, 'RES-2'), [options[0]])
+  assert.deepEqual(filterSearchableOptions(options, 'RES-3'), [])
   assert.deepEqual(penetrationEngineerCandidates(), [])
 })

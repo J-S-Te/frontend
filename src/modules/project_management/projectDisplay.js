@@ -456,16 +456,21 @@ export function penetrationEngineerCandidates({ capabilities = [] } = {}) {
     if (item?.resource_type !== 'PERSON' || item.status !== 'ACTIVE' ||
         item.identity_status !== 'ACTIVE') continue
     const id = String(item.user_id || '').trim()
-    if (!id || options.has(id)) continue
+    if (!id) continue
     const codes = (item.codes || []).map((code) => String(code).trim())
     if (!codes.some((code) => code.toUpperCase() === 'PENETRATION_TEST')) continue
-    options.set(id, {
-      id,
-      name: item.resource_name || '未命名人员',
-      description: [item.resource_id, ...codes].filter(Boolean).join(' · '),
-    })
+    const option = options.get(id) || { id, name: '', searchTerms: new Set() }
+    option.name ||= item.resource_name
+    for (const term of [item.resource_id, ...codes]) {
+      if (term) option.searchTerms.add(term)
+    }
+    options.set(id, option)
   }
-  return [...options.values()]
+  return [...options.values()].map(({ id, name, searchTerms }) => ({
+    id,
+    name: name || '未命名人员',
+    description: [...searchTerms].join(' · '),
+  }))
 }
 
 export function monitoringServiceSummary(row) {
