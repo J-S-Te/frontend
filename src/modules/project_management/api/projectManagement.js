@@ -874,6 +874,16 @@ export function revokePreparation(itemID, payload) {
   return request(`/service-items/${encodeURIComponent(itemID)}/preparation/revoke`, { method: 'POST', body: JSON.stringify(payload) })
 }
 
+// 用途：把实施中的服务项直接退回实施准备。
+// 参数：itemID 为服务项 ID，payload 包含当前版本和退回原因。
+// 返回值：已保存的退回状态，校验或权限失败时拒绝。
+export function returnFieldToPreparation(itemID, payload) {
+  return request(`/service-items/${encodeURIComponent(itemID)}/field-return`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
 export function requestRollback(itemID, payload) {
   return request(`/service-items/${encodeURIComponent(itemID)}/rollback-requests`, { method: 'POST', body: JSON.stringify(payload) })
 }

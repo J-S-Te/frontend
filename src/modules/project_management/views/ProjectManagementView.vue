@@ -79,6 +79,7 @@ import SignaturePad from '@/modules/project_management/components/SignaturePad.v
 import SupplementClosureDialog from '@/modules/project_management/components/SupplementClosureDialog.vue'
 import {
   allocationState, implementationPlanReady, isAllocationPending, projectAllowsWorkflowNode,
+  serviceItemPreparationConfirmed,
 } from '@/modules/project_management/workflowNode'
 import { listFieldOperations, processFieldQueue, removeFieldOperation, removeRejectedFieldOperation, saveFieldOperation } from '@/modules/project_management/offlineFieldQueue'
 import { acquireFieldPosition } from '@/modules/project_management/fieldGeolocation.js'
@@ -203,6 +204,7 @@ import {
   revokeExecutionAssignment,
   revokeImplementationPlan,
   revokePreparation,
+  returnFieldToPreparation,
   requestRollback,
   withdrawRollback,
   requestReportCorrection,
@@ -1480,7 +1482,7 @@ const workflowNodeEventTypes = new Set([
   'DECOMPOSITION_RETURNED', 'TEAM_ASSIGNED', 'EXECUTION_TEAM_ASSIGNED',
   'IMPLEMENTATION_PLANNED', 'IMPLEMENTATION_PLAN_REVOKED',
   'PREPARATION_STARTED', 'PREPARATION_REVOKED', 'FIELD_STARTED', 'FIELD_RECORD_SUBMITTED',
-  'FIELD_COMPLETED', 'ROLLBACK_APPROVED', 'REPORT_STATUS_UPDATED',
+  'FIELD_COMPLETED', 'FIELD_RETURNED_TO_PREPARATION', 'ROLLBACK_APPROVED', 'REPORT_STATUS_UPDATED',
 ])
 const latestWorkflowEventByItem = computed(() => {
   const latest = new Map()
@@ -1511,14 +1513,16 @@ const planningItems = computed(() => serviceItems.value.filter((item) => {
   return projectAllowsNode(item, 'planning') && implementationPlanReady(item)
 }))
 const preparationItems = computed(() => serviceItems.value.filter((item) => {
-  const event = latestWorkflowEvent(item)
-  if (item.status === '待实施') return projectAllowsNode(item, 'preparation')
-  return projectAllowsNode(item, 'preparation') && item.status === '实施准备中' && event?.type === 'ROLLBACK_APPROVED' && event.payload?.kind === 'FIELD_TO_PREPARATION'
+  if (!projectAllowsNode(item, 'preparation')) return false
+  if (item.status === '待实施') return true
+  return item.status === '实施准备中'
+    && serviceItemPreparationConfirmed(item, latestWorkflowEvent(item)) === false
 }))
 const implementationItems = computed(() => serviceItems.value.filter((item) => {
-  const event = latestWorkflowEvent(item)
-  if (item.status === '实施中') return projectAllowsNode(item, 'implementation')
-  return projectAllowsNode(item, 'implementation') && item.status === '实施准备中' && event?.type === 'PREPARATION_STARTED'
+  if (!projectAllowsNode(item, 'implementation')) return false
+  if (item.status === '实施中') return true
+  return item.status === '实施准备中'
+    && serviceItemPreparationConfirmed(item, latestWorkflowEvent(item)) === true
 }))
 const implementationProjectCount = computed(() => implementationKanbanColumns.value
   .reduce((total, column) => total + column.count, 0))
@@ -1815,6 +1819,11 @@ watch([decompositionProjects, () => route.query.project,
 }, { immediate: true })
 const currentDecompositionItems = computed(() => decompositionItems.value.filter((item) => item.project_id === selectedDecompositionProjectID.value))
 const decompositionProject = computed(() => projectByID.value.get(selectedDecompositionProjectID.value) || null)
+const decompositionProjectName = computed(() => decompositionProject.value?.name?.trim() || '未提供项目名称')
+const decompositionSourceLabel = computed(() => {
+  const project = decompositionProject.value
+  return `合同 ${project?.contract || '—'} · ${project?.customer || '未提供客户名称'}`
+})
 // 补充协议关账入口：只有 supplement_status=REQUIRED 且具备拆解管理权限才可提交；
 // 缺少权限时保留说明而不是让按钮“看起来能点、点了必然 403”。
 const decompositionSupplementClosure = computed(() => supplementClosureAvailability(decompositionProject.value, permissionSet.value))
@@ -3770,18 +3779,55 @@ async function revokeDeliveryPhase(kind) {
   } catch (error) { showToast(formatUserError(error, { fallback: '撤销失败，请刷新后重试' }), 'error') } finally { saving.value = false }
 }
 
-// 用途：为符合当前状态的服务项提交现场回退或报告返工申请。
-// 参数：kind 为现场回退或报告返工的业务类型。
-// 返回值：无；取消不写入，失败以提示反馈。
-async function submitRollbackRequest(kind) {
-  const eligible = () => canRequestRollback.value && (kind === 'FIELD_TO_PREPARATION'
-    ? selectedServiceItem.value?.status === '实施中'
-    : kind === 'REPORT_TO_FIELD' && selectedServiceItem.value?.status === '现场实施完成'
-      && ['RECTIFYING', 'COMPILING', 'REVIEWED'].includes(selectedServiceItem.value?.report_status))
+// 用途：记录退回原因，将当前实施中的服务项直接退回实施准备。
+// 参数：无，服务项、版本与操作权限取自当前页面上下文。
+// 返回值：无；操作完成后更新工作区，失败或尚有本机作业时提示。
+async function returnSelectedFieldToPreparation() {
+  const eligible = () => activeSection.value === 'implementation' && canRequestRollback.value
+    && selectedServiceItem.value?.status === '实施中' && !fieldSyncing.value
   if (saving.value || promptDialog.value || !eligible()) return
   const context = captureReasonContext([selectedServiceItem.value])
   const item = context.items[0]
-  const label = kind === 'FIELD_TO_PREPARATION' ? '申请回退至实施准备' : '申请报告返工'
+  const owner = fieldQueueOwner()
+  const reason = await askOperationReason({
+    title: '退回实施准备', confirmText: '退回实施准备', label: '退回原因',
+    description: '确认后立即退回。已经保存的现场证据与设备预约会保留。',
+  }, context, eligible)
+  if (reason === null) return
+  saving.value = true
+  try {
+    await refreshFieldQueueCount()
+    if (!reasonContextCurrent(context) || !eligible()) return
+    if (fieldQueueError.value || pendingFieldOperations.value.some(operation => operation.itemID === item.id)) {
+      showToast(fieldQueueError.value || '该服务项还有现场作业待同步，请同步后退回。', 'warning')
+      return
+    }
+    await returnFieldToPreparation(item.id, { reason, expected_version: Number(item.version) })
+    showToast('已退回实施准备')
+    await refreshAfterWrite()
+    if (owner === fieldQueueOwner() && activeSection.value === context.section
+      && navigation.value?.sections?.includes('preparation')
+      && preparationItems.value.some(row => row.id === item.id)) {
+      navigate('preparation')
+    }
+  } catch (error) {
+    showToast(formatUserError(error, { fallback: '退回实施准备失败，请刷新后核对。' }), 'error')
+  } finally {
+    saving.value = false
+  }
+}
+
+// 用途：为符合当前状态的服务项提交报告返工申请。
+// 参数：kind 为报告返工的业务类型。
+// 返回值：无；取消不写入，失败以提示反馈。
+async function submitRollbackRequest(kind) {
+  const eligible = () => canRequestRollback.value && kind === 'REPORT_TO_FIELD'
+    && selectedServiceItem.value?.status === '现场实施完成'
+    && ['RECTIFYING', 'COMPILING', 'REVIEWED'].includes(selectedServiceItem.value?.report_status)
+  if (saving.value || promptDialog.value || !eligible()) return
+  const context = captureReasonContext([selectedServiceItem.value])
+  const item = context.items[0]
+  const label = '申请报告返工'
   const reason = await askOperationReason({
     title: label, confirmText: label, label: '申请原因',
   }, context, eligible)
@@ -3789,9 +3835,7 @@ async function submitRollbackRequest(kind) {
   saving.value = true
   try {
     await requestRollback(item.id, { kind, reason, expected_version: Number(item.version) || 0 })
-    showToast(kind === 'REPORT_TO_FIELD'
-      ? '报告返工申请已提交，等待技术总监审批，可在审批待办中查看。'
-      : '现场回退申请已提交，等待技术总监审批，可在审批待办中查看。')
+    showToast('报告返工申请已提交，等待技术总监审批，可在审批待办中查看。')
     await refreshAfterWrite()
   } catch (error) { showToast(formatUserError(error, { fallback: '回退申请失败' }), 'error') } finally { saving.value = false }
 }
@@ -4741,15 +4785,19 @@ onBeforeUnmount(() => {
             <div class="pm-source-icon"><ConsoleIcon name="account" /></div>
             <div class="pm-source-content">
               <span>合同来源</span>
-              <h2>{{ decompositionProject.name?.trim() || '未提供项目名称' }}</h2>
-              <p>合同 {{ decompositionProject.contract || '—' }} · {{ decompositionProject.customer || '未提供客户名称' }}</p>
+              <h2 class="ui-record-name" :title="decompositionProjectName">{{ decompositionProjectName }}</h2>
+              <p class="ui-record-name" :title="decompositionSourceLabel">{{ decompositionSourceLabel }}</p>
               <p>合同版本 {{ decompositionProject.contract_version || '—' }} · 自动生成于 {{ formatDateTime(decompositionProject.created_at) }}</p>
             </div>
             <div class="pm-source-actions">
               <label v-if="decompositionProjects.length > 1" class="pm-decomposition-switcher">
                 <span class="pm-decomposition-switcher-label">当前拆解项目</span>
                 <span class="pm-decomposition-select-shell">
-                  <select v-model="selectedDecompositionProjectID" aria-label="选择当前拆解项目">
+                  <select
+                    v-model="selectedDecompositionProjectID"
+                    aria-label="选择当前拆解项目"
+                    :title="decompositionProjectName"
+                  >
                     <option v-for="project in decompositionProjects" :key="project.id" :value="project.id">{{ project.name?.trim() || '未提供项目名称' }} · {{ project.id }}</option>
                   </select>
                 </span>
@@ -4761,31 +4809,38 @@ onBeforeUnmount(() => {
           <section v-else class="pm-decompose-grid">
             <article class="pm-panel pm-tree-panel">
               <header><div><p class="pm-panel-kicker">服务项树</p>
-                <h2>{{ decompositionProject.name?.trim() || '未提供项目名称' }}</h2>
+                <h2 class="ui-record-name" :title="decompositionProjectName">{{ decompositionProjectName }}</h2>
               </div><span>{{ currentDecompositionItems.length }} 项</span></header>
               <button v-for="([batch, items], index) in decompositionBatches" :key="batch"
                 type="button" :aria-pressed="activeDecompositionBatch === batch"
                 :class="{ active: activeDecompositionBatch === batch }"
                 @click="selectedDecompositionBatch = batch">
                 <span>{{ String(index + 1).padStart(2, '0') }}</span>
-                <div><b>{{ [...new Set(items.map(item => item.system?.trim() || '未提供系统名称'))].join('、') }}</b>
+                <div><b class="ui-record-name">{{ [...new Set(items.map(item => item.system?.trim() || '未提供系统名称'))].join('、') }}</b>
                   <small>{{ batch }} · {{ items.length }} 个服务项</small>
                 </div>
               </button>
               <div class="pm-tree-note"><b>自动拆解校验</b><p>{{ currentDecompositionItems.filter((item) => item.test_mode === 'PENETRATION').length }} 项渗透测试需要专项计划；确认后的服务项进入资源分配。</p></div>
             </article>
-            <article class="pm-table-panel"><div class="pm-table-scroll"><table class="pm-table">
+            <article class="pm-table-panel"><div class="pm-table-scroll"><table class="pm-table pm-decomposition-table">
               <thead><tr><th scope="col">纳入</th><th scope="col">项目 / 系统名称</th>
                 <th scope="col">场所 / 批次</th><th scope="col">检测类别</th>
                 <th scope="col">技术要求摘要</th><th scope="col">特殊方法</th><th scope="col">状态</th>
               </tr></thead>
               <tbody><tr v-for="item in visibleDecompositionItems" :key="item.id">
                 <td><input v-model="item.selected" type="checkbox" :aria-label="`纳入 ${item.id}`" /></td>
-                <td><b>{{ serviceItemLabel(item, decompositionProject) }}</b>
+                <td>
+                  <b class="ui-record-name" :title="serviceItemLabel(item, decompositionProject)">
+                    {{ serviceItemLabel(item, decompositionProject) }}
+                  </b>
                   <small class="pm-service-code mono">服务项编号：{{ item.id }}</small>
                 </td>
-                <td>{{ item.site }}<span class="pm-cell-sub">{{ item.batch }}</span></td>
-                <td>{{ item.category }}</td><td>{{ item.requirement }}</td>
+                <td>
+                  <span class="ui-record-name" :title="item.site">{{ item.site }}</span>
+                  <span class="ui-record-name pm-cell-sub" :title="item.batch">{{ item.batch }}</span>
+                </td>
+                <td>{{ item.category }}</td>
+                <td><span class="ui-record-name" :title="item.requirement">{{ item.requirement }}</span></td>
                 <td><span class="pm-badge" :class="item.special === '是' ? '待确认' : 'neutral'">{{ item.special }}</span></td>
                 <td><span class="pm-badge" :class="statusTone(item.status)">{{ item.status }}</span></td>
               </tr></tbody>
@@ -4808,6 +4863,13 @@ onBeforeUnmount(() => {
           <section class="pm-panel pm-operation-panel">
             <header><div><p class="pm-panel-kicker">现场实施</p><h2>现场测评与记录</h2></div><div class="pm-field-sync"><span class="pm-badge" :class="pendingFieldSyncCount ? '关注' : 'normal'">待同步 {{ pendingFieldSyncCount }}</span><button v-if="pendingFieldSyncCount" type="button" class="pm-link" :disabled="fieldSyncing" @click="flushFieldOperations(true)">{{ fieldSyncing ? '同步中…' : '立即重试' }}</button></div></header>
             <ServiceItemPicker :items="implementationItems" :projects="projects" :selected-ids="selectedServiceItem ? [selectedServiceItem.id] : []" empty-text="暂无处于现场实施节点的服务项" @select="selectServiceItem" />
+            <button
+              v-if="selectedServiceItem?.status === '实施中' && canRequestRollback"
+              type="button"
+              class="pm-button"
+              :disabled="saving || fieldSyncing"
+              @click="returnSelectedFieldToPreparation"
+            >退回实施准备</button>
             <PenetrationWorkPackageCard v-if="selectedServiceItem && isEmbeddedPenetrationItem(selectedServiceItem)" :item="selectedServiceItem" :session="session" :engineer-options="penetrationEngineerOptions" @updated="updatePenetrationPackage" @notify="notifyFromPenetration" />
             <button v-if="selectedServiceItem && selectedServiceItem.status === '实施准备中' && canExecuteField" class="pm-button primary" :disabled="saving" @click="runOperation('field-start')">进入实施中</button>
             <div v-if="selectedServiceItem && selectedServiceItem.status === '实施中' && canExecuteField" class="pm-field-workflow">
@@ -5047,7 +5109,6 @@ onBeforeUnmount(() => {
             <div v-if="selectedServiceItem" class="pm-panel-actions">
               <button v-if="canRevokeImplementation && selectedServiceItem.status === '待实施'" type="button" class="pm-button danger" :disabled="saving" @click="revokeDeliveryPhase('plan')">撤销实施计划</button>
               <button v-if="canRevokeImplementation && selectedServiceItem.status === '实施准备中'" type="button" class="pm-button danger" :disabled="saving" @click="revokeDeliveryPhase('preparation')">撤销实施准备并释放设备</button>
-              <button v-if="canRequestRollback && selectedServiceItem.status === '实施中'" type="button" class="pm-button" :disabled="saving" @click="submitRollbackRequest('FIELD_TO_PREPARATION')">申请回退至实施准备</button>
               <button v-if="canRequestRollback && selectedServiceItem.status === '现场实施完成' && ['RECTIFYING', 'COMPILING', 'REVIEWED'].includes(selectedServiceItem.report_status)" type="button" class="pm-button" :disabled="saving" @click="submitRollbackRequest('REPORT_TO_FIELD')">申请报告返工</button>
             </div>
             <section v-if="activeSection === 'inbox' && pendingRollbackRequests.length"
