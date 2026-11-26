@@ -11,7 +11,8 @@ const operations = [
   ['returnSelectedToDecomposition', []],
   ['withdrawPendingRollback', ['REQUEST']],
   ['revokeDeliveryPhase', ['plan']],
-  ['submitRollbackRequest', ['FIELD_TO_PREPARATION']],
+  ['returnSelectedFieldToPreparation', []],
+  ['submitRollbackRequest', ['REPORT_TO_FIELD']],
 ]
 
 // 用途：执行真实组件函数并注入延迟输入与隔离 API，验证写入边界。
@@ -20,12 +21,16 @@ const operations = [
 function harness(operation) {
   const item = { id: 'SI-1', version: 5, status: '待分配', team_lead_id: 'LEAD', project_manager_id: 'MANAGER' }
   if (operation === 'revokeDeliveryPhase') item.status = '待实施'
-  if (operation === 'submitRollbackRequest') item.status = '实施中'
+  if (operation === 'returnSelectedFieldToPreparation') item.status = '实施中'
+  if (operation === 'submitRollbackRequest') {
+    item.status = '现场实施完成'
+    item.report_status = 'COMPILING'
+  }
   const request = { id: 'REQ-1', service_item_id: item.id, actor_user_id: operation === 'decidePendingRollback' ? 'OTHER' : 'USER' }
-  const writes = [], prompts = []
+  const writes = [], prompts = [], visits = []
   let resolve
   const context = {
-    saving: ref(false), promptDialog: ref(null), activeSection: ref('allocation'),
+    saving: ref(false), promptDialog: ref(null), activeSection: ref(operation === 'returnSelectedFieldToPreparation' ? 'implementation' : 'allocation'),
     session: ref({ user_id: 'USER', tenant_id: 'TENANT' }),
     selectedServiceItemIDs: ref([item.id]), serviceItems: ref([item]),
     selectedServiceItem: ref(item), selectedServiceItems: ref([item]), pendingRollbackRequests: ref([request]),
@@ -34,11 +39,16 @@ function harness(operation) {
     canRevokeImplementation: ref(true), canRequestRollback: ref(true), canApproveRollback: ref(true),
     askPrompt: (options) => { prompts.push(options); context.promptDialog.value = options; return new Promise((yes) => { resolve = yes }) },
     showToast: () => {}, formatUserError: () => '', loadWorkspace: async () => {}, refreshAfterWrite: async () => {},
+    navigation: ref({ sections: ['implementation', 'preparation'] }),
+    preparationItems: ref([item]), fieldSyncing: ref(false), fieldQueueError: ref(''),
+    pendingFieldOperations: ref([]), refreshFieldQueueCount: async () => {},
+    fieldQueueOwner: () => `${context.session.value.tenant_id}:${context.session.value.user_id}`,
+    navigate: section => visits.push(section),
     window: { prompt: () => { throw new Error('必须使用可等待的共享输入弹窗') } },
   }
   context.projectAllowsNode = (_item, node) =>
     projectAllowsWorkflowNode(context.detailProject.value.status, node)
-  for (const name of ['revokeTeamAssignment', 'revokeExecutionAssignment', 'returnServiceItemToDecomposition', 'withdrawRollback', 'revokeImplementationPlan', 'revokePreparation', 'requestRollback', 'decideRollback']) {
+  for (const name of ['revokeTeamAssignment', 'revokeExecutionAssignment', 'returnServiceItemToDecomposition', 'withdrawRollback', 'revokeImplementationPlan', 'revokePreparation', 'returnFieldToPreparation', 'requestRollback', 'decideRollback']) {
     context[name] = async (...args) => writes.push([name, ...args])
   }
   const names = ['detailAssignmentActionItems', 'captureReasonContext',
@@ -50,7 +60,7 @@ function harness(operation) {
     return source.slice(start, source.indexOf('\n}', start) + 2)
   })
   const run = vm.runInNewContext(`${functions.join('\n')}\n${operation}`, context)
-  return { context, item, request, writes, prompts, run: (args) => run(...args.map((arg) => arg === 'REQUEST' ? request : arg)), finish: (value) => { context.promptDialog.value = null; resolve(value) } }
+  return { context, item, request, writes, prompts, visits, run: (args) => run(...args.map((arg) => arg === 'REQUEST' ? request : arg)), finish: (value) => { context.promptDialog.value = null; resolve(value) } }
 }
 
 for (const [name, args] of [
@@ -120,7 +130,7 @@ for (const [name, args] of operations) {
     assert.equal(empty.writes.length, 0)
     assert.equal(empty.context.saving.value, false)
     const failed = harness(name)
-    for (const api of ['revokeTeamAssignment', 'returnServiceItemToDecomposition', 'withdrawRollback', 'revokeImplementationPlan', 'requestRollback', 'decideRollback']) {
+    for (const api of ['revokeTeamAssignment', 'returnServiceItemToDecomposition', 'withdrawRollback', 'revokeImplementationPlan', 'returnFieldToPreparation', 'requestRollback', 'decideRollback']) {
       failed.context[api] = async () => { throw new Error('隔离接口失败') }
     }
     const pending = failed.run(args)
@@ -171,4 +181,30 @@ test('报告返工等待原因时进入签发阶段会停止写入', async () =>
   h.finish('需要再次现场测评')
   await pending
   assert.equal(h.writes.length, 0)
+})
+
+test('现场实施直接退回实施准备，原回退审批接口不参与', async () => {
+  const h = harness('returnSelectedFieldToPreparation')
+  const pending = h.run([])
+  assert.equal(h.prompts[0].confirmText, '退回实施准备')
+  h.finish('准备条件调整')
+  await pending
+  assert.equal(h.writes.length, 1)
+  assert.equal(h.writes[0][0], 'returnFieldToPreparation')
+  assert.equal(h.writes[0][1], 'SI-1')
+  assert.equal(h.writes[0][2].expected_version, 5)
+  assert.deepEqual(h.visits, ['preparation'])
+})
+
+test('退回前复核本机作业，同一服务项仍有记录待同步时不提交', async () => {
+  const h = harness('returnSelectedFieldToPreparation')
+  h.context.refreshFieldQueueCount = async () => {
+    h.context.pendingFieldOperations.value = [{ itemID: 'SI-1' }]
+  }
+  const pending = h.run([])
+  h.finish('准备条件调整')
+  await pending
+  assert.equal(h.writes.length, 0)
+  assert.equal(h.visits.length, 0)
+  assert.equal(h.context.saving.value, false)
 })

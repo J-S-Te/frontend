@@ -25,6 +25,7 @@ const cases = [
   { key: 'projects', section: 'projects' },
   { key: 'project-detail', section: 'project_detail', query: { project: 'PJ-2026-0823' } },
   { key: 'decomposition', section: 'decomposition' },
+  { key: 'decomposition-long-text', section: 'decomposition' },
   { key: 'allocation', section: 'allocation' },
   { key: 'inbox', section: 'inbox' },
   { key: 'planning', section: 'planning' },
@@ -34,6 +35,7 @@ const cases = [
   { key: 'assignments', section: 'assignments' },
   { key: 'methods', section: 'methods' },
   { key: 'implementation', section: 'implementation' },
+  { key: 'implementation-field-return', section: 'implementation' },
   { key: 'exceptions', section: 'exceptions' },
   { key: 'standards', section: 'standards' },
   { key: 'reports', section: 'reports' },
@@ -71,6 +73,8 @@ export function useRouter() {
   }
 }
 export function onBeforeRouteLeave() {}
+export function onBeforeRouteUpdate() {}
+export const NavigationFailureType = { aborted: 4, cancelled: 8, duplicated: 16 }
 export const RouterLink = { props: ['to'], setup(_props, { slots }) { return () => h('a', {}, slots.default?.()) } }
 `
 
@@ -91,13 +95,16 @@ window.__mountPM = ({ section, query = {} }) => {
 `
 
 const NOW = '2026-11-12T10:30:00+08:00'
+const fieldReturnItemID = 'SI-0823-01'
+const fieldReturnProjectID = 'PJ-2026-0823'
+const fieldReturnReason = '现场条件变化，需重新核验设备'
 const PEOPLE = {
   'u-lead-1': '李伟', 'u-lead-2': '周敏', 'u-pm-1': '张磊', 'u-pm-2': '王明', 'u-pm-3': '李娜',
   'u-eng-1': '陈静', 'u-eng-2': '赵磊', 'u-eng-3': '孙悦', 'u-eng-4': '刘洋', 'u-eng-5': '吴倩',
   'u-tech-1': '郑昊',
 }
 const session = {
-  tenant_id: 'tenant-demo', identity_id: 'actor-pm', subject_id: 'actor-pm',
+  tenant_id: 'tenant-demo', user_id: 'actor-pm', identity_id: 'actor-pm', subject_id: 'actor-pm',
   username: '张磊', display_name: '张磊',
   roles: ['admin', 'business_admin', 'project_manager', 'technical_director', 'team_lead', 'engineer'],
   permissions: [
@@ -155,6 +162,20 @@ const projects = [
     manager: '张磊', status: '待实施', progress: 30, report_stage: '', due: '2026-09-15',
     created_at: '2026-07-20T09:00:00+08:00', updated_at: NOW, risk: false, version: 3 },
 ]
+
+const longProjectName = '区域综合能源管理平台建设与评估项目'.repeat(8)
+const longDecompositionProjects = projects.slice(0, 2).map((project, index) => ({
+  ...project,
+  name: index === 0 ? longProjectName : 'ProjectWithoutBreaks'.repeat(12),
+  customer: '示例客户技术服务有限公司'.repeat(8),
+  status: '待拆解确认',
+}))
+const longDecompositionItems = longDecompositionProjects.map((project, index) => ({
+  id: 'SI-LONG-00' + index, project_id: project.id, batch: '第一批次',
+  site: 'RegionWithoutBreaks'.repeat(12), category: '应用测试',
+  requirement: '补充检测范围与验收标准。'.repeat(30),
+  system: 'SystemWithoutBreaks'.repeat(16), status: '待确认', version: 1,
+}))
 
 const plan = (start, end) => ({
   planned_start: start, planned_end: end, site_plan: '中心机房 + 灾备机房，需提前一个工作日预约门禁。',
@@ -397,9 +418,10 @@ function jsonResponse(value) {
   return { status: 200, contentType: 'application/json', body: JSON.stringify({ code: 'OK', message: 'ok', request_id: 'harness', data: value }) }
 }
 
-// fixture 根据项目 API 路径返回隔离替身数据；未覆盖的只读路径返回空集合，
-// 保证页面以“空态”渲染而不是请求真实后端。
-function projectFixture(pathname, search) {
+// 用途：为项目页面夹具提供隔离的 API 数据。
+// 参数：pathname 和 search 为请求路径及筛选，长文案与退回标识为独立夹具场景。
+// 返回值：匹配的模拟响应，未覆盖的只读路径返回空集合。
+function projectFixture(pathname, search, { longDecomposition, fieldReturned }) {
   const path = pathname.slice('/project_management/api/v1'.length)
   if (path === '/auth/me') return session
   if (path === '/navigation') return {
@@ -416,10 +438,19 @@ function projectFixture(pathname, search) {
   if (path.startsWith('/projects-monitoring')) return monitoring
   if (path === '/projects') {
     const stage = search.get('report_stage')
-    const rows = stage ? projects.filter((project) => project.report_stage === stage) : projects
+    const data = longDecomposition ? longDecompositionProjects : projects.map(project =>
+      fieldReturned && project.id === fieldReturnProjectID ? { ...project, status: '实施准备中' } : project)
+    const rows = stage ? data.filter((project) => project.report_stage === stage) : data
     return { items: rows, total: rows.length, page: 1, page_size: rows.length, truncated: false }
   }
-  if (path === '/service-items') return { items: serviceItems, total: serviceItems.length, page: 1, page_size: serviceItems.length, truncated: false }
+  if (path === '/service-items') {
+    const items = longDecomposition ? longDecompositionItems : serviceItems.map(item =>
+      fieldReturned && item.id === fieldReturnItemID
+        ? { ...item, status: '实施准备中', preparation_confirmed: false, version: item.version + 1 }
+        : item)
+    return { items, total: items.length, page: 1, page_size: items.length, truncated: false }
+  }
+  // 退回事件可被最近事件窗口淘汰，实施准备队列仍须由服务项状态恢复。
   if (path === '/delivery-events') return events
   if (path === '/delivery/sla-overdue') return [
     { id: 'SI-0850-02', project_id: 'PJ-2026-0850', site: '某城商行 - 总行', category: '软件测试', status: '报告编制', planned_end: '2026-08-20', overdue_hours: 12, kind: 'PLAN_END_OVERDUE' },
@@ -516,20 +547,53 @@ const browser = await chromium.launch({
   executablePath: process.env.CHROMIUM_PATH || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
 })
 const results = []
+
+// 用途：执行实施看板的确认交互，核验退回后进入实施准备且目标服务项可见。
+// 参数：page 为使用隔离项目数据的浏览器页面。
+// 返回值：所有界面断言满足后兑现。
+async function exerciseFieldReturn(page) {
+  const card = () => page.locator('.pm-picker-card').filter({ hasText: fieldReturnItemID })
+  await card().click({ timeout: 5000 })
+  await page.getByRole('button', { name: '退回实施准备' }).click()
+  const dialog = page.getByRole('dialog', { name: '退回实施准备' })
+  await dialog.getByLabel('退回原因').fill(fieldReturnReason)
+  await dialog.getByRole('button', { name: '退回实施准备' }).click()
+  await page.getByRole('heading', { name: '实施准备', exact: true }).waitFor({ timeout: 5000 })
+  await card().waitFor({ timeout: 5000 })
+}
 try {
   for (const width of widthList) {
     for (const theme of themes) {
       for (const item of cases.filter(row => !selectedCases.length || selectedCases.includes(row.key))) {
         const page = await browser.newPage({ viewport: { width, height: 1000 }, reducedMotion: 'reduce' })
         const errors = []
+        const longDecomposition = item.key === 'decomposition-long-text'
+        const fieldReturnCase = item.key === 'implementation-field-return'
+        let fieldReturned = false
+        let fieldReturnCalls = 0
         page.on('pageerror', error => errors.push(error.message))
         page.on('console', message => { if (message.type() === 'error') errors.push(message.text()) })
         await page.route('**/*', async (route) => {
           const url = new URL(route.request().url())
-          if (url.origin !== origin) return route.continue()
+          if (url.origin !== origin) return route.abort()
           if (url.pathname === '/') return route.fulfill({ status: 200, contentType: 'text/html; charset=utf-8', body: shell })
+          if (['/api/v1/notifications/inbox/stream', '/project_management/api/v1/workflow/stream'].includes(url.pathname)) {
+            return route.fulfill({ status: 200, contentType: 'text/event-stream', body: ': fixture\n\n' })
+          }
+          if (fieldReturnCase && route.request().method() === 'POST'
+            && url.pathname.startsWith('/project_management/api/v1/service-items/')) {
+            const payload = route.request().postDataJSON()
+            if (url.pathname !== `/project_management/api/v1/service-items/${fieldReturnItemID}/field-return`
+              || payload.reason !== fieldReturnReason || payload.expected_version !== 5) {
+              errors.push('现场退回请求的路径、原因或版本不正确')
+              return route.abort()
+            }
+            fieldReturnCalls += 1
+            fieldReturned = true
+            return route.fulfill(jsonResponse({ status: '实施准备中' }))
+          }
           const data = url.pathname.startsWith('/project_management/api/v1')
-            ? projectFixture(url.pathname, url.searchParams)
+            ? projectFixture(url.pathname, url.searchParams, { longDecomposition, fieldReturned })
             : platformFixture(url.pathname, url.searchParams)
           return route.fulfill(jsonResponse(data))
         })
@@ -547,6 +611,40 @@ try {
             await pickerCard.click()
             await page.waitForTimeout(700)
           }
+        }
+        if (longDecomposition) {
+          const picker = page.getByRole('combobox', { name: '选择当前拆解项目' })
+          const title = page.locator('.pm-decomposition-source-card h2')
+          await title.waitFor({ state: 'attached' })
+          for (const project of longDecompositionProjects) {
+            await picker.selectOption(project.id)
+            await page.waitForFunction((name) =>
+              document.querySelector('.pm-decomposition-source-card h2')?.textContent === name, project.name)
+            const violations = await page.locator('.pm-decomposition-source-card').evaluate(card => {
+              const content = card.querySelector('.pm-source-content')
+              const actions = card.querySelector('.pm-source-actions')
+              const title = content.querySelector('h2')
+              const meta = content.querySelector('p')
+              const picker = actions.querySelector('select')
+              const table = document.querySelector('.pm-decompose-grid .pm-table-scroll')
+              const narrow = matchMedia('(max-width: 900px)').matches
+              const titleStyle = getComputedStyle(title)
+              return [
+                [content.clientWidth < card.clientWidth * .4, '合同来源栏被挤窄'],
+                [title.offsetHeight > parseFloat(titleStyle.lineHeight) * 2 + 1, '项目名称超过两行'],
+                [meta.offsetHeight > parseFloat(getComputedStyle(meta).lineHeight) * 2 + 1, '合同与客户信息超过两行'],
+                [picker.getBoundingClientRect().right > card.getBoundingClientRect().right, '项目选择器超出来源卡片'],
+                [narrow && table.clientWidth < card.clientWidth - 2, '窄屏表格没有占满可用宽度'],
+                [title.title !== title.textContent, '项目名称未保留全文提示'],
+              ].filter(([failed]) => failed).map(([, message]) => message)
+            })
+            errors.push(...violations)
+          }
+          await picker.selectOption(longDecompositionProjects[0].id)
+        }
+        if (fieldReturnCase) {
+          await exerciseFieldReturn(page)
+          if (fieldReturnCalls !== 1) errors.push('确认退回应当只发出一次业务请求')
         }
         const metrics = await page.evaluate(() => ({
           scrollWidth: document.documentElement.scrollWidth,

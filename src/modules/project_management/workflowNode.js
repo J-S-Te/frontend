@@ -53,3 +53,14 @@ export function implementationPlanReady(item) {
     && item.conflict_status === 'PASSED'
     && (item.special !== '是' || item.tech_review_status === 'APPROVED')
 }
+
+// 用途：分流实施准备中的服务项，优先使用服务端完整历史得出的准备状态。
+// 参数：item 为服务项，event 为旧版接口上的最近节点事件。
+// 返回值：true 表示已确认准备，false 表示已退回待准备，null 表示来源未知。
+export function serviceItemPreparationConfirmed(item, event) {
+  if (typeof item.preparation_confirmed === 'boolean') return item.preparation_confirmed
+  if (event?.type === 'PREPARATION_STARTED') return true
+  if (event?.type === 'FIELD_RETURNED_TO_PREPARATION'
+    || (event?.type === 'ROLLBACK_APPROVED' && event.payload?.kind === 'FIELD_TO_PREPARATION')) return false
+  return null
+}

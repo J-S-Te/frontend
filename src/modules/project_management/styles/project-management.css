@@ -1516,8 +1516,8 @@
    ========================================================================== */
 .pm-source-card {
   display: grid;
-  grid-template-columns: 40px minmax(0, 1fr) auto;
-  align-items: center;
+  grid-template-columns: 40px minmax(0, 1fr) minmax(0, min(40%, 28rem));
+  align-items: start;
   gap: 14px;
   margin-bottom: 14px;
   padding: var(--pm-sp-4) var(--pm-sp-5);
@@ -1531,15 +1531,16 @@
 .pm-source-icon { width: 40px; height: 40px; display: grid; place-items: center; border-radius: var(--pm-r-sm); background: var(--pm-primary-soft); color: var(--pm-blue-text); }
 .pm-source-icon svg { width: 20px; height: 20px; }
 .pm-source-content { min-width: 0; }
-.pm-source-content > span { color: var(--pm-blue-text); font-size: var(--pm-fs-nano); font-weight: var(--pm-fw-bold); letter-spacing: .12em; text-transform: uppercase; }
+.pm-source-content > span { white-space: nowrap; color: var(--pm-blue-text); font-size: var(--pm-fs-nano); font-weight: var(--pm-fw-bold); letter-spacing: .12em; text-transform: uppercase; }
 .pm-source-card h2 { margin: 3px 0; color: var(--pm-ink); font-size: var(--pm-fs-card); font-weight: var(--pm-fw-semibold); }
 .pm-source-card p { margin: 0; color: var(--pm-body); font-size: var(--pm-fs-hint); }
-.pm-source-actions { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: var(--pm-sp-3); }
+.pm-source-actions { display: flex; min-width: 0; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: var(--pm-sp-3); }
 .pm-decomposition-switcher {
   display: flex;
   align-items: center;
   gap: var(--pm-sp-3);
-  min-width: min(430px, 36vw);
+  flex: 1 1 100%;
+  min-width: 0;
   padding: 6px 7px 6px var(--pm-sp-3);
   border: 1px solid var(--pm-primary-border);
   border-radius: var(--pm-r-lg);
@@ -1582,15 +1583,17 @@
   cursor: pointer;
 }
 .pm-decomposition-switcher select:focus-visible { outline: 0; }
+.pm-decomposition-table { min-width: 48rem; }
 
 .pm-decompose-grid { display: grid; grid-template-columns: 240px minmax(0, 1fr); gap: var(--pm-sp-4); }
 .pm-decomposition-empty { min-height: 320px; border: 1px dashed var(--pm-line-strong); border-radius: var(--pm-r-lg); background: var(--pm-card); }
 .pm-config-layout { display: grid; grid-template-columns: 260px minmax(0, 1fr); gap: var(--pm-sp-4); align-items: start; }
 
 .pm-tree-panel { padding-bottom: 14px; }
+.pm-tree-panel > header > span { flex: none; white-space: nowrap; }
 .pm-tree-panel > button { width: calc(100% - 24px); display: flex; align-items: center; gap: 10px; margin: 10px var(--pm-sp-3) 0; padding: var(--pm-sp-3); border: 1px solid var(--pm-line); border-radius: var(--pm-r-sm); background: var(--pm-card); text-align: left; font-size: var(--pm-fs-sm); }
 .pm-tree-panel > button.active { border-color: var(--pm-primary-border); background: var(--pm-primary-soft); }
-.pm-tree-panel button > span { width: var(--pm-h-control); height: var(--pm-h-control); display: grid; place-items: center; border-radius: var(--pm-r-sm); background: var(--pm-content); color: var(--pm-body); font-size: var(--pm-fs-micro); font-weight: var(--pm-fw-bold); }
+.pm-tree-panel button > span { flex: none; width: var(--pm-h-control); height: var(--pm-h-control); display: grid; place-items: center; border-radius: var(--pm-r-sm); background: var(--pm-content); color: var(--pm-body); font-size: var(--pm-fs-micro); font-weight: var(--pm-fw-bold); }
 .pm-tree-panel button div { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
 .pm-tree-panel button b { color: var(--pm-ink); font-size: var(--pm-fs-sm); overflow-wrap: anywhere; }
 .pm-tree-panel button small { color: var(--pm-muted); font-size: var(--pm-fs-hint); }
@@ -1647,12 +1650,12 @@
   /* 顶栏此时只剩铃铛与头像：账号名与退出入口本就在侧栏底部，窄屏无需再隐藏任何文案。 */
   .pm-page { padding: var(--pm-sp-5) var(--pm-sp-4) var(--pm-sp-7); }
   .pm-page-head { align-items: flex-start; }
-  .pm-decompose-grid,
+  .pm-decompose-grid { grid-template-columns: minmax(0, 1fr); }
   .pm-config-layout { grid-template-columns: 1fr; }
   .pm-tree-panel { display: none; }
   .pm-source-card { grid-template-columns: 40px minmax(0, 1fr); }
   .pm-source-actions { grid-column: 1 / -1; justify-content: space-between; padding-top: var(--pm-sp-3); border-top: 1px solid var(--pm-primary-border); }
-  .pm-decomposition-switcher { flex: 1; min-width: 220px; }
+  .pm-decomposition-switcher { flex: 1 1 220px; }
   .pm-filters { flex-wrap: wrap; }
   .pm-filters label { width: 100%; }
   .pm-notifications { right: var(--pm-sp-4); width: min(340px, calc(100vw - 30px)); }
@@ -1681,7 +1684,7 @@
   .pm-source-card { gap: var(--pm-sp-3); padding: var(--pm-sp-4); }
   .pm-source-card h2 { font-size: var(--pm-fs-ui); }
   .pm-source-actions { align-items: stretch; flex-direction: column; }
-  .pm-decomposition-switcher { box-sizing: border-box; width: 100%; min-width: 0; }
+  .pm-decomposition-switcher { box-sizing: border-box; width: 100%; flex-basis: auto; }
   .pm-decomposition-switcher-label { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
   .pm-source-actions > .pm-badge { align-self: flex-start; }
   .pm-responsive-list tbody tr { grid-template-columns: minmax(0, 1fr); }
@@ -2423,7 +2426,6 @@
 .pm-decomposition-switcher-label { color: var(--pm-muted); font-size: var(--pm-fs-nano); font-weight: 400; letter-spacing: .04em; }
 .pm-decomposition-select-shell::after { border-color: var(--pm-faint); }
 .pm-decomposition-switcher select { height: var(--pm-h-control); padding: 0 32px 0 10px; border-radius: var(--pm-r-xs); background: var(--pm-card); font-size: var(--pm-fs-sm); font-weight: 400; line-height: var(--pm-h-control); }
-.pm-decompose-grid { grid-template-columns: 240px minmax(0, 1fr); gap: var(--pm-sp-4); }
 .pm-tree-panel > button { border-color: var(--pm-line-soft); border-radius: var(--pm-r-sm); }
 .pm-tree-panel > button.active { border-color: var(--pm-primary-border); background: var(--pm-primary-soft); }
 .pm-tree-panel button > span { border-radius: var(--pm-r-xs); background: var(--pm-sunken); color: var(--pm-body); font-size: var(--pm-fs-nano); }

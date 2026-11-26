@@ -158,3 +158,19 @@ test('真实收件箱包含授权快照中的回退待审项，并随驳回事�
     assert.deepEqual(state.pending.value.map(item => item.id), ['assigned'])
   } finally { state.scope.stop() }
 })
+
+test('服务项准备状态在最新事件窗口缺失或滞后时仍可正确分流', () => {
+  const prepared = { preparation_confirmed: true }
+  const returned = { preparation_confirmed: false }
+  const confirmation = { type: 'PREPARATION_STARTED' }
+  const fieldReturn = { type: 'FIELD_RETURNED_TO_PREPARATION' }
+  const legacyReturn = { type: 'ROLLBACK_APPROVED', payload: { kind: 'FIELD_TO_PREPARATION' } }
+  assert.equal(workflow.serviceItemPreparationConfirmed(prepared), true)
+  assert.equal(workflow.serviceItemPreparationConfirmed(returned), false)
+  assert.equal(workflow.serviceItemPreparationConfirmed(returned, confirmation), false)
+  assert.equal(workflow.serviceItemPreparationConfirmed(prepared, fieldReturn), true)
+  assert.equal(workflow.serviceItemPreparationConfirmed({}, confirmation), true)
+  assert.equal(workflow.serviceItemPreparationConfirmed({}, fieldReturn), false)
+  assert.equal(workflow.serviceItemPreparationConfirmed({}, legacyReturn), false)
+  assert.equal(workflow.serviceItemPreparationConfirmed({}), null)
+})

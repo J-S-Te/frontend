@@ -191,23 +191,23 @@ test('缺少项目系统名称时诚实显示缺失说明，编号仍可追溯',
 test('拆解确认合同卡以项目名为标题并保留合同客户来源', async () => {
   const html = await renderFragment(findElement('pm-decomposition-source-card').loc.source, {
     decompositionProject: project, decompositionProjects: [project],
+    decompositionProjectName: project.name, decompositionSourceLabel: '合同 HT-DISPLAY · 合成客户',
   })
-  assert.match(html, /<h2>合成展示项目<\/h2>/)
-  assert.match(html, /HT-DISPLAY/)
-  assert.match(html, /合成客户/)
+  assert.match(html, /<h2[^>]*title="合成展示项目">合成展示项目<\/h2>/)
+  assert.match(html, /<p[^>]*title="合同 HT-DISPLAY · 合成客户">合同 HT-DISPLAY · 合成客户<\/p>/)
 })
 
 test('拆解树和表格突出项目系统名称，原批次与纳入状态保持', async () => {
   const grid = findElement('pm-decompose-grid')
   const fragment = grid.children.map(node => node.loc.source).join('')
   const html = await renderFragment(fragment, {
-    decompositionProject: project, currentDecompositionItems: items,
+    decompositionProject: project, decompositionProjectName: project.name, currentDecompositionItems: items,
     decompositionBatches: [['第一批次', items]], activeDecompositionBatch: '第一批次',
     visibleDecompositionItems: items, selectedDecompositionBatch: '',
   })
-  assert.match(html, /<h2>合成展示项目<\/h2>/)
-  assert.match(html, /<b>档案系统、办公系统<\/b>/)
-  assert.match(html, /<b>合成展示项目 · 档案系统<\/b>/)
+  assert.match(html, /<h2[^>]*>合成展示项目<\/h2>/)
+  assert.match(html, /<b[^>]*>档案系统、办公系统<\/b>/)
+  assert.match(html, /<b[^>]*title="合成展示项目 · 档案系统">合成展示项目 · 档案系统<\/b>/)
   assert.match(html, /<small[^>]*class="[^"]*pm-service-code[^"]*"[^>]*>[^<]*SI-ONE<\/small>/)
   assert.match(html, /第一批次/)
   assert.match(html, /aria-pressed="true"/)
@@ -217,11 +217,11 @@ test('拆解树和表格突出项目系统名称，原批次与纳入状态保�
 test('拆解批次合并展示相同系统名称，仍保留真实服务项数量', async () => {
   const sameSystemItems = [items[0], { ...items[1], system: items[0].system }]
   const html = await renderFragment(findElement('pm-tree-panel').loc.source, {
-    decompositionProject: project, currentDecompositionItems: sameSystemItems,
+    decompositionProjectName: project.name, currentDecompositionItems: sameSystemItems,
     decompositionBatches: [['第一批次', sameSystemItems]],
     activeDecompositionBatch: '第一批次', selectedDecompositionBatch: '',
   })
-  assert.match(html, /<b>档案系统<\/b>/)
+  assert.match(html, /<b[^>]*>档案系统<\/b>/)
   assert.doesNotMatch(html, /档案系统、档案系统/)
   assert.match(html, /2 个服务项/)
 })
