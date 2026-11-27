@@ -3,6 +3,7 @@ import { RELATED_DATA, publishRelatedDataChanged } from '../../shared/utils/rela
 import { formatUserError } from '../../../shared/utils/userError.js'
 import { postCredentialJSON, postCredentialFormData } from '../../../shared/credential/credentialRequest.js'
 import { CredentialProtocolError } from '../../../shared/credential/credentialProtocol.js'
+import { IAM_PERMISSIONS } from '../utils/iamPermissions.js'
 
 /**
  * IamError 表示 IAM 接口返回的结构化错误。
@@ -175,6 +176,31 @@ export async function createEmployee({ user, account = null, membership = null }
       : credentialRequest('/employees', 'CREATE_EMPLOYEE', payload),
     [RELATED_DATA.PEOPLE, RELATED_DATA.MEMBERSHIPS],
   )
+}
+
+// 用途：读取本次入职使用的账号权限和任职组织范围。
+// 参数：principal 为当前会话，仅在旧版服务端未提供预检接口时使用其租户级权限码。
+// 返回值：入职授权快照；请求失败或数据格式异常时抛出错误。
+export async function getEmployeeOnboardingPermissions(principal) {
+  let permissions
+  try {
+    permissions = await request('/employees/onboarding-permissions', { method: 'GET' })
+  } catch (error) {
+    if (!employeeEndpointUnavailable(error)) throw error
+    const codes = Array.isArray(principal?.permission_codes) ? principal.permission_codes : []
+    return {
+      can_create_account: codes.includes(IAM_PERMISSIONS.accountCreate),
+      all_organizations: codes.includes(IAM_PERMISSIONS.membershipCreate),
+      organization_ids: [],
+    }
+  }
+  if (typeof permissions?.can_create_account !== 'boolean' ||
+      typeof permissions.all_organizations !== 'boolean' ||
+      !Array.isArray(permissions.organization_ids) ||
+      permissions.organization_ids.some(id => typeof id !== 'string' || id === '')) {
+    throw new IamError('入职权限响应格式不完整，请重新读取。', { code: 'IAM_INVALID_ONBOARDING_PERMISSIONS' })
+  }
+  return permissions
 }
 
 function employeeEndpointUnavailable(error) {
