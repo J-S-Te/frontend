@@ -140,7 +140,9 @@ for (const status of [403, 503]) {
       loadError: ref(''), ruleConfigurationCatalogError: ref(''),
       session: ref({ permissions: ['project.create'] }),
       navigation: ref({ sections: ['projects', 'automations'] }),
-      selectedServiceItemIDs: ref(['old']), projectForm: ref({ name: '尚未提交的项目' }),
+      selectedServiceItemIDs: ref(['old']),
+      operationDetail: ref({ section: 'reports', row: { id: 'old' } }),
+      projectForm: ref({ name: '尚未提交的项目' }),
       getProjectSession: async () => { throw Object.assign(Error('当前授权不可用'), { status }) },
       subsystemAccessMessage: error => error.message }
     for (const name of ['projects', 'serviceItems', 'rules', 'capabilities']) {
@@ -151,6 +153,7 @@ for (const status of [403, 503]) {
     await api.loadWorkspace({ background: true })
     assert.equal(context.session.value, null)
     assert.deepEqual(Array.from(context.navigation.value.sections), [])
+    assert.equal(context.operationDetail.value, null)
     assert.equal(context.projectForm.value.name, '尚未提交的项目')
     assert.equal(context.loadError.value, '当前授权不可用')
   })

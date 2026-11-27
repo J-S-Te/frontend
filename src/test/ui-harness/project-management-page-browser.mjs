@@ -42,6 +42,8 @@ const cases = [
   { key: 'exceptions', section: 'exceptions' },
   { key: 'standards', section: 'standards' },
   { key: 'reports', section: 'reports' },
+  { key: 'reports-archived-history', section: 'reports', query: { service_item_id: 'SI-0852-01' } },
+  { key: 'reports-archived-only', section: 'reports' },
   { key: 'split-rules', section: 'split-rules' },
   { key: 'config-warning-rules', section: 'warning-rules' },
   { key: 'config-automations', section: 'automations' },
@@ -99,6 +101,8 @@ window.__mountPM = ({ section, query = {} }) => {
 
 const NOW = '2026-11-12T10:30:00+08:00'
 const fieldReturnItemID = 'SI-0823-01'
+const archivedReportItemID = 'SI-0852-01'
+const activeReportItemID = 'SI-0823-04'
 const fieldReturnProjectID = 'PJ-2026-0823'
 const fieldReturnReason = '现场条件变化，需重新核验设备'
 const personnelPlanProjectID = 'PJ-2026-0855'
@@ -430,9 +434,19 @@ function jsonResponse(value) {
 // 用途：为项目页面夹具提供隔离的 API 数据。
 // 参数：pathname 和 search 为请求路径及筛选，其余参数标记独立夹具场景。
 // 返回值：匹配的模拟响应，未覆盖的只读路径返回空集合。
-function projectFixture(pathname, search, { longDecomposition, fieldReturned, penetrationPersonnel, personnelPlans }) {
+function projectFixture(pathname, search, {
+  longDecomposition, fieldReturned, penetrationPersonnel, personnelPlans, reportHistoryCase,
+  reportArchiveAccessLost,
+}) {
   const path = pathname.slice('/project_management/api/v1'.length)
   if (path === '/auth/me') {
+    if (reportArchiveAccessLost) {
+      return {
+        ...session,
+        roles: ['project_manager'],
+        data_scopes: [{ type: 'SELF', id: session.user_id }],
+      }
+    }
     if (!penetrationPersonnel) return session
     return { ...session, roles: ['project_manager'],
       permissions: session.permissions.filter((permission) => permission !== 'project.execution.assign') }
@@ -457,6 +471,16 @@ function projectFixture(pathname, search, { longDecomposition, fieldReturned, pe
     return { items: rows, total: rows.length, page: 1, page_size: rows.length, truncated: false }
   }
   if (path === '/service-items') {
+    if (reportHistoryCase) {
+      const archived = serviceItems.find((item) => item.id === archivedReportItemID)
+      const active = serviceItems.find((item) => item.id === activeReportItemID)
+      const activeReport = { ...active, project_id: 'PJ-2026-0826', project_manager_id: session.user_id }
+      const archivedReport = { ...archived, project_id: activeReport.project_id }
+      const items = reportHistoryCase === 'reports-archived-only'
+        ? [{ ...archived, project_id: 'PJ-2026-0855' }]
+        : reportArchiveAccessLost ? [activeReport] : [activeReport, archivedReport]
+      return { items, total: items.length, page: 1, page_size: items.length, truncated: false }
+    }
     if (personnelPlans) {
       const items = personnelPlanCases.map(({ id, version, engineer }) => ({
         id, version, project_id: personnelPlanProjectID, site: '实施计划验证点位', category: '等保测评',
@@ -671,6 +695,46 @@ async function exerciseIndependentPersonnel(page, published) {
   assert.equal(published.size, 2)
   assert.deepEqual(published.get('SI-PLAN-A').personnel.map((row) => row.resource_id), ['u-lead-1', 'u-eng-1'])
 }
+// 用途：验证归档项只在历史表可查，既不进入队列，也不影响计数。
+// 参数：page 为报告工作台页面，onlyArchived 表示没有待处理项。
+//       revokeAccess 模拟打开历史详情后失去该服务项的访问权限。
+// 返回值：无；只读详情、展示范围或统计口径不符时断言失败。
+async function exerciseArchivedReportHistory(page, onlyArchived, revokeAccess) {
+  const queue = page.locator('.pm-operation-queue')
+  const table = page.locator('.pm-table-panel table')
+  const pending = page.locator('.pm-operational-stats article').first()
+  const activeCount = onlyArchived ? 0 : 1
+  await queue.getByText(activeCount + ' 项', { exact: true }).waitFor({ timeout: 5000 })
+  assert.equal(await pending.locator('strong').textContent(), String(activeCount))
+  assert.equal(await queue.getByRole('option').filter({ hasText: archivedReportItemID }).count(), 0)
+  assert.equal(await queue.getByRole('option').filter({ hasText: activeReportItemID }).count(), activeCount)
+  assert.ok(!(await page.locator('.pm-operation-panel').textContent()).includes(archivedReportItemID))
+
+  const selected = queue.getByRole('option', { selected: true })
+  const previousSelection = await selected.allTextContents()
+  const archived = table.getByRole('row').filter({ hasText: archivedReportItemID })
+  await archived.getByText('已归档', { exact: true }).waitFor({ timeout: 5000 })
+  assert.equal(await table.getByRole('row').filter({ hasText: activeReportItemID }).count(), activeCount)
+  assert.equal(await archived.getByRole('button').count(), 1)
+  await archived.getByRole('button', { name: '查看详情' }).click()
+
+  const drawer = page.locator('.pm-drawer').filter({ hasText: archivedReportItemID })
+  await drawer.getByText('已归档', { exact: true }).waitFor({ timeout: 5000 })
+  assert.deepEqual(await drawer.getByRole('button').evaluateAll((buttons) =>
+    buttons.map((button) => (button.getAttribute('aria-label') || button.textContent).trim())),
+  ['关闭', '关闭'])
+  assert.equal(await drawer.locator('input, textarea, select').count(), 0)
+  assert.deepEqual(await selected.allTextContents(), previousSelection)
+  if (onlyArchived) {
+    await drawer.getByRole('button', { name: '关闭' }).first().click()
+  } else {
+    await revokeAccess()
+    await archived.waitFor({ state: 'hidden', timeout: 5000 })
+    await queue.getByRole('option').filter({ hasText: activeReportItemID }).waitFor({ timeout: 5000 })
+  }
+  await drawer.waitFor({ state: 'hidden', timeout: 5000 })
+}
+
 try {
   for (const width of widthList) {
     for (const theme of themes) {
@@ -681,7 +745,9 @@ try {
         const fieldReturnCase = item.key === 'implementation-field-return'
         const personnelPlans = item.key === 'planning-independent-personnel' ? new Map() : null
         const penetrationPersonnel = item.key === 'penetration-personnel'
+        const reportHistoryCase = item.key.startsWith('reports-archived-') ? item.key : ''
         let fieldReturned = false
+        let reportArchiveAccessLost = false
         let fieldReturnCalls = 0
         page.on('pageerror', error => errors.push(error.message))
         page.on('console', message => { if (message.type() === 'error') errors.push(message.text()) })
@@ -691,6 +757,11 @@ try {
           if (url.pathname === '/') return route.fulfill({ status: 200, contentType: 'text/html; charset=utf-8', body: shell })
           if (['/api/v1/notifications/inbox/stream', '/project_management/api/v1/workflow/stream'].includes(url.pathname)) {
             return route.fulfill({ status: 200, contentType: 'text/event-stream', body: ': fixture\n\n' })
+          }
+          if (reportHistoryCase && route.request().method() !== 'GET'
+            && url.pathname.startsWith('/project_management/api/v1/service-items/')) {
+            errors.push('归档报告只读查看不应发出业务写请求')
+            return route.abort()
           }
           if (fieldReturnCase && route.request().method() === 'POST'
             && url.pathname.startsWith('/project_management/api/v1/service-items/')) {
@@ -716,7 +787,10 @@ try {
             return route.fulfill(jsonResponse({ status: '待实施' }))
           }
           const data = url.pathname.startsWith('/project_management/api/v1')
-            ? projectFixture(url.pathname, url.searchParams, { longDecomposition, fieldReturned, penetrationPersonnel, personnelPlans })
+            ? projectFixture(url.pathname, url.searchParams, {
+              longDecomposition, fieldReturned, penetrationPersonnel, personnelPlans, reportHistoryCase,
+              reportArchiveAccessLost,
+            })
             : platformFixture(url.pathname, url.searchParams)
           return route.fulfill(jsonResponse(data))
         })
@@ -771,6 +845,12 @@ try {
         }
         if (penetrationPersonnel) await exercisePenetrationPersonnel(page)
         if (personnelPlans) await exerciseIndependentPersonnel(page, personnelPlans)
+        if (reportHistoryCase) {
+          await exerciseArchivedReportHistory(page, reportHistoryCase === 'reports-archived-only', async () => {
+            reportArchiveAccessLost = true
+            await page.evaluate(() => window.dispatchEvent(new Event('dsh:authorization-denied')))
+          })
+        }
         const metrics = await page.evaluate(() => ({
           scrollWidth: document.documentElement.scrollWidth,
           clientWidth: document.documentElement.clientWidth,
