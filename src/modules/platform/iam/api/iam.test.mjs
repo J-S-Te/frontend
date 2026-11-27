@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { afterEach, test } from 'node:test'
 import { readFile } from 'node:fs/promises'
+import * as iam from './iam.js'
 import {
   RELATED_DATA,
   relatedDataVersion,
@@ -124,6 +125,36 @@ test('createEmployee sends the atomic employee contract to POST /employees', asy
   assert.equal(requested.url, '/api/v1/employees')
   assert.equal(requested.options.method, 'POST')
   assert.deepEqual(JSON.parse(requested.options.body), payload)
+})
+
+test('新增员工权限预检以服务端的组织范围为准并保留账号权限结果', async () => {
+  const permissions = { can_create_account: false, all_organizations: false, organization_ids: ['tech'] }
+  globalThis.fetch = async (url, options) => {
+    assert.equal(url, '/api/v1/employees/onboarding-permissions')
+    assert.equal(options.method, 'GET')
+    return jsonResponse({ data: permissions })
+  }
+  assert.deepEqual(await iam.getEmployeeOnboardingPermissions({
+    permission_codes: ['platform:user:create', 'platform:account:create'],
+  }), permissions)
+})
+
+test('仅旧版服务端缺少入职预检接口时使用会话中的租户级权限', async () => {
+  const principal = { permission_codes: ['platform:user:create', 'platform:membership:create'] }
+  globalThis.fetch = async () => jsonResponse({}, { ok: false, status: 404 })
+  assert.deepEqual(await iam.getEmployeeOnboardingPermissions(principal), {
+    can_create_account: false, all_organizations: true, organization_ids: [],
+  })
+
+  globalThis.fetch = async () => jsonResponse({}, { ok: false, status: 403 })
+  await assert.rejects(iam.getEmployeeOnboardingPermissions(principal), { status: 403 })
+})
+
+test('拒绝格式异常的入职授权结果', async () => {
+  globalThis.fetch = async () => jsonResponse({ data: {
+    can_create_account: true, all_organizations: 'false', organization_ids: [],
+  } })
+  await assert.rejects(iam.getEmployeeOnboardingPermissions(), { code: 'IAM_INVALID_ONBOARDING_PERMISSIONS' })
 })
 
 test('createEmployeesBatch sends Chinese organization and position names to the atomic batch endpoint', async () => {

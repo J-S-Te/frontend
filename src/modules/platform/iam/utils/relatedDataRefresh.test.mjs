@@ -52,7 +52,7 @@ test('前置检查在快速补齐后等待目录确认，未确认前不能继�
 test('员工弹窗接收目录加载 / 失败状态，且只清除确实失效的选择', () => {
   assert.match(employeeModal, /referencesLoading: \{ type: Boolean/)
   assert.match(employeeModal, /referencesError: \{ type: String/)
-  assert.match(employeeModal, /references-loading="referencesLoading"/)
+  assert.match(employeeModal, /references-loading="referencesLoading \|\| onboardingPermissionsLoading"/)
   assert.match(employeeModal, /dropSelectionIfMissing\('organization'\)/)
   assert.match(employeeModal, /dropSelectionIfMissing\('position'\)/)
   assert.match(employeeModal, /其余已填写内容保持不变/)

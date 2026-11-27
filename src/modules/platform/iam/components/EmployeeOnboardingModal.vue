@@ -9,6 +9,7 @@ import { useDialogFocusTrap } from '../../../shared/composables/useDialogFocusTr
 import ConsoleIcon from '@/modules/platform/shared/components/ConsoleIcon.vue'
 import {
   IamError,
+  getEmployeeOnboardingPermissions,
   onboardEmployee,
 } from '@/modules/platform/iam/api/iam'
 import { previewPositionAuthorization } from '@/modules/platform/iam/api/positionAuthorization'
@@ -25,6 +26,7 @@ import {
 } from '@/modules/platform/iam/utils/selectionCatalog'
 import { useRelatedDataInvalidation } from '@/modules/platform/shared/composables/useRelatedDataInvalidation'
 import { RELATED_DATA } from '@/modules/platform/shared/utils/relatedDataInvalidation'
+import { createRequestScope } from '@/modules/platform/shared/composables/requestScope'
 import OnboardingPrerequisiteStep from '@/modules/platform/iam/components/OnboardingPrerequisiteStep.vue'
 
 const props = defineProps({
@@ -48,7 +50,7 @@ const form = reactive(defaultEmployeeOnboardingForm())
 const onboardingDialogElement = ref(null)
 useDialogFocusTrap({ active: ref(true), container: onboardingDialogElement, initialFocus: 'input:not([type="hidden"]), select, textarea' })
 // 入职草稿按会话主体（租户+用户）隔离：他人或未识别主体不得恢复；登出统一清除。
-const onboardingPrincipal = useCurrentPrincipal().principal
+const { principal: onboardingPrincipal, lastFingerprint: onboardingPermissionContext } = useCurrentPrincipal()
 const draftRecovery = useFormDraft({
   key: 'uip:employee-onboarding-draft',
   form,
@@ -72,6 +74,16 @@ let previousBodyOverflow = ''
 // 触发前置检查组件内部"快速补齐"操作时使用的轻量递增计数器。
 // 父组件 (PlatformConsoleView) 监听 prerequisites-bump 事件并按需刷新 orgs/positions/applications。
 const prereqRefreshKey = ref(0)
+const onboardingPermissions = ref(null)
+const onboardingPermissionsError = ref('')
+const onboardingPermissionsLoading = ref(true)
+const onboardingPermissionsScope = createRequestScope()
+const canCreateAccount = computed(() => !onboardingPermissionsLoading.value &&
+  onboardingPermissions.value?.can_create_account === true)
+const createAccount = computed({
+  get: () => canCreateAccount.value && form.create_account,
+  set: (checked) => { form.create_account = canCreateAccount.value && checked },
+})
 
 onMounted(() => {
   formInitialSnapshot = createFormSnapshot(form)
@@ -102,7 +114,23 @@ function positionName(item) {
   return item?.name || item?.position_name || item?.code || positionId(item)
 }
 
-const organizationOptions = computed(() => organizationSelectOptions(props.organizations))
+const organizationOptions = computed(() => {
+  const options = organizationSelectOptions(props.organizations)
+  if (onboardingPermissions.value?.all_organizations) return options
+  const allowed = new Set(onboardingPermissions.value?.organization_ids || [])
+  return options.filter(item => allowed.has(item.option_id))
+})
+const onboardingPermissionNotice = computed(() => {
+  const permissions = onboardingPermissions.value
+  if (!permissions || permissions.all_organizations) return ''
+  if (!permissions.organization_ids.length) return '当前账号没有创建员工任职关系的权限。'
+  if (!props.referencesLoading && !props.referencesError && !organizationOptions.value.length) {
+    return '当前组织目录中没有可办理任职的组织，请核对组织状态与管理范围。'
+  }
+  return ''
+})
+const hasOnboardingScope = computed(() => !!onboardingPermissions.value && !onboardingPermissionNotice.value)
+const canStartOnboarding = computed(() => hasOnboardingScope.value && !onboardingPermissionsLoading.value)
 const membershipPositions = computed(() => positionsForOrganization(props.positions, form.org_unit_id))
 const selectedPosition = computed(() => membershipPositions.value.find((item) => positionId(item) === form.position_id) || null)
 const previewRoles = computed(() => Array.isArray(authorizationPreview.value?.roles) ? authorizationPreview.value.roles : [])
@@ -114,19 +142,46 @@ watch(() => form.org_unit_id, () => {
   }
 })
 
+// 用途：读取当前账号的入职权限，丢弃切换账号或重复读取后的旧响应。
+// 参数：keepVisible 为同一会话刷新目录时保留前置检查视图的标记。
+// 返回值：异步完成；读取失败时阻止办理并提供重试。
+async function loadOnboardingPermissions({ keepVisible = false } = {}) {
+  const ticket = onboardingPermissionsScope.begin(onboardingPermissionContext.value)
+  if (!keepVisible) onboardingPermissions.value = null
+  onboardingPermissionsLoading.value = true
+  onboardingPermissionsError.value = ''
+  if (!onboardingPrincipal.value) return
+  try {
+    const permissions = await getEmployeeOnboardingPermissions(onboardingPrincipal.value)
+    if (onboardingPermissionsScope.isCurrent(ticket)) onboardingPermissions.value = permissions
+  } catch (error) {
+    if (onboardingPermissionsScope.isCurrent(ticket)) {
+      onboardingPermissions.value = null
+      onboardingPermissionsError.value = formatUserError(error, { fallback: '无法读取入职权限，请重试。' })
+    }
+  } finally {
+    if (onboardingPermissionsScope.isCurrent(ticket)) onboardingPermissionsLoading.value = false
+  }
+}
+
+watch(onboardingPermissionContext, () => { void loadOnboardingPermissions() }, { immediate: true, flush: 'sync' })
+
 // 目录重新读取后只清理“确实已经失效”的选择，并说明原因；姓名、账号、有效期等
 // 已填写内容一律保留。加载进行中的空数组不代表失效，因此先跳过。
 const selectionNotice = ref('')
 
+// 用途：清理目录或任职授权变化后已失效的选择。
+// 参数：kind 指定需要复核的是组织还是岗位。
+// 返回值：无；有效选择和其他表单字段继续保留。
 function dropSelectionIfMissing(kind) {
   if (props.referencesLoading) return
   if (kind === 'organization') {
-    if (!form.org_unit_id) return
+    if (!onboardingPermissions.value || !form.org_unit_id) return
     const stillVisible = organizationOptions.value.some((item) => String(item.option_id) === String(form.org_unit_id))
     if (stillVisible) return
     form.org_unit_id = ''
     form.position_id = ''
-    selectionNotice.value = '原选组织已停用或不再对当前账号可见，已清除该组织与岗位选择；其余已填写内容保持不变。'
+    selectionNotice.value = '原选组织已停用、不可见或超出任职管理范围，已清除组织与岗位选择。'
     return
   }
   if (!form.position_id) return
@@ -136,7 +191,7 @@ function dropSelectionIfMissing(kind) {
   selectionNotice.value = '原选岗位已停用或不再属于当前组织，已清除岗位选择；其余已填写内容保持不变。'
 }
 
-watch(() => props.organizations, () => dropSelectionIfMissing('organization'))
+watch([() => props.organizations, onboardingPermissions], () => dropSelectionIfMissing('organization'))
 watch(() => props.positions, () => dropSelectionIfMissing('position'))
 
 // 岗位授权模板或岗位映射变化后，已展示的“即将继承的应用角色”不再代表当前授权。
@@ -166,15 +221,22 @@ async function close() {
   emit('close')
 }
 
+// 用途：目录与任职权限均通过预检时进入员工录入。
+// 参数：无。
+// 返回值：无。
 function handlePrerequisitesContinue() {
-  if (!prerequisitesReady.value) return
+  if (!canStartOnboarding.value || !prerequisitesReady.value) return
   currentStep.value = 1
 }
 
+// 用途：快速补齐目录后重查目录和任职范围。
+// 参数：无。
+// 返回值：无。
 function handlePrerequisitesRefresh() {
   // 通知父级重新拉取 orgs/positions/applications，前置检查组件会随之重算状态。
   prereqRefreshKey.value += 1
   emit('refresh-prerequisites')
+  void loadOnboardingPermissions({ keepVisible: true })
 }
 
 function goToStep(step) {
@@ -216,8 +278,11 @@ function validateUser() {
   return { display_name: displayName, email, mobile, status: form.status || 'ACTIVE', valid_until: validUntil }
 }
 
+// 用途：校验本次有权创建且明确勾选的本地账号。
+// 参数：无，使用入职表单及预检结果。
+// 返回值：账号入参；没有勾选或缺权时返回 null。
 function validateAccount() {
-  if (!form.create_account) return null
+  if (!createAccount.value) return null
   const accountName = String(form.account_name ?? '').trim()
   if (Array.from(accountName).length < 3 || Array.from(accountName).length > 64) {
     throw fieldValidationError('account_name', '账号名长度必须为 3–64 个字符。')
@@ -240,8 +305,14 @@ function validateAccount() {
   return { account_name: accountName, initial_password: password, valid_until: validUntil }
 }
 
+// 用途：核对任职组织位于有效范围内且岗位属于该组织。
+// 参数：无，使用表单及已授权组织目录。
+// 返回值：任职入参；选择无效时抛出字段错误。
 function validateMembership() {
   if (!form.org_unit_id || !form.position_id) throw fieldValidationError('org_unit_id', '请选择员工所属组织和岗位，用户必须对应一条任职关系。')
+  if (!organizationOptions.value.some(item => item.option_id === form.org_unit_id)) {
+    throw fieldValidationError('org_unit_id', '请选择授权范围内的任职组织。')
+  }
   if (!membershipPositions.value.some((item) => positionId(item) === form.position_id)) throw fieldValidationError('position_id', '请选择当前组织下的岗位。')
 
   const isShortTerm = form.membership_validity_mode === 'SHORT_TERM'
@@ -277,25 +348,31 @@ async function loadAuthorizationPreview() {
   }
 }
 
+// 用途：说明入职失败原因，并保留旧版兼容流程的部分成功信息。
+// 参数：error 为入职接口抛出的错误。
+// 返回值：可向当前操作者展示的错误提示。
 function onboardingFailureMessage(error) {
   const partial = error?.partialCompletion
   if (partial?.userCreated === true) {
     const completed = partial.accountCreated === true ? '员工档案和本地账号已创建' : '员工档案已创建'
-    const pending = partial.accountCreated === true || !form.create_account ? '任职关系' : '本地账号'
+    const pending = partial.accountCreated === true || !createAccount.value ? '任职关系' : '本地账号'
     const reason = formatUserError(error.cause || error, { method: 'POST', fallback: '请联系管理员核对已有员工记录。' }).slice(0, 180)
     return `${completed}；${pending}创建尚未确认完成。${reason}请先核对现有记录，勿重复新增员工。`
   }
   return formatUserError(error, { method: 'POST', fallback: '新增员工失败。' })
 }
 
+// 用途：提交已通过权限预检和字段校验的原子入职请求。
+// 参数：无，使用当前向导状态及表单。
+// 返回值：异步完成；失败时保留表单并显示原因。
 async function submit() {
-  if (saving.value) return
+  if (saving.value || currentStep.value === 0 || !canStartOnboarding.value) return
   saving.value = true
   try {
     const user = validateUser()
     const account = validateAccount()
     const membership = validateMembership()
-    const payload = buildEmployeeOnboardingPayload(form, { user, account })
+    const payload = buildEmployeeOnboardingPayload({ ...form, create_account: createAccount.value }, { user, account })
     // 保留已经归一化的任职数据，不再从原始表单重建，以免长期/短期模式切换后旧日期回流。
     payload.membership = membership
 
@@ -310,6 +387,7 @@ async function submit() {
   } catch (error) {
     onboardingFieldError.value = error?.field ? { field: error.field, message: error.message } : null
     emit('toast', onboardingFailureMessage(error))
+    if (error?.status === 403) void loadOnboardingPermissions()
     if (error?.field) {
       await nextTick()
       document.querySelector(`[data-onboarding-field="${error.field}"]`)?.focus()
@@ -386,12 +464,19 @@ async function submit() {
           </li>
         </ol>
 
+        <p v-if="onboardingPermissionsError" class="console-form-error" role="alert">
+          {{ onboardingPermissionsError }}
+          <button type="button" class="console-button ghost small" @click="loadOnboardingPermissions()">重试权限检查</button>
+        </p>
+        <p v-else-if="onboardingPermissionsLoading" class="console-wizard-field-help" role="status">正在检查入职权限…</p>
+        <p v-else-if="onboardingPermissionNotice" class="console-form-error" role="alert">{{ onboardingPermissionNotice }}</p>
+
         <OnboardingPrerequisiteStep
-          v-if="currentStep === 0"
+          v-if="currentStep === 0 && hasOnboardingScope"
           :organizations="organizations"
           :positions="positions"
           :applications="applications"
-          :references-loading="referencesLoading"
+          :references-loading="referencesLoading || onboardingPermissionsLoading"
           :references-error="referencesError"
           :refresh-key="prereqRefreshKey"
           @ready="prerequisitesReady = true"
@@ -421,16 +506,24 @@ async function submit() {
             </div>
           </section>
 
-          <section class="console-wizard-section" :class="{ active: form.create_account, muted: !form.create_account }">
+          <section class="console-wizard-section" :class="{ active: createAccount, muted: !createAccount }">
             <div class="console-wizard-section-head">
               <span class="console-wizard-section-icon"><ConsoleIcon name="account" /></span>
               <div>
                 <h3>本地登录账号</h3>
-                <p>可选。关闭后只创建员工档案，后续可在“登录账号”中补建。</p>
+                <p v-if="onboardingPermissions && !onboardingPermissions.can_create_account"
+                  id="onboarding-account-permission">
+                  当前账号没有创建登录账号的权限。仍可创建员工档案和任职关系。
+                </p>
+                <p v-else>可选。关闭后创建员工档案及任职关系，后续可补建账号。</p>
               </div>
-              <label class="console-wizard-toggle"><input v-model="form.create_account" type="checkbox" /><span>同时创建</span></label>
+              <label class="console-wizard-toggle">
+                <input v-model="createAccount" type="checkbox" :disabled="!canCreateAccount || saving"
+                  :aria-describedby="onboardingPermissions && !onboardingPermissions.can_create_account ? 'onboarding-account-permission' : undefined" />
+                <span>同时创建</span>
+              </label>
             </div>
-            <div v-if="form.create_account" class="console-form-grid">
+            <div v-if="createAccount" class="console-form-grid">
               <label class="console-form-item"><span>登录账号 *</span><input v-model="form.account_name" data-onboarding-field="account_name" required minlength="3" maxlength="64" placeholder="例如：zhang.san" /><small class="console-wizard-field-help">账号必须唯一，以字母或数字开头。</small></label>
               <label class="console-form-item"><span>初始密码 *</span><div class="console-password-field"><input v-model="form.initial_password" data-onboarding-field="initial_password" :type="initialPasswordVisible ? 'text' : 'password'" required minlength="8" maxlength="128" autocomplete="new-password" /><button class="console-password-toggle" type="button" :aria-label="initialPasswordVisible ? '隐藏密码' : '显示密码'" @click="initialPasswordVisible = !initialPasswordVisible"><ConsoleIcon :name="initialPasswordVisible ? 'eye-off' : 'eye'" /></button></div></label>
               <label class="console-form-item"><span>账号有效期 *</span><select v-model="form.validity_mode"><option value="TEMPORARY">临时（默认 1 天）</option><option value="PERMANENT">永久</option></select></label>
@@ -485,7 +578,8 @@ async function submit() {
 
         <div class="console-form-actions">
           <button class="console-button ghost" type="button" :disabled="saving" @click="close">取消</button>
-          <button v-if="currentStep >= 1" class="console-button primary" type="submit" :disabled="saving"><ConsoleIcon name="save" />{{ saving ? '创建中…' : '创建员工' }}</button>
+          <button v-if="currentStep >= 1" class="console-button primary" type="submit"
+            :disabled="saving || !canStartOnboarding"><ConsoleIcon name="save" />{{ saving ? '创建中…' : '创建员工' }}</button>
         </div>
       </form>
     </section>

@@ -56,12 +56,24 @@ test('IAM 前置检查保留精确中文业务拒绝及结构化字段定位', a
   assert.match(state.formError.value, /填写名称/)
 })
 
+// 用途：执行已通过前置检查的入职提交，验证写入结果和错误提示。
+// 参数：onboardEmployee 为本用例注入的入职请求。
+// 返回值：提交入口、表单与捕获的组件事件。
 function onboarding(onboardEmployee) {
   const source = sources.EmployeeOnboardingModal
   const code = source.slice(source.indexOf('function onboardingFailureMessage('), source.indexOf('</script>'))
   const state = { saving: ref(false), form: { create_account: true }, events: [], onboardingFieldError: ref(null) }
-  const run = new Function('formatUserError', 'form', 'saving', 'emit', 'validateUser', 'validateAccount', 'validateMembership', 'buildEmployeeOnboardingPayload', 'onboardEmployee', 'onboardingFieldError', 'nextTick', 'document', 'draftRecovery',
-    `${code}; return submit;`)(formatUserError, state.form, state.saving, (...args) => state.events.push(args), () => ({ display_name: '测试员工' }), () => ({ account_name: 'test-account', initial_password: 'Test-fixture-only-1!' }), () => ({ org_unit_id: 'org-1', position_id: 'position-1', inherit_authorization: true }), (_form, { user, account }) => ({ user, account }), onboardEmployee, state.onboardingFieldError, (fn) => fn?.(), { querySelector: () => null }, { clear: () => {} })
+  const dependencies = {
+    formatUserError, form: state.form, saving: state.saving, onboardingFieldError: state.onboardingFieldError,
+    currentStep: ref(1), canStartOnboarding: ref(true), createAccount: computed(() => state.form.create_account),
+    emit: (...args) => state.events.push(args),
+    validateUser: () => ({ display_name: '测试员工' }),
+    validateAccount: () => ({ account_name: 'test-account', initial_password: 'Test-fixture-only-1!' }),
+    validateMembership: () => ({ org_unit_id: 'org-1', position_id: 'position-1', inherit_authorization: true }),
+    buildEmployeeOnboardingPayload: (_form, { user, account }) => ({ user, account }),
+    onboardEmployee, nextTick: fn => fn?.(), document: { querySelector: () => null }, draftRecovery: { clear() {} },
+  }
+  const run = new Function(...Object.keys(dependencies), `${code}; return submit;`)(...Object.values(dependencies))
   return { ...state, run }
 }
 
