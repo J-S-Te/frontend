@@ -528,7 +528,11 @@ const contractTypeOptions = computed(() => contractTypeItems.value.map((item) =>
 const availableContractTypeOptions = computed(() => isExternalContractMode.value
   ? contractTypeOptions.value.filter((value) => externalContractTypes.includes(value)) : contractTypeOptions.value)
 const serviceTypeOptions = computed(() => serviceTypeItems.value.map((item) => item.value))
-const systemLevelOptions = computed(() => systemLevelItems.value.map((item) => item.value).filter((value) => contractSystemLevels.includes(value)))
+const templateSystemLevelOptions = computed(() => systemLevelItems.value.map((item) => item.value))
+// 正文模板可以使用字典中的等级文本。服务项等级仍受合同领域枚举约束。
+const systemLevelOptions = computed(() =>
+  templateSystemLevelOptions.value.filter((value) => contractSystemLevels.includes(value)),
+)
 const opportunityLoading = ref(false)
 const opportunityError = ref('')
 const opportunityKeyword = ref('')
@@ -3524,6 +3528,7 @@ onBeforeUnmount(() => {
             :available-contract-type-options="availableContractTypeOptions"
             :service-type-options="serviceTypeOptions"
             :system-level-options="systemLevelOptions"
+            :template-system-level-options="templateSystemLevelOptions"
             :current-user-label="currentUserLabel"
             :external-contract-file="externalContractFile"
             :external-contract-file-error="externalContractFileError"
