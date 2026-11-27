@@ -4,12 +4,12 @@ import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import test from 'node:test'
 import vm from 'node:vm'
-import { effectScope, ref, watch } from 'vue'
+import { effectScope, nextTick, ref, watch } from 'vue'
 import { formatUserError } from '../../shared/utils/userError.js'
 import { formatBusinessDate } from '../../shared/utils/businessTime.js'
 import { attachStructuredContext } from '../../platform/shared/api/requestContext.js'
 import { normalizeAuthorizationSession, principalIdentityID, shouldStartSubsystemLogin } from '../../shared/authz/sessionCompatibility.js'
-import { datetimeLocalToInstant, toDateTimeLocal, planPersonnelFor, planEquipmentFor, isEmbeddedPenetrationItem, travelTravelerDefaults } from '../projectDisplay.js'
+import { datetimeLocalToInstant, toDateTimeLocal, planPersonnelFor, planPersonnelRows, planEquipmentFor, isEmbeddedPenetrationItem, travelTravelerDefaults } from '../projectDisplay.js'
 
 const view = await readFile(new URL('./ProjectManagementView.vue', import.meta.url), 'utf8')
 const api = (await readFile(new URL('../api/projectManagement.js', import.meta.url), 'utf8'))
@@ -34,8 +34,9 @@ function workspace({ status = 200 } = {}) {
     ref, watch, FormData, Response, formatUserError, attachStructuredContext,
     normalizeAuthorizationSession, principalIdentityID, shouldStartSubsystemLogin,
     selectedServiceItem: ref(null), selectedServiceItems: ref([]),
+    activeSection: ref('planning'),
     planningBlocked: ref(null), signaturePadKey: ref(0), saving: ref(false),
-    datetimeLocalToInstant, toDateTimeLocal, planPersonnelFor, planEquipmentFor, isEmbeddedPenetrationItem, travelTravelerDefaults,
+    datetimeLocalToInstant, toDateTimeLocal, planPersonnelFor, planPersonnelRows, planEquipmentFor, isEmbeddedPenetrationItem, travelTravelerDefaults,
     // 出行人员默认值依赖能力目录（档案编号→平台 user_id 映射）；沙箱内为空即回落指派团队。
     capabilities: ref([]),
     formatBusinessDate,
@@ -52,12 +53,16 @@ function workspace({ status = 200 } = {}) {
   }
   // 执行真实组件状态、回填和提交函数，保留真实 API 序列化；只替换网络与工作区刷新。
   const init = section('const operationForm = ref(', 'const pendingFieldSyncCount = ref(')
+  const personnelWatcher = 'watch([activeSection, selectedServiceItem],'
   const scope = effectScope()
   scope.run(() => vm.runInNewContext([
     api, init,
     section('function fillOperationForm(item)', 'function updatePenetrationPackage('),
+    section('function removePlanPersonnel(index)', 'function toggleServiceItem('),
     section('async function runOperation(kind)', 'async function revokeSelectedAssignment('),
+    section(personnelWatcher, '// 工作区成功刷新后'),
     'this.form = operationForm; this.fill = fillOperationForm; this.run = runOperation;',
+    'this.setPersonnel = setPlanPersonnelSelected;',
     'this.editPersonnelDate = typeof editPlanPersonnelDate === "function" ? editPlanPersonnelDate : null;',
   ].join('\n'), context))
   return { context, requests, toasts, stop: () => scope.stop(), get refreshes() { return refreshes } }
@@ -175,6 +180,68 @@ test('现场计划在既有 5000 字上限内不截断', async () => {
   w.context.form.value.sitePlan = '计'.repeat(5000)
   await w.context.run('planning')
   assert.equal(w.requests[0].payload.site_plan, '计'.repeat(5000))
+})
+
+test('同一项目下两个服务项分别勾选和发布，不覆盖对方的名单', async () => {
+  const w = workspace()
+  assert.equal(typeof w.context.setPersonnel, 'function', '实施计划需要可取消和重新勾选的人员选择操作')
+  const itemA = { id: 'SI-A', project_id: 'PJ-SHARED', engineer_ids: ['engineer-a'] }
+  const itemB = { id: 'SI-B', project_id: 'PJ-SHARED', version: 3, engineer_ids: ['engineer-b'] }
+  const currentPersonnel = () => Array.from(w.context.form.value.personnel, (row) => row.resourceID)
+
+  select(w, itemA)
+  assert.deepEqual(currentPersonnel(), ['lead-1', 'manager-1', 'engineer-a'])
+  w.context.setPersonnel('engineer-a', false)
+  w.context.setPersonnel('engineer-b', true)
+  assert.deepEqual(currentPersonnel(), ['lead-1', 'manager-1'])
+
+  select(w, itemB)
+  assert.deepEqual(currentPersonnel(), ['lead-1', 'manager-1', 'engineer-b'])
+  w.context.setPersonnel('lead-1', false)
+
+  select(w, itemA)
+  assert.deepEqual(currentPersonnel(), ['lead-1', 'manager-1'])
+  w.context.setPersonnel('engineer-a', true)
+  w.context.setPersonnel('engineer-a', true)
+  w.context.setPersonnel('manager-1', false)
+  await w.context.run('planning')
+
+  select(w, itemB)
+  assert.deepEqual(currentPersonnel(), ['manager-1', 'engineer-b'])
+  await w.context.run('planning')
+
+  assert.deepEqual(w.requests.map(({ url, payload }) => ({ url, version: payload.expected_version, ids: payload.personnel.map((row) => row.resource_id) })), [
+    { url: '/project_management/api/v1/service-items/SI-A/implementation-plan', version: 7, ids: ['lead-1', 'engineer-a'] },
+    { url: '/project_management/api/v1/service-items/SI-B/implementation-plan', version: 3, ids: ['manager-1', 'engineer-b'] },
+  ])
+})
+
+test('取消全部人员时阻止发布，重新勾选一人后可发布', async () => {
+  const w = workspace()
+  assert.equal(typeof w.context.setPersonnel, 'function')
+  select(w)
+  for (const id of ['lead-1', 'manager-1', 'engineer-1']) w.context.setPersonnel(id, false)
+  await w.context.run('planning')
+  assert.equal(w.requests.length, 0)
+  assert.ok(w.toasts.some(({ message }) => message === '请至少添加一名实施人员'))
+  w.context.setPersonnel('engineer-1', true)
+  await w.context.run('planning')
+  assert.deepEqual(w.requests[0].payload.personnel.map((row) => row.resource_id), ['engineer-1'])
+})
+
+test('工作区重新读取后，只在当前服务项版本实际变化时重载人员名单', async () => {
+  const w = workspace()
+  assert.equal(typeof w.context.setPersonnel, 'function')
+  select(w)
+  await nextTick()
+  w.context.setPersonnel('engineer-1', false)
+  const item = w.context.selectedServiceItem.value
+  w.context.selectedServiceItem.value = { ...item }
+  await nextTick()
+  assert.deepEqual(Array.from(w.context.form.value.personnel, (row) => row.resourceID), ['lead-1', 'manager-1'])
+  w.context.selectedServiceItem.value = { ...item, version: 8, engineer_ids: ['engineer-reassigned'] }
+  await nextTick()
+  assert.deepEqual(Array.from(w.context.form.value.personnel, (row) => row.resourceID), ['lead-1', 'manager-1', 'engineer-reassigned'])
 })
 
 test('补齐现场计划传输仍保留计划前置条件和独立渗透合规拦截', async () => {

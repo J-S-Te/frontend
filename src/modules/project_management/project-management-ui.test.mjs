@@ -780,7 +780,7 @@ test('发布实施计划在提交前拦截未完成的前置步骤', () => {
   assert.match(source, /tone: 'danger'/)
   assert.match(source, /tone: 'warn'/)
   // 主按钮在拦截态下禁用，并给出可执行的替代动作。
-  assert.match(source, /:disabled="saving \|\| !!planningBlocked"/)
+  assert.match(source, /:disabled="saving \|\| !!planningBlocked \|\| !operationForm\.personnel\.length"/)
   assert.match(source, /class="pm-blocker"/)
   assert.match(source, /前往任务分配/)
   assert.match(source, /@click="navigate\('allocation'\)"/)
@@ -1151,7 +1151,7 @@ test('每个写操作入口都按服务端同款权限码门控', () => {
   // 确认拆解走 POST /service-items/confirm（服务端要求 service_item.confirm），与
   // 调整拆解的 project.decomposition.manage 是两个权限码，不能共用同一个守卫。
   assert.match(source, /v-if="activeSection === 'decomposition' && canConfirmDecomposition"[^>]*@click="confirmDecomposition"/)
-  assert.match(source, /v-if="canPlanImplementation" class="pm-button primary" :disabled="saving \|\| !!planningBlocked"/)
+  assert.match(source, /v-if="canPlanImplementation" class="pm-button primary" :disabled="saving \|\| !!planningBlocked \|\| !operationForm\.personnel\.length"/)
   assert.match(source, /selectedServiceItem\.status === '实施准备中' && canExecuteField" class="pm-button primary"[^>]*runOperation\('field-start'\)[^>]*>进入实施中</)
   assert.match(source, /selectedServiceItem && selectedServiceItem\.status === '实施中' && canExecuteField" class="pm-field-workflow"/)
   assert.match(source, /class="pm-form pm-operation-form"/)

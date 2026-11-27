@@ -1744,6 +1744,23 @@
 .pm-plan-resources > header { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--pm-sp-3); }
 .pm-plan-resources > header b { display: block; font-size: var(--pm-fs-base); }
 .pm-plan-resources > header small { color: var(--pm-muted); font-size: var(--pm-fs-hint); }
+.pm-plan-personnel-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--pm-sp-3);
+  min-inline-size: 0;
+  margin: 0;
+  padding: var(--pm-sp-3);
+  border: 1px solid var(--pm-line);
+  border-radius: var(--pm-r-sm);
+}
+.pm-plan-personnel-options label { flex-direction: row; align-items: center; }
+.pm-plan-personnel-options input[type="checkbox"] {
+  inline-size: 1rem;
+  block-size: 1rem;
+  min-height: 0;
+  margin: 0;
+}
 .pm-plan-window { display: flex; align-items: center; gap: 6px; }
 .pm-plan-window input { min-width: 132px; }
 .pm-plan-resources .pm-table-scroll { overflow: auto; border: 1px solid var(--pm-line); border-radius: var(--pm-r-sm); }

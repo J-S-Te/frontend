@@ -694,6 +694,8 @@ const selectedServiceItemIDs = ref([])
 // 切换服务项时递增，用于强制重建签名画布（避免沿用上一项的签名图像）。
 const signaturePadKey = ref(0)
 const operationForm = ref({ teamLeadID: '', projectManagerID: '', engineerIDs: '', plannedStart: '', plannedEnd: '', sitePlan: '', penetrationTestPlan: '', authDocNo: '', authStart: '', authEnd: '', authScope: '', testScope: '', testWindow: '', emergencyContact: '', rollbackPlan: '', reviewComment: '', personnel: [], equipment: [], travelMode: '', travelReferenceEventID: '', noTravelReason: '', travelOrigin: '', travelDestination: '', travelDepartureDate: '', travelReturnDate: '', travelTransport: '', travelAccommodationNeed: '', travelTravelerIDs: [], rawData: '', environment: '', fieldEvidenceFile: null, fieldSignatureFile: null, checkInDeviationReason: '', fieldIncompleteReason: '', reportFile: null, reportCorrectionReason: '', reportCorrectionComment: '', deviationDescription: '', deviationEvidenceFile: null, severity: 'MEDIUM', decision: 'RELEASE', comment: '' })
+// 草稿随服务项版本隔离；分配变化后使用服务端新名单重新初始化。
+const planPersonnelDrafts = new Map()
 // 用途：将计划的北京时间日期同步到仍跟随计划的人员时段字段。
 // 参数：无，读取当前服务项的计划和实施人员草稿。
 // 返回值：无，仅更新未单独设置的起止日期。
@@ -3004,12 +3006,22 @@ function fillOperationForm(item) {
     checkInDeviationReason: '', fieldIncompleteReason: '',
   }
   const plan = item.implementation_plan || {}
-  const personnel = planPersonnelFor(item, plan).map((row) => ({
+  const personnel = planPersonnelDraftFor(item)
+  operationForm.value = { ...operationForm.value, teamLeadID: item.team_lead_id || '', projectManagerID: item.project_manager_id || '', engineerIDs: (item.engineer_ids || []).join(','), plannedStart: toDateTimeLocal(item.planned_start || plan.planned_start), plannedEnd: toDateTimeLocal(item.planned_end || plan.planned_end), sitePlan: plan.site_plan || '', penetrationTestPlan: plan.penetration_test_plan || '', authDocNo: plan.auth_doc_no || '', authStart: toDateTimeLocal(plan.auth_start), authEnd: toDateTimeLocal(plan.auth_end), authScope: plan.auth_scope || '', testScope: plan.test_scope || '', testWindow: plan.test_window || '', emergencyContact: plan.emergency_contact || '', rollbackPlan: plan.rollback_plan || '', reviewComment: item.tech_review_comment || '', personnel, equipment: planEquipmentFor(plan), travelMode: '', travelReferenceEventID: '', noTravelReason: '', travelOrigin: '', travelDestination: '', travelDepartureDate: formatBusinessDate(item.planned_start || plan.planned_start), travelReturnDate: formatBusinessDate(item.planned_end || plan.planned_end), travelTransport: '', travelAccommodationNeed: '', travelTravelerIDs: travelTravelerDefaults(item, plan, capabilities.value), comment: '' }
+}
+// 用途：按服务项与版本读取已有人员草稿，或用当前分配初始化草稿。
+// 参数：item 为当前选择或刚刷新的服务项快照。
+// 返回值：只属于该服务项版本的可编辑人员行。
+function planPersonnelDraftFor(item) {
+  const draft = planPersonnelDrafts.get(item.id)
+  if (draft && draft.version === item.version) return draft.rows
+  const rows = planPersonnelFor(item, item.implementation_plan || {}).map((row) => ({
     ...row,
     windowStartOverridden: Boolean(row.windowStart),
     windowEndOverridden: Boolean(row.windowEnd),
   }))
-  operationForm.value = { ...operationForm.value, teamLeadID: item.team_lead_id || '', projectManagerID: item.project_manager_id || '', engineerIDs: (item.engineer_ids || []).join(','), plannedStart: toDateTimeLocal(item.planned_start || plan.planned_start), plannedEnd: toDateTimeLocal(item.planned_end || plan.planned_end), sitePlan: plan.site_plan || '', penetrationTestPlan: plan.penetration_test_plan || '', authDocNo: plan.auth_doc_no || '', authStart: toDateTimeLocal(plan.auth_start), authEnd: toDateTimeLocal(plan.auth_end), authScope: plan.auth_scope || '', testScope: plan.test_scope || '', testWindow: plan.test_window || '', emergencyContact: plan.emergency_contact || '', rollbackPlan: plan.rollback_plan || '', reviewComment: item.tech_review_comment || '', personnel, equipment: planEquipmentFor(plan), travelMode: '', travelReferenceEventID: '', noTravelReason: '', travelOrigin: '', travelDestination: '', travelDepartureDate: formatBusinessDate(item.planned_start || plan.planned_start), travelReturnDate: formatBusinessDate(item.planned_end || plan.planned_end), travelTransport: '', travelAccommodationNeed: '', travelTravelerIDs: travelTravelerDefaults(item, plan, capabilities.value), comment: '' }
+  planPersonnelDrafts.set(item.id, { version: item.version, rows })
+  return rows
 }
 function updatePenetrationPackage(workPackage) {
   const index = serviceItems.value.findIndex((item) => item.id === workPackage?.parent_service_item_id)
@@ -3153,8 +3165,37 @@ function addPlanEquipment(equipmentItem) {
 function removePlanEquipment(index) {
   operationForm.value.equipment = operationForm.value.equipment.filter((_, position) => position !== index)
 }
+// 用途：取消当前服务项中的一名实施人员，保留该项其余草稿。
+// 参数：index 为人员在当前计划清单中的位置。
+// 返回值：无。
 function removePlanPersonnel(index) {
-  operationForm.value.personnel = operationForm.value.personnel.filter((_, position) => position !== index)
+  operationForm.value.personnel.splice(index, 1)
+}
+
+// 用途：根据分配人员编号定位计划行，兼容已保存的资质档案编号。
+// 参数：resourceID 为当前服务项分配名单中的人员编号。
+// 返回值：匹配的行位置，未勾选时为 -1。
+function planPersonnelRowIndex(resourceID) {
+  return operationForm.value.personnel.findIndex((row) => row.resourceID === resourceID
+    || capabilities.value.some((capability) => capability.resource_type === 'PERSON'
+      && capability.resource_id === row.resourceID && capability.user_id === resourceID))
+}
+
+// 用途：勾选或取消当前服务项的一名已分配人员。
+// 参数：resourceID 为人员编号，selected 表示是否加入当前实施计划。
+// 返回值：无；候选名单之外的人员不会被加入。
+function setPlanPersonnelSelected(resourceID, selected) {
+  const item = selectedServiceItem.value
+  if (!item || saving.value) return
+  const candidate = planPersonnelRows(item).find((row) => row.resourceID === resourceID)
+  if (!candidate) return
+
+  const index = planPersonnelRowIndex(resourceID)
+  if (selected && index < 0) {
+    operationForm.value.personnel.push(candidate)
+    syncPlanPersonnelDates()
+  }
+  if (!selected && index >= 0) removePlanPersonnel(index)
 }
 function toggleServiceItem(item) {
   const selected = new Set(selectedServiceItemIDs.value)
@@ -3499,6 +3540,7 @@ async function runOperation(kind) {
         if (new Date(form.authEnd).getTime() <= new Date(form.authStart).getTime()) { showToast('授权截止时间必须晚于授权生效时间', 'warning'); return }
       }
       await planImplementation(item.id, { expected_version: Number(item.version) || 0, planned_start: datetimeLocalToInstant(form.plannedStart), planned_end: datetimeLocalToInstant(form.plannedEnd), site_plan: form.sitePlan, penetration_test_plan: form.penetrationTestPlan, auth_doc_no: form.authDocNo, auth_start: datetimeLocalToInstant(form.authStart), auth_end: datetimeLocalToInstant(form.authEnd), auth_scope: form.authScope, test_scope: form.testScope, test_window: form.testWindow, emergency_contact: form.emergencyContact, rollback_plan: form.rollbackPlan , personnel: form.personnel.map((row) => ({ resource_type: 'PERSON', resource_id: row.resourceID, window_start: row.windowStart, window_end: row.windowEnd, note: row.note })) })
+      planPersonnelDrafts.delete(item.id)
       showToast('实施计划已发布')
     } else if (kind === 'special-approve' || kind === 'special-reject') {
       await reviewSpecialMethod(item.id, { decision: kind === 'special-approve' ? 'APPROVED' : 'REJECTED', comment: form.reviewComment })
@@ -4084,6 +4126,9 @@ function onSectionChanged(section) {
   if (section === 'monitoring') void loadSlaOverdueDetails({ force: true })
 }
 watch(activeSection, onSectionChanged)
+watch([activeSection, selectedServiceItem], ([section, item]) => {
+  if (section === 'planning' && item) operationForm.value.personnel = planPersonnelDraftFor(item)
+})
 // 工作区成功刷新后辅助数据必须重新确认：姓名按新快照重新读取，设备目录/SLA 明细置为
 // 待确认并在当前使用区域重新读取；失败不缓存，由各自的重试入口承担。
 watch(lastUpdatedAt, () => {
@@ -5164,13 +5209,27 @@ onBeforeUnmount(() => {
                 <p v-if="selectedServiceItems.length" class="pm-form-hint pm-allocation-preview">影响预览：将为 {{ selectedServiceItems.length }} 个服务项{{ canExecutionAssign ? '写入团队负责人、项目经理与实施工程师并触发能力校验' : '写入团队负责人' }}；已选 {{ selectedServiceItems.map((item) => item.id).join('、') }}</p>
                 <button v-if="canSubmitAllocation" class="pm-button primary" :disabled="saving" @click="runOperation('allocation')">{{ saving ? '提交中…' : canExecutionAssign ? '保存分配并校验能力' : '分配团队负责人' }}</button>
               </template>
-              <template v-else-if="activeSection === 'planning'"><div v-if="planningBlocked" class="pm-blocker" :class="planningBlocked.tone" role="alert"><b>暂时不能发布实施计划</b><span>{{ planningBlocked.reason }}</span><button class="pm-button" type="button" @click="navigate('allocation')">前往任务分配</button></div><label><span>计划开始 <em>*</em></span><input v-model.trim="operationForm.plannedStart" type="datetime-local" /></label><label><span>计划结束 <em>*</em></span><input v-model.trim="operationForm.plannedEnd" type="datetime-local" /></label><label><span>现场计划</span><textarea v-model.trim="operationForm.sitePlan" rows="3" placeholder="现场实施步骤和窗口" maxlength="5000"></textarea></label><template v-if="selectedServiceItem.test_mode === 'PENETRATION'"><label><span>渗透测试专项计划 <em>*</em></span><textarea v-model.trim="operationForm.penetrationTestPlan" rows="3" maxlength="5000"></textarea></label><fieldset class="pm-compliant-fieldset"><legend>专项合规要素（授权 / 白名单 / 时间窗 / 应急 / 回滚）</legend><label><span>授权书编号 <em>*</em></span><input v-model.trim="operationForm.authDocNo" required placeholder="例如 AUTH-2026-001"  maxlength="128"/></label><label><span>授权生效 <em>*</em></span><input v-model.trim="operationForm.authStart" type="datetime-local" required /></label><label><span>授权截止 <em>*</em></span><input v-model.trim="operationForm.authEnd" type="datetime-local" required /></label><label><span>授权范围 <em>*</em></span><input v-model.trim="operationForm.authScope" required placeholder="例如 内网段 10.0.0.0/8"  maxlength="5000"/></label><label><span>计划测试范围 <em>*</em></span><input v-model.trim="operationForm.testScope" required placeholder="例如 关键业务系统 WEB 渗透"  maxlength="5000"/></label><label><span>测试时间窗 <em>*</em></span><input v-model.trim="operationForm.testWindow" required placeholder="例如 00:00-06:00"  maxlength="128"/></label><label><span>应急联系人 <em>*</em></span><input v-model.trim="operationForm.emergencyContact" required placeholder="姓名 + 电话"  maxlength="128"/></label><label><span>回滚方案 <em>*</em></span><textarea v-model.trim="operationForm.rollbackPlan" rows="3" required maxlength="5000"></textarea></label></fieldset></template><section class="pm-plan-resources"><header><div><b>实施人员</b><small>资质编码取自「资质与能力」档案，人员不限制有效期；使用时段默认随计划日期，可单独修改；两端留空表示全程；设备清单在「实施准备」中登记</small></div></header><div class="pm-table-scroll"><table class="pm-table"><thead><tr><th scope="col">名称</th><th scope="col">规格 / 资质</th><th scope="col">有效期规则</th><th scope="col">使用时段</th><th scope="col">备注</th><th scope="col"></th></tr></thead><tbody><tr v-for="(row, index) in operationForm.personnel" :key="row.resourceID"><td>{{ planResourceName(row) }}</td><td><CodePills :codes="planResourceCodes(row)" /></td><td>{{ planResourceValidUntil(row) }}</td><td><div class="pm-plan-window">
+              <template v-else-if="activeSection === 'planning'"><div v-if="planningBlocked" class="pm-blocker" :class="planningBlocked.tone" role="alert"><b>暂时不能发布实施计划</b><span>{{ planningBlocked.reason }}</span><button class="pm-button" type="button" @click="navigate('allocation')">前往任务分配</button></div><label><span>计划开始 <em>*</em></span><input v-model.trim="operationForm.plannedStart" type="datetime-local" /></label><label><span>计划结束 <em>*</em></span><input v-model.trim="operationForm.plannedEnd" type="datetime-local" /></label><label><span>现场计划</span><textarea v-model.trim="operationForm.sitePlan" rows="3" placeholder="现场实施步骤和窗口" maxlength="5000"></textarea></label><template v-if="selectedServiceItem.test_mode === 'PENETRATION'"><label><span>渗透测试专项计划 <em>*</em></span><textarea v-model.trim="operationForm.penetrationTestPlan" rows="3" maxlength="5000"></textarea></label><fieldset class="pm-compliant-fieldset"><legend>专项合规要素（授权 / 白名单 / 时间窗 / 应急 / 回滚）</legend><label><span>授权书编号 <em>*</em></span><input v-model.trim="operationForm.authDocNo" required placeholder="例如 AUTH-2026-001"  maxlength="128"/></label><label><span>授权生效 <em>*</em></span><input v-model.trim="operationForm.authStart" type="datetime-local" required /></label><label><span>授权截止 <em>*</em></span><input v-model.trim="operationForm.authEnd" type="datetime-local" required /></label><label><span>授权范围 <em>*</em></span><input v-model.trim="operationForm.authScope" required placeholder="例如 内网段 10.0.0.0/8"  maxlength="5000"/></label><label><span>计划测试范围 <em>*</em></span><input v-model.trim="operationForm.testScope" required placeholder="例如 关键业务系统 WEB 渗透"  maxlength="5000"/></label><label><span>测试时间窗 <em>*</em></span><input v-model.trim="operationForm.testWindow" required placeholder="例如 00:00-06:00"  maxlength="128"/></label><label><span>应急联系人 <em>*</em></span><input v-model.trim="operationForm.emergencyContact" required placeholder="姓名 + 电话"  maxlength="128"/></label><label><span>回滚方案 <em>*</em></span><textarea v-model.trim="operationForm.rollbackPlan" rows="3" required maxlength="5000"></textarea></label></fieldset></template>
+                <section class="pm-plan-resources">
+                  <header>
+                    <div><b>实施人员</b><small>使用时段留空表示全程。设备在「实施准备」中登记。</small></div>
+                  </header>
+                  <fieldset class="pm-plan-personnel-options">
+                    <legend>选择本服务项实施人员（至少一人）</legend>
+                    <label v-for="candidate in planPersonnelRows(selectedServiceItem)" :key="candidate.resourceID">
+                      <input type="checkbox" :disabled="saving || !canPlanImplementation"
+                        :checked="planPersonnelRowIndex(candidate.resourceID) >= 0"
+                        @change="setPlanPersonnelSelected(candidate.resourceID, $event.target.checked)" />
+                      <span>{{ planResourceName(candidate) }}</span>
+                    </label>
+                  </fieldset>
+                  <div class="pm-table-scroll"><table class="pm-table"><thead><tr><th scope="col">名称</th><th scope="col">规格 / 资质</th><th scope="col">有效期规则</th><th scope="col">使用时段</th><th scope="col">备注</th><th scope="col"></th></tr></thead><tbody><tr v-for="(row, index) in operationForm.personnel" :key="row.resourceID"><td>{{ planResourceName(row) }}</td><td><CodePills :codes="planResourceCodes(row)" /></td><td>{{ planResourceValidUntil(row) }}</td><td><div class="pm-plan-window">
                   <input :value="row.windowStart" type="date" aria-label="使用时段开始"
                     @input="editPlanPersonnelDate(row, 'windowStart', $event.target.value)" />
                   <span>~</span>
                   <input :value="row.windowEnd" type="date" aria-label="使用时段结束"
                     @input="editPlanPersonnelDate(row, 'windowEnd', $event.target.value)" />
-                </div></td><td><input v-model.trim="row.note" placeholder="例如 备份"  maxlength="500"/></td><td><button type="button" class="pm-link danger" @click="removePlanPersonnel(index)">移除</button></td></tr><tr v-if="!operationForm.personnel.length"><td colspan="6" class="pm-empty-mini">请至少添加一名实施人员</td></tr></tbody></table></div></section><button v-if="canPlanImplementation" class="pm-button primary" :disabled="saving || !!planningBlocked" :title="planningBlocked ? planningBlocked.reason : ''" @click="runOperation('planning')">发布实施计划</button></template>
+                </div></td><td><input v-model.trim="row.note" placeholder="例如 备份"  maxlength="500"/></td><td><button type="button" class="pm-link danger" :disabled="saving || !canPlanImplementation" @click="removePlanPersonnel(index)">移除</button></td></tr><tr v-if="!operationForm.personnel.length"><td colspan="6" class="pm-empty-mini">请至少添加一名实施人员</td></tr></tbody></table></div></section><button v-if="canPlanImplementation" class="pm-button primary" :disabled="saving || !!planningBlocked || !operationForm.personnel.length" :title="planningBlocked ? planningBlocked.reason : ''" @click="runOperation('planning')">发布实施计划</button></template>
               <template v-else-if="activeSection === 'methods'"><div class="pm-review-state"><span>复核状态</span><b class="pm-badge" :class="statusTone(item && reportTechReviewLabel(item.tech_review_status))">{{ item && reportTechReviewLabel(item.tech_review_status) }}</b></div><p v-if="item?.tech_review_status === 'PENDING' && !focusedApprovalTask" class="pm-form-hint">申请人：{{ eventApplicantLabel(selectedMethodRequest) }}</p><template v-if="item && ['PENDING', 'REJECTED'].includes(item.tech_review_status)"><label><span>复核意见</span><textarea v-model.trim="operationForm.reviewComment" rows="3" placeholder="填写风险说明或驳回原因" maxlength="1000"></textarea></label><div v-if="canReviewSpecialMethod" class="pm-form-row"><button class="pm-button primary" :disabled="saving" @click="runOperation('special-approve')">通过复核</button><button class="pm-button" :disabled="saving" @click="runOperation('special-reject')">驳回复核</button></div></template><template v-else-if="item && item.tech_review_status === 'APPROVED'"><p class="pm-form-hint">{{ item.tech_review_comment || '已通过复核，可发布实施计划' }}<span v-if="item.tech_reviewed_at"> · {{ formatDateTime(item.tech_reviewed_at) }} · {{ item.tech_reviewed_by }} </span></p></template><template v-else-if="item && item.tech_review_status === 'PENDING'"><p class="pm-form-hint">等待技术总监复核特殊方法。</p></template></template>
               <template v-else-if="activeSection === 'preparation'">
                 <section class="pm-plan-resources"><header><div><b>设备清单（选填）</b><small>无需设备的项目可留空；选择设备后仍会校验有效档案、检定有效期、在位状态及占用冲突</small></div><button type="button" class="pm-button" @click="openEquipmentPicker">＋ 添加设备</button></header><div class="pm-table-scroll"><table class="pm-table"><thead><tr><th scope="col">设备</th><th scope="col">能力码</th><th scope="col">检定有效期</th><th scope="col">使用时段</th><th scope="col">备注</th><th scope="col"></th></tr></thead><tbody><tr v-for="(row, index) in operationForm.equipment" :key="row.resourceID"><td>{{ planResourceName(row) }}</td><td><CodePills :codes="planResourceCodes(row)" /></td><td>{{ planResourceValidUntil(row) }}</td><td><div class="pm-plan-window"><input v-model="row.windowStart" type="date" aria-label="使用时段开始" /><span>~</span><input v-model="row.windowEnd" type="date" aria-label="使用时段结束" /></div></td><td><input v-model.trim="row.note" placeholder="例如 备用机"  maxlength="500"/></td><td><button type="button" class="pm-link danger" @click="removePlanEquipment(index)">移除</button></td></tr><tr v-if="!operationForm.equipment.length"><td colspan="6" class="pm-empty-mini">本服务项无需设备时可留空</td></tr></tbody></table></div></section>
