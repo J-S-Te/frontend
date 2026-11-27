@@ -1,5 +1,5 @@
 // 报销原型视觉证据（手工夹具，不进 CI）。
-// 用真实 ReimbursementView + AppShell + reimbursement.css，路由和 API 全部替换为隔离替身；
+// 用真实 ReimbursementView、AppShell、Vue Router 和 reimbursement.css，API 使用隔离替身。
 // 不连接任何业务服务、不写业务数据。输出 1440/375 浅深色截图，供人工比对高保真原型。
 import { build } from 'esbuild'
 import { createHash } from 'node:crypto'
@@ -24,6 +24,10 @@ const cases = [
   { key: 'invoice-controls', section: 'invoices', invoice: true },
   { key: 'invoice-upload', section: 'invoice-upload' },
   { key: 'claims', section: 'claims' },
+  { key: 'claim-workbench', section: 'claims', query: { project_id: 'project-1' } },
+  { key: 'claim-back', section: 'claims', query: { q: '保留筛选' } },
+  { key: 'submitted-deep-link', section: 'submitted',
+    query: { claim_id: 'claim-1', status: 'IN_APPROVAL', project_id: 'project-1' } },
   { key: 'claim-detail', section: 'claims', query: { claim_id: 'claim-1' } },
   { key: 'approvals', section: 'approvals' },
   { key: 'approval-detail', section: 'approvals', click: '查看任务与办理' },
@@ -36,25 +40,6 @@ const cases = [
 const runCases = cases.filter(row => !selectedCases.length || selectedCases.includes(row.key))
 assert.ok(runCases.length && selectedCases.every(key => cases.some(row => row.key === key)),
   'PAGE_CASES包含未知场景，不能以零用例通过')
-
-const routerStub = `import { h, reactive } from 'vue'
-export const __route = reactive({ params: { section: 'dashboard' }, query: {} })
-export function __setRoute(section, query = {}) {
-  __route.params = { section }
-  __route.query = query
-}
-export function useRoute() { return __route }
-export function useRouter() {
-  return {
-    push(to) { if (to?.params?.section) __setRoute(to.params.section, to.query || {}); return Promise.resolve() },
-    replace(to) { if (to?.params?.section) __setRoute(to.params.section, to.query || {}); return Promise.resolve() },
-  }
-}
-export function onBeforeRouteLeave() {}
-export function onBeforeRouteUpdate() {}
-export const NavigationFailureType = { aborted: 4, cancelled: 8, duplicated: 16 }
-export const RouterLink = { props: ['to'], setup(_props, { slots }) { return () => h('a', {}, slots.default?.()) } }
-`
 
 const apiStub = `const session = {
   tenant_id: 'tenant-demo', subject_id: 'actor-demo', username: 'fixture.reader', display_name: '王晓磊',
@@ -137,7 +122,11 @@ function fixture(path) {
   }
   if (value.startsWith('/project-options')) return { items: [{ project_id: 'project-1', project_name: '示例项目' }], total: 1 }
   if (value === '/claims/claim-1') return claim
-  if (value.startsWith('/claims?')) return { items: [claimRow], total: 1, page: 1 }
+  if (value.startsWith('/claims?')) {
+    const status = new URLSearchParams(value.split('?')[1]).get('status')
+    const row = ['APPROVED_PENDING_PAYMENT', 'PAID'].includes(status) ? { ...claimRow, status } : claimRow
+    return { items: [row], total: 1, page: 1 }
+  }
   if (value.startsWith('/invoices?')) return { items: [invoiceRow], total: 1, page: 1 }
   if (value === '/invoices/inv-1') return { ...invoiceRow,
     review_status: window.__invoiceReadonly ? 'CONFIRMED' : 'PENDING' }
@@ -169,8 +158,13 @@ function fixture(path) {
     monthly: [{ month: '2026-11', amount_minor: '128800', count: 3 }],
     by_type: [{ claim_type: 'TRAVEL', amount_minor: '128800', count: 3 }],
     by_project: [{ project_id: 'project-1', amount_minor: '128800', count: 3 }] }
-  if (value.startsWith('/archive-projects')) return { items: [{ project_id: 'project-1', claim_count: 2,
-    amount_minor: '257600', last_archived_at: '2026-11-10T09:00:00+08:00' }], total: 1, page: 1 }
+  if (value.startsWith('/archive-projects')) {
+    const page = Number(new URLSearchParams(value.split('?')[1]).get('page'))
+    if (page === 2) return { items: [{ project_id: 'project-last', claim_count: 1,
+      amount_minor: '99', last_archived_at: '2026-11-10T09:00:00+08:00' }], total: 21, page }
+    return { items: [{ project_id: 'project-1', claim_count: 2,
+      amount_minor: '257600', last_archived_at: '2026-11-10T09:00:00+08:00' }], total: 21, page }
+  }
   if (value.startsWith('/configurations/')) return { items: [{ id: 'policy-1', version: 2, published: true,
     lifecycle_status: 'ACTIVE', name: '差旅费用标准', fee_type: '交通费', limit_minor: '80000',
     created_at: '2026-11-01T09:00:00+08:00' }], total: 1, page: 1 }
@@ -212,30 +206,39 @@ export async function markNotificationRead() { return {} }
 export async function deleteReadNotifications() { throw new Error('票据夹具不包含通知删除操作') }
 `
 
-const entry = `import { createApp } from 'vue'
+const entry = `import { createApp, h } from 'vue'
 import View from './src/modules/reimbursement/views/ReimbursementView.vue'
-import { __setRoute, RouterLink } from 'vue-router'
+import { createRouter, createWebHistory, RouterView } from 'vue-router'
 import './src/modules/platform/shared/styles/main.css'
 import './src/modules/platform/shared/styles/state.css'
 import './src/modules/shared/styles/global-ux.css'
 import './src/modules/reimbursement/reimbursement.css'
-window.__mountReimbursement = ({ section, query = {} }) => {
-  __setRoute(section, query)
-  const app = createApp(View)
-  app.component('RouterLink', RouterLink)
+// 用途：在隔离浏览器中挂载真实报销页面和浏览器历史。
+// 参数：section 和 query 为本轮合成入口坐标。
+// 返回值：页面完成挂载的 Promise。
+window.__mountReimbursement = async ({ section, query = {} }) => {
+  const empty = { render: () => null }
+  const router = createRouter({ history: createWebHistory(), routes: [
+    { path: '/', redirect: '/reimbursement/dashboard' },
+    { path: '/reimbursement/:section?', name: 'reimbursement', component: View },
+    { path: '/portal', name: 'portal', component: empty },
+    { path: '/projects/:section?', name: 'project_management', component: empty },
+  ] })
+  const app = createApp({ render: () => h(RouterView) })
+  app.use(router)
+  await router.isReady()
+  await router.replace({ name: 'reimbursement', params: { section }, query })
   app.mount('#app')
-  return app
 }
 `
 
 const stubPlugin = {
   name: 'reimbursement-page-stubs',
   setup(builder) {
-    builder.onResolve({ filter: /^vue-router$/ }, () => ({ path: 'vue-router', namespace: 'stub' }))
     builder.onResolve({ filter: /api\/reimbursement\.js$/ }, () => ({ path: 'reimbursement-api', namespace: 'stub' }))
     builder.onResolve({ filter: /notifications\/api\/notifications\.js$/ }, () => ({ path: 'notifications-api', namespace: 'stub' }))
     builder.onLoad({ filter: /.*/, namespace: 'stub' }, ({ path }) => ({
-      contents: path === 'vue-router' ? routerStub : path === 'reimbursement-api' ? apiStub : notificationsStub,
+      contents: path === 'reimbursement-api' ? apiStub : notificationsStub,
       loader: 'js',
       resolveDir: root,
     }))
@@ -376,6 +379,89 @@ async function checkInvoicePage(page, item, width, theme) {
   await checkInvoiceConfirmation(page, review)
 }
 
+// 用途：验证同页切换保留筛选，并以本人已提交状态读取列表。
+// 参数：page 为合成会话里的真实报销页面。
+// 返回值：无；请求或页面状态与预期不同时断言失败。
+async function checkClaimWorkbench(page) {
+  await page.getByLabel('单号 / 标题 / 发票号码').fill('合成差旅')
+  const views = page.getByRole('group', { name: '我的单据视图' })
+  const submitted = views.getByRole('button', { name: '我发起的审批' })
+  await submitted.click()
+  assert.equal(await submitted.getAttribute('aria-pressed'), 'true')
+  await page.waitForFunction(() => window.__invoiceFixtureRequests.some(({ path }) => {
+    if (!path.startsWith('/claims?')) return false
+    const query = new URLSearchParams(path.split('?')[1])
+    return query.get('mine') === 'true' && query.get('page') === '1'
+      && query.get('q') === '合成差旅' && query.get('project_id') === 'project-1'
+      && query.get('status') === 'IN_APPROVAL,RETURNED,APPROVED_PENDING_PAYMENT,PAID,VOID'
+  }))
+  await views.getByRole('button', { name: '我的单据', exact: true }).click()
+  assert.equal(await page.getByLabel('单号 / 标题 / 发票号码').inputValue(), '合成差旅')
+}
+
+// 用途：验证浏览器后退移除地址栏单据坐标，并返回原筛选列表。
+// 参数：page 为使用真实浏览器历史的隔离报销页面。
+// 返回值：无；历史记录、地址或业务筛选不一致时断言失败。
+async function checkClaimBack(page) {
+  await page.getByRole('button', { name: '查看详情', exact: true }).click()
+  await page.waitForURL(url => url.searchParams.get('claim_id') === 'claim-1')
+  await page.getByRole('heading', { name: '审批流程', exact: true }).waitFor()
+  await page.goBack()
+  await page.waitForURL(url => url.pathname.endsWith('/claims') && !url.searchParams.has('claim_id'))
+  assert.equal(await page.getByLabel('单号 / 标题 / 发票号码').inputValue(), '保留筛选')
+}
+
+// 用途：验证旧提交深链打开单据，审批冻结信息默认收起且可按需阅读。
+// 参数：page 为合成会话里的真实报销页面。
+// 返回值：无；深链详情或折叠状态失效时断言失败。
+async function checkSubmittedDeepLink(page) {
+  await page.getByRole('heading', { name: '审批流程', exact: true }).waitFor()
+  const audit = page.locator('summary').filter({ hasText: '审计信息' })
+  const hash = page.getByText('冻结内容摘要 hash-demo', { exact: false })
+  assert.equal(await hash.isVisible(), false)
+  await audit.click()
+  assert.equal(await hash.isVisible(), true)
+  await audit.click()
+  assert.equal(await hash.isVisible(), false)
+}
+
+// 用途：校验付款筛选完成后，统计切换为新页面的金额和状态。
+// 参数：page 为合成会话里的真实付款页面。
+// 返回值：无；付款数据未随筛选同步时断言失败。
+async function checkPaymentSummary(page) {
+  const summary = page.getByLabel('付款本页统计')
+  await summary.getByText('1288.00 元', { exact: true }).waitFor()
+  await page.getByLabel('单据状态').selectOption('PAID')
+  await summary.getByText('1 单', { exact: true }).waitFor()
+  assert.match(await summary.innerText(), /当前页已付款\s+1 单/)
+  assert.match(await summary.innerText(), /当前页待付金额\s+0\.00 元/)
+}
+
+// 用途：验证项目归档分页使用自身总数，并只更新项目表和本页统计。
+// 参数：page 为真实分页组件渲染的归档页面。
+// 返回值：无；将项目与单据绑定到同一页时断言失败。
+async function checkArchivePages(page) {
+  const summary = page.getByLabel('项目归档包本页统计')
+  await summary.getByText('2576.00 元', { exact: true }).waitFor()
+  const claims = page.getByRole('navigation', { name: '报销列表分页' })
+  const projects = page.getByRole('navigation', { name: '项目归档分页' })
+  assert.equal(await claims.getByRole('button', { name: '下一页' }).isDisabled(), true)
+  await projects.getByRole('button', { name: '下一页' }).click()
+  await summary.getByText('0.99 元', { exact: true }).waitFor()
+  assert.match(await projects.innerText(), /第 2 页，共 21 条/)
+  assert.match(await claims.innerText(), /第 1 页，共 1 条/)
+  const calls = await page.evaluate(() =>
+    window.__invoiceFixtureRequests.filter(({ path }) => path.startsWith('/claims?')).length)
+  assert.equal(calls, 1)
+  await claims.getByRole('combobox', { name: /每页条数/ }).selectOption('10')
+  await page.waitForFunction(() => window.__invoiceFixtureRequests.some(({ path }) =>
+    path.startsWith('/claims?page=1&page_size=10')))
+  assert.match(await projects.innerText(), /第 2 页，共 21 条/)
+  const projectCalls = await page.evaluate(() =>
+    window.__invoiceFixtureRequests.filter(({ path }) => path.startsWith('/archive-projects?')).length)
+  assert.equal(projectCalls, 2)
+}
+
 await mkdir(outputDir, { recursive: true })
 const browser = await chromium.launch({
   executablePath: process.env.CHROMIUM_PATH || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
@@ -423,15 +509,22 @@ try {
         })
         await page.goto('http://reimbursement-fixture.invalid/')
         await page.addScriptTag({ content: js })
-        await page.evaluate(({ item, theme }) => {
+        await page.evaluate(async ({ item, theme }) => {
           document.documentElement.dataset.theme = theme
-          window.__mountReimbursement({ section: item.section, query: item.query || {} })
+          await window.__mountReimbursement({ section: item.section, query: item.query || {} })
         }, { item, theme })
         await page.waitForTimeout(900)
         if (item.invoice) {
           try { await checkInvoicePage(page, item, width, theme) }
           catch (error) { errors.push(error.message) }
         }
+        try {
+          if (item.key === 'claim-workbench') await checkClaimWorkbench(page)
+          if (item.key === 'claim-back') await checkClaimBack(page)
+          if (item.key === 'submitted-deep-link') await checkSubmittedDeepLink(page)
+          if (item.key === 'payments') await checkPaymentSummary(page)
+          if (item.key === 'archives') await checkArchivePages(page)
+        } catch (error) { errors.push(error.message) }
         // 桌面侧栏常驻才做折叠交互；窄屏侧栏在抽屉里，截图保留默认态。
         if (item.click && (width >= 821 || item.key === 'approval-detail')) {
           const button = page.getByRole('button', { name: item.click }).first()

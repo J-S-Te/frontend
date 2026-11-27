@@ -1034,6 +1034,39 @@
   display: none;
 }
 
+.expense-page-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 160px), 1fr));
+  gap: 12px;
+  margin: 0 0 14px;
+}
+
+.expense-panel--flush .expense-page-summary {
+  margin-inline: 16px;
+}
+
+.expense-page-summary > div {
+  min-width: 0;
+  padding: 12px 14px;
+  border: 1px solid var(--exp-line);
+  border-radius: var(--exp-radius-sm);
+  background: var(--exp-inset);
+}
+
+.expense-page-summary dt {
+  color: var(--exp-muted);
+  font-size: var(--fs-xs, 12px);
+}
+
+.expense-page-summary dd {
+  margin: 4px 0 0;
+  color: var(--exp-ink);
+  font-size: var(--fs-title);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
 /* ============ 角色卡 / 快捷操作 ============ */
 .expense-role-card {
   display: grid;

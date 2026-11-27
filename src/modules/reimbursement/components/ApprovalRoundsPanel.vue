@@ -36,19 +36,17 @@ watch(page, load)
 <template>
   <article class="expense-item">
     <header class="expense-card-head">
-      <h3 class="expense-card-title">审批轮次与责任来源</h3>
+      <h3 class="expense-card-title">审批流程</h3>
       <span class="expense-card-extra">共 {{ total }} 轮</span>
     </header>
     <ErrorState v-if="error" compact title="审批轮次读取失败" :error="error" retry-text="重新读取审批轮次" @retry="load" />
     <details v-for="round in rounds" :key="round.round" :open="round.round === rounds[rounds.length - 1]?.round">
       <summary>第 {{ round.round }} 轮 · {{ formatBusinessDateTime(round.created_at) }}</summary>
-      <p>冻结内容摘要 {{ round.content_hash }} · 路由版本 {{ round.rule_version }}</p>
       <div v-if="round.frozen_tasks?.length" class="expense-flow" role="list" aria-label="第 {{ round.round }} 轮冻结审批节点">
         <template v-for="(task, index) in round.frozen_tasks" :key="task.id">
           <div class="expense-flow__node" role="listitem">
             <span class="expense-flow__circle">{{ index + 1 }}</span>
             <span class="expense-flow__name">{{ approvalNodeLabel(task.node_role || task.node_code) }}</span>
-            <span class="expense-flow__time">{{ task.assignee_subject_id }}</span>
           </div>
           <span v-if="index < round.frozen_tasks.length - 1" class="expense-flow__line" aria-hidden="true" />
         </template>
@@ -60,11 +58,15 @@ watch(page, load)
           {{ change.label }}：{{ change.before }} → {{ change.after }}</p>
         <p v-if="!claimChanges(rounds.find(previous=>previous.round===round.round-1)?.snapshot,round.snapshot).length">当前可见关键字段没有变化。</p>
       </section>
-      <p v-for="task in round.frozen_tasks" :key="task.id">{{ approvalNodeLabel(task.node_role || task.node_code) }} · 冻结受理人 {{ task.assignee_subject_id }} · 责任分摊 {{ task.allocation_keys?.join('、') }}</p>
-      <div v-for="reference in round.references" :key="reference.project_id + reference.service_item_id">
-        <p>项目 {{ reference.project_id }} / {{ reference.service_item_id || '项目级' }} · 引用版本 {{ reference.reference_version }}</p>
-        <p v-for="person in reference.required_approver_refs" :key="person.node_role + person.subject_id">{{ approvalNodeLabel(person.node_role) }}：{{ person.subject_id }} · {{ person.source_field }} · 版本 {{ person.source_version || person.source_digest }}</p>
-      </div>
+      <details>
+        <summary>审计信息</summary>
+        <p>冻结内容摘要 {{ round.content_hash }} · 路由版本 {{ round.rule_version }}</p>
+        <p v-for="task in round.frozen_tasks" :key="task.id">{{ approvalNodeLabel(task.node_role || task.node_code) }} · 冻结受理人 {{ task.assignee_subject_id }} · 责任分摊 {{ task.allocation_keys?.join('、') }}</p>
+        <div v-for="reference in round.references" :key="reference.project_id + reference.service_item_id">
+          <p>项目 {{ reference.project_id }} / {{ reference.service_item_id || '项目级' }} · 引用版本 {{ reference.reference_version }}</p>
+          <p v-for="person in reference.required_approver_refs" :key="person.node_role + person.subject_id">{{ approvalNodeLabel(person.node_role) }}：{{ person.subject_id }} · {{ person.source_field }} · 版本 {{ person.source_version || person.source_digest }}</p>
+        </div>
+      </details>
       <ol v-if="round.actions?.length" class="expense-timeline" aria-label="第 {{ round.round }} 轮审批动作">
         <li v-for="action in round.actions" :key="action.ID" class="expense-timeline__item">
           <div class="expense-timeline__head">

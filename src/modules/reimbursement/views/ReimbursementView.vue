@@ -156,7 +156,29 @@ const paymentHistoryPage = ref(1)
 const paymentHistoryPageSize = 20
 let paymentHistorySequence = 0
 const archives = ref(null)
-const archiveProjects=ref(null)
+const archiveProjects = ref(null)
+const archiveProjectsPage = ref(1)
+const archiveProjectsPageSize = 20
+const archiveProjectsLoading = ref(false)
+let archiveProjectsSequence = 0
+const paymentPageSummary = computed(() => {
+  const waiting = rows.value.filter(row => row.status === 'APPROVED_PENDING_PAYMENT')
+  return {
+    waiting: waiting.length,
+    paid: rows.value.filter(row => row.status === 'PAID').length,
+    amount: sumPageMinor(waiting, 'payable_minor'),
+  }
+})
+const archivePageSummary = computed(() => {
+  const projects = archiveProjects.value?.items || []
+  const claimCount = projects.reduce((sum, project) => sum + project.claim_count, 0)
+  return {
+    projects: projects.length,
+    claims: projects.every(project => Number.isSafeInteger(project.claim_count) && project.claim_count >= 0)
+      && Number.isSafeInteger(claimCount) ? `${claimCount} 张` : '未提供',
+    amount: sumPageMinor(projects, 'amount_minor'),
+  }
+})
 // 列表/工作台/归档项目/看板/冲正历史的读取失败分别记录，失败不能被渲染成"暂无数据"。
 const listError = ref('')
 const dashboardError = ref('')
@@ -205,6 +227,7 @@ const recentTask = ref({ parse: null, export: null, document: null })
 const paymentStatus = ref('APPROVED_PENDING_PAYMENT')
 const policyBaseline = ref(null)
 let detailSequence = 0
+let claimDetailOpening = null
 let documentSequence = 0
 let queuedUpload = null
 const approvalReason = ref('')
@@ -304,8 +327,7 @@ const sections = [
   ['invoices', '发票台账', 'expense.invoice.read'],
   ['invoice-upload', '发票上传 / OCR', 'expense.invoice.upload'],
   ['invoice-abnormal', '异常发票池', 'expense.invoice.read'],
-  ['claims', '我的报销', 'expense.claim.read'],
-  ['submitted', '我发起的', 'expense.claim.read'],
+  ['claims', '我的单据', 'expense.claim.read'],
   ['approvals', '待我审批', 'expense.approval.act'],
   ['payments', '付款管理', ['expense.payment.read', 'expense.payment.exception.record',
     'expense.payment.exception.review', 'expense.claim.reopen', 'expense.claim.approved_void']],
@@ -317,7 +339,11 @@ const sections = [
 ]
 const workspace = computed(() => String(route.params.section || 'dashboard'))
 const section = computed(() => workspaceSection(workspace.value))
-const title = computed(() => sections.find(([key]) => key === workspace.value)?.[1] || '工作台')
+// 旧提交地址继续使用同一组件和详情坐标；导航与授权都走统一入口。
+const navigationWorkspace = computed(() => workspace.value === 'submitted' ? 'claims' : workspace.value)
+const claimView = computed(() => workspace.value === 'submitted'
+  || (workspace.value === 'claims' && route.query.view === 'submitted') ? 'submitted' : 'mine')
+const title = computed(() => sections.find(([key]) => key === navigationWorkspace.value)?.[1] || '工作台')
 // 页面描述与原型每个页面标题下方的一句话说明对齐；不承载权限或业务结论。
 const notificationUnread = useNotificationBadge({
   session: () => can('expense.claim.read') ? session.value : null,
@@ -328,8 +354,7 @@ const sectionDescriptions = {
   invoices: '查看已上传票据台账；人工复核、生成费用草稿与异常处理都在受控范围内完成。',
   'invoice-upload': '批量上传发票原件，解析结果仅辅助填写，仍需逐张人工复核。',
   'invoice-abnormal': '集中处理未确认、查验不一致及待关闭风险的票据。',
-  claims: '查看本人报销单；新建或编辑草稿后提交审批。',
-  submitted: '查看已提交审批的单据及当前节点。',
+  claims: '查看报销单据，跟踪本人发起的审批进展。',
   approvals: '处理当前待办审批任务；动作、原因与确认在同一详情内完成。',
   payments: '登记付款、查看付款历史与冲正记录。',
   archives: '按项目查看归档包与归档详情；金额为当前已付净额。',
@@ -340,7 +365,7 @@ const sectionDescriptions = {
 }
 const sectionIcons = {
   dashboard: 'nav-overview', invoices: 'nav-invoice', 'invoice-upload': 'nav-upload', 'invoice-abnormal': 'nav-exception',
-  claims: 'nav-claim', submitted: 'nav-submitted', approvals: 'nav-approval', payments: 'nav-payment', archives: 'nav-archive',
+  claims: 'nav-claim', approvals: 'nav-approval', payments: 'nav-payment', archives: 'nav-archive',
   recovery: 'nav-recovery', policies: 'nav-rules', analytics: 'nav-analytics', messages: 'nav-notifications',
 }
 // 侧栏分组对齐原型：工作台 / 发票中心 / 报销单 / 付款 / 归档中心 / 配置 / 消息 / 系统。
@@ -350,7 +375,7 @@ const navGroups = computed(() => {
     { items: [{ key: 'portal', label: '返回门户', icon: 'nav-portal', anchor: 'subsystem-portal' }] },
     { label: '工作台', keys: ['dashboard', 'analytics'] },
     { label: '发票中心', keys: ['invoices', 'invoice-upload', 'invoice-abnormal'] },
-    { label: '报销单', keys: ['claims', 'submitted', 'approvals'] },
+    { label: '报销单', keys: ['claims', 'approvals'] },
     { label: '付款', keys: ['payments'] },
     { label: '归档中心', keys: ['archives'] },
     { label: '配置', keys: ['policies'] },
@@ -369,7 +394,7 @@ const navGroups = computed(() => {
       key: item.key,
       label: item.label,
       icon: item.icon || sectionIcons[item.key] || 'account',
-      active: workspace.value === item.key,
+      active: navigationWorkspace.value === item.key,
     })),
   })).filter((group) => group.items.length)
 })
@@ -410,7 +435,7 @@ const draftTotal = computed(() => {
   catch { return '待校验' }
 })
 const hasModule = computed(() => Boolean(session.value)
-  && sections.some(([key, , permission]) => key === workspace.value && can(permission)))
+  && sectionAllowed(navigationWorkspace.value))
 const sessionRolesLabel = computed(() => (session.value?.roles || [])
   .map((role) => reimbursementRoleLabel(typeof role === 'string' ? role : role.code)).filter(Boolean)
   .join('、') || '按当前账号授权范围')
@@ -448,10 +473,10 @@ function sectionAllowed(key) {
 
 // 列表列定义按分区拆分：审批区展示轮次与节点，单据区展示应付金额，票据区展示票面。
 const listTitle = computed(() => ({
-  claims: '我的报销', submitted: '我发起的', invoices: '发票台账',
+  claims: '我的单据', invoices: '发票台账',
   'invoice-abnormal': '异常发票池', approvals: '待审批任务', payments: '付款记录',
   archives: '归档单据', policies: '政策版本',
-}[workspace.value] || '列表'))
+}[navigationWorkspace.value] || '列表'))
 const listAmountLabel = computed(() => ({
   invoices: '票面金额', approvals: '审批轮次', policies: '金额 / 标准上限',
 }[section.value] || '应付金额'))
@@ -461,7 +486,7 @@ const listNodeLabel = computed(() => ({
 // 付款与归档的每一行都是单据，没有独立审批节点，强行保留列只会出现一列"—"。
 const listHasNodeColumn = computed(() => ['invoices', 'approvals', 'claims', 'policies'].includes(section.value))
 // 状态页签：普通报销入口保留草稿；「我发起的审批」只列提交后的状态，已作废也要能被找回。
-const statusTabs = computed(() => workspace.value === 'submitted'
+const statusTabs = computed(() => claimView.value === 'submitted'
   ? { '':'全部', IN_APPROVAL:'审批中', RETURNED:'已退回', APPROVED_PENDING_PAYMENT:'待付款',
     PAID:'已付款', VOID:'已作废' }
   : { '':'全部', DRAFT:'草稿', IN_APPROVAL:'审批中', APPROVED_PENDING_PAYMENT:'待付款',
@@ -473,6 +498,19 @@ const statusTabs = computed(() => workspace.value === 'submitted'
 function moneyText(value) {
   const text = formatMinor(value)
   return text === '不可用' ? '未提供' : `${text} 元`
+}
+
+// 用途：精确合计当前页服务端整数分，历史缺值不计作零元。
+// 参数：pageRows 为本页业务记录，field 为接口返回的整数分字段。
+// 返回值：人民币元金额；任一笔金额不可用时返回未提供。
+function sumPageMinor(pageRows, field) {
+  let amount = 0n
+  for (const row of pageRows) {
+    const value = row[field]
+    if (typeof value !== 'string' || !/^-?\d+$/.test(value)) return '未提供'
+    amount += BigInt(value)
+  }
+  return moneyText(String(amount))
 }
 
 // 用途：统一列表行的状态码与状态文案，保留原生命周期 > 业务状态 > 复核状态 > 发布标记的优先级。
@@ -708,10 +746,12 @@ async function discardDraft() {
 
 // 用途：在现有统一路由中切换工作区。
 // 参数：key 为导航区域。
-// 返回值：无；有未保存草稿时先确认，取消则不跳转。
+// 返回值：路由导航结果；有未保存草稿时先确认，取消则不跳转。
 async function navigate(key) {
-  if (key !== workspace.value && !(await discardDraft())) return
-  router.push(key === 'portal' ? { name: 'portal' } : { name: 'reimbursement', params: { section: key } })
+  // 旧审批详情回统一入口时由同一组件的路由守卫确认放弃。
+  const closesLegacyDetail = key === 'claims' && workspace.value === 'submitted' && route.query.claim_id
+  if (key !== workspace.value && !closesLegacyDetail && !(await discardDraft())) return
+  return router.push(key === 'portal' ? { name: 'portal' } : { name: 'reimbursement', params: { section: key } })
 }
 
 // 用途：新建报销前保护当前草稿，并先进入报销分区。
@@ -797,7 +837,7 @@ async function refreshSelectedSection() {
         payment.value = value
       } catch (cause) { if (ticket === detailSequence) showError(cause) }
     }
-    await loadPaymentHistory(1)
+    if (ticket === detailSequence) await loadPaymentHistory(1)
     return
   }
   if (section.value === 'archives') {
@@ -831,7 +871,7 @@ async function loadClaimOptions(ticket = loadSequence) {
 }
 
 // 用途：只按当前已授权页面加载业务数据，防止跨页迟到结果覆盖。
-// 参数：无。
+// 参数：preserveContext 表示写后刷新是否保留当前详情与操作上下文。
 // 返回值：无；错误显式呈现在对应数据区，不用空列表代替失败。
 async function load({ preserveContext = false } = {}) {
   const ticket = ++loadSequence
@@ -847,7 +887,6 @@ async function load({ preserveContext = false } = {}) {
     conflictSnapshot.value = null
     validationHint.value = ''
     listError.value = ''; dashboardError.value = ''; analyticsError.value = ''
-    archiveProjectsError.value = ''
   }
   if (changedWorkspace) {
     if (!preserveContext) notice.value = ''
@@ -859,8 +898,7 @@ async function load({ preserveContext = false } = {}) {
     const activeSession = await ensureReimbursementSession()
     if (ticket !== loadSequence || !activeSession) return
     session.value = activeSession
-    const entry = sections.find(([key]) => key === workspace.value)
-    if (!entry || !can(entry[2])) {
+    if (!sectionAllowed(navigationWorkspace.value)) {
       rows.value = []
       const first = sections.find(([, , permission]) => can(permission))
       if (first) { await router.replace({ name: 'reimbursement', params: { section: first[0] } }); return }
@@ -881,35 +919,32 @@ async function load({ preserveContext = false } = {}) {
       return
     }
     if (workspace.value === 'invoice-upload') { rows.value=[]; total.value=0; return }
-    if(current==='archives') {
-      // 项目归档聚合失败不影响下面的单据列表，两块失败各自显示原因。
-      try {
-        archiveProjects.value=await api.request(`/archive-projects?${workspaceQuery('archives',listFilters.value,page.value,pageSize.value,route.query.project_id || '')}`)
-      } catch (cause) {
-        if (ticket === loadSequence) { archiveProjects.value = null; areaError('archives', cause) }
-      }
-      if(ticket!==loadSequence)return
-    }
+    if (current === 'archives') void loadArchiveProjects()
     if (['recovery','messages'].includes(current)) { rows.value = []; total.value = 0; return }
     let path = '/claims'
     if (current === 'invoices') path = '/invoices'
     if (current === 'approvals') path = '/approval-tasks'
     if (current === 'policies') path = `/configurations/${policyKind.value}`
-    const query = new URLSearchParams(workspaceQuery(workspace.value,listFilters.value,
+    const listWorkspace = claimView.value === 'submitted' ? 'submitted' : workspace.value
+    const query = new URLSearchParams(workspaceQuery(listWorkspace,listFilters.value,
       page.value,pageSize.value,route.query.project_id || ''))
     if (current === 'approvals' && approvalStatus.value) query.set('status', approvalStatus.value)
     if (current === 'approvals' && typeof route.query.claim_id === 'string') {
       query.set('claim_id', route.query.claim_id)
     }
-    if (current === 'payments' && paymentStatus.value) query.set('status', paymentStatus.value)
+    if (current === 'payments') {
+      if (paymentStatus.value) query.set('status', paymentStatus.value)
+      else query.delete('status')
+    }
     if (route.query.project_id) query.set('project_id', String(route.query.project_id))
-    const result = await api.request(`${path}?${query}`)
-    if (ticket !== loadSequence) return
-    if (!Array.isArray(result.items) || !Number.isFinite(result.total)) throw new Error('服务端分页响应不完整')
-    rows.value = result.items
-    total.value = result.total
+    const result = await readListPage(path, query, ticket)
+    if (!result || ticket !== loadSequence) return
     if (current === 'approvals') await openApprovalNotificationRoute()
-    if (current === 'claims' && route.query.claim_id && selected.value?.id !== String(route.query.claim_id)) await openClaim(String(route.query.claim_id))
+    const claimID = route.query.claim_id
+    if (current === 'claims' && typeof claimID === 'string' && claimID
+      && selected.value?.id !== claimID && claimDetailOpening?.id !== claimID) {
+      await openClaim(claimID)
+    }
     if (current === 'policies' && policyRecord.value) {
       const latest = result.items.find((row) => row.id === policyID.value)
       if (latest) { policyRecord.value = { ...policyRecord.value, ...latest }; policyVersion.value = latest.version }
@@ -922,6 +957,74 @@ async function load({ preserveContext = false } = {}) {
   }
   finally {
     if (ticket === loadSequence) { loading.value = false; initialized.value = true }
+  }
+}
+
+// 用途：读取并应用通过授权的单据或工作区列表页。
+// 参数：path 为列表接口，query 为已构造的筛选和页码，ticket 为本次读取序号。
+// 返回值：本次有效分页结果；已被较新读取取代时返回空值。
+async function readListPage(path, query, ticket) {
+  const result = await api.request(`${path}?${query}`)
+  if (ticket !== loadSequence) return
+  if (!Array.isArray(result?.items) || !Number.isFinite(result.total)) {
+    throw new Error('服务端分页响应不完整')
+  }
+  rows.value = result.items
+  total.value = result.total
+  return result
+}
+
+// 用途：更新列表分页；归档单据翻页与归档项目翻页互不触发。
+// 参数：nextPage 为单据页码，nextSize 为每页单据数。
+// 返回值：无；失败显示在当前列表并保留独立项目页。
+async function changeListPage(nextPage, nextSize = pageSize.value) {
+  page.value = nextPage
+  pageSize.value = nextSize
+  if (section.value !== 'archives') {
+    await load()
+    return
+  }
+  if (!sectionAllowed('archives')) return
+  const ticket = ++loadSequence
+  selectedClaimIDs.value = []
+  listError.value = ''
+  loading.value = true
+  try {
+    const query = workspaceQuery('archives', listFilters.value, nextPage, nextSize,
+      route.query.project_id || '')
+    await readListPage('/claims', query, ticket)
+  } catch (cause) {
+    if (ticket === loadSequence) areaError('list', cause)
+  } finally {
+    if (ticket === loadSequence) loading.value = false
+  }
+}
+
+// 用途：按项目归档接口的总数独立读取指定页，单据列表保留原分页。
+// 参数：nextPage 为所需项目页码，省略时重读当前项目页。
+// 返回值：无；较早的读取结果及离开归档后的结果不更新页面。
+async function loadArchiveProjects(nextPage = archiveProjectsPage.value) {
+  if (section.value !== 'archives' || !sectionAllowed('archives')) return
+  const ticket = ++archiveProjectsSequence
+  archiveProjectsPage.value = nextPage
+  archiveProjectsLoading.value = true
+  archiveProjectsError.value = ''
+  try {
+    const query = workspaceQuery('archives', listFilters.value, nextPage, archiveProjectsPageSize,
+      route.query.project_id || '')
+    const result = await api.request(`/archive-projects?${query}`)
+    if (ticket !== archiveProjectsSequence) return
+    if (!Array.isArray(result?.items) || !Number.isFinite(result.total)) {
+      throw new Error('项目归档分页响应不完整')
+    }
+    archiveProjects.value = result
+  } catch (cause) {
+    if (ticket === archiveProjectsSequence) {
+      archiveProjects.value = null
+      areaError('archives', cause)
+    }
+  } finally {
+    if (ticket === archiveProjectsSequence) archiveProjectsLoading.value = false
   }
 }
 
@@ -1363,7 +1466,23 @@ function openProjectExpenseParticipants(option) {
 // 用途：应用筛选并重置分页，避免保留上一查询的末页。
 // 参数：无。
 // 返回值：无；真实服务端错误保留输入并显示。
-async function applyFilters() { page.value=1; await load() }
+async function applyFilters() {
+  page.value = 1
+  archiveProjectsPage.value = 1
+  await load()
+}
+
+// 用途：从统一工作台切换列表视图，保留仍适用的深链与筛选参数。
+// 参数：view 为我的单据或我发起的审批。
+// 返回值：路由导航结果；列表由地址变化统一驱动。
+async function switchClaimView(view) {
+  if (view === claimView.value) return
+  const query = { ...route.query }
+  delete query.claim_id
+  if (view === 'submitted') query.view = 'submitted'
+  else delete query.view
+  return router.push({ name: 'reimbursement', params: { section: 'claims' }, query })
+}
 
 // 用途：清除手工筛选，固定业务子入口约束仍由查询构造保留。
 // 参数：无。
@@ -1540,7 +1659,7 @@ async function saveDraft() {
     const payload = claimPayload()
     const result = await mutate(selected.value ? 'claim.update' : 'claim.create', selected.value ? `/claims/${selected.value.id}` : '/claims',
       payload, selected.value ? 'PATCH' : 'POST')
-    if (result) { await openClaim(result.id, true); await load({ preserveContext: true }) }
+    if (result) { await openClaim(result.id, { force: true }); await load({ preserveContext: true }) }
   } catch (cause) { showError(cause) }
 }
 
@@ -1556,16 +1675,20 @@ async function revealDetail() {
 
 // 用途：从详情返回列表，并清理已确认放弃的草稿与深链参数。
 // 参数：kind 为 claim、invoice 或 approval，决定要关闭的详情。
-// 返回值：无；有未保存草稿时先确认。
+// 返回值：无；有未保存草稿时先确认，单据命令未确认时保留详情。
 async function backToList(kind = 'claim') {
+  if (kind === 'claim' && (saving.value || runner.pending())) {
+    showError(new Error('当前操作仍在处理，请先核对结果再返回列表。'))
+    return
+  }
   if (!(await discardDraft())) return
   if (kind === 'invoice') {
     selectedInvoice.value = null; invoiceRows.value = []; selectedSource.value = null
   } else if (kind === 'approval') {
     approvalTask.value = null; approvalHistory.value = []; historyError.value = ''
   } else {
-    selected.value = null; claimFormOpen.value = false
-    draft.value = blankDraft(); draftBaseline.value = ''
+    invalidateClaimOpening()
+    clearClaimDetail()
   }
   const query = { ...route.query }
   delete query.claim_id
@@ -1576,15 +1699,45 @@ async function backToList(kind = 'claim') {
   heading.value?.focus?.()
 }
 
+// 用途：在已获放弃确认或撤销过期待载详情后，恢复到单据列表。
+// 参数：无。
+// 返回值：无；不改动地址、列表筛选和分页。
+function clearClaimDetail() {
+  selected.value = null
+  claimFormOpen.value = false
+  draft.value = blankDraft()
+  draftBaseline.value = ''
+}
+
+// 用途：使原视图的单据读取与已开始的辅助读取失效。
+// 参数：无。
+// 返回值：无；完整打开的单据可沿用既有跨栏目定位。
+function invalidateClaimOpening() {
+  ++detailSequence
+  ++paymentOptionsSequence
+  ++paymentHistorySequence
+  if (claimDetailOpening?.applied) {
+    ++projectSequence
+    projectLoading.value = false
+    clearClaimDetail()
+  }
+  claimDetailOpening = null
+}
+
 // 用途：读取单据详情并建立可编辑副本，不把只读字段回传。
-// 参数：id 为服务器单据ID，force 表示保存成功后跳过重复放弃确认。
-// 返回值：无；详情读取失败保持表单。
-async function openClaim(id, force = false) {
+// 参数：id 为服务器单据ID，force 用于保存成功后重读，fromList 用于添加返回列表的历史入口。
+// 返回值：无；过期读取丢弃，当前读取失败保持原表单。
+async function openClaim(id, { force = false, fromList = false } = {}) {
+  const previousWorkspace = workspace.value
+  const previousQuery = route.query
   if (!force && selected.value?.id !== String(id) && !(await discardDraft())) return
+  if (workspace.value !== previousWorkspace || route.query !== previousQuery) return
   const ticket = ++detailSequence
+  claimDetailOpening = { id, applied: false }
   try {
     const result = await api.request(`/claims/${encodeURIComponent(id)}`)
     if (ticket !== detailSequence) return
+    claimDetailOpening.applied = true
     selected.value = result
     claimFormOpen.value = true
     exceptionRows.value = null; selectedException.value = null; exceptionPage.value = 1
@@ -1607,9 +1760,9 @@ async function openClaim(id, force = false) {
       const kept = restoreSavedChoices(result)
       if (kept) notice.value = kept
     }
+    draftBaseline.value = stableStringify(draft.value)
     if (section.value === 'claims' && editable.value && currentDraftContext.value.ready) await searchProjects()
     if (ticket !== detailSequence) return
-    draftBaseline.value = stableStringify(draft.value)
     payment.value = null; archives.value = null
     reversalHistoryError.value = ''
     paymentHistory.value = []; reversalHistory.value = []; paymentHistoryError.value = ''
@@ -1618,12 +1771,16 @@ async function openClaim(id, force = false) {
     await refreshSelectedSection()
     if (ticket !== detailSequence) return
     if (route.query.claim_id !== String(id)) {
-      router.replace({ name: 'reimbursement', params: { section: workspace.value },
+      const navigateDetail = fromList ? router.push : router.replace
+      await navigateDetail({ name: 'reimbursement', params: { section: workspace.value },
         query: { ...route.query, claim_id: String(id) } })
-
     }
-    await revealDetail()
-  } catch (cause) { showError(cause) }
+    if (ticket === detailSequence) await revealDetail()
+  } catch (cause) {
+    if (ticket === detailSequence) showError(cause)
+  } finally {
+    if (ticket === detailSequence) claimDetailOpening = null
+  }
 }
 
 // 用途：在提交前核对已保存版本的全部项目引用，不以预检代替正式提交校验。
@@ -1792,12 +1949,13 @@ async function loadApprovalHistory() {
 // 参数：无。
 // 返回值：无；失败保留原因，不退回手填账户。
 async function loadPaymentAccountOptions() {
+  const ticket = detailSequence
   paymentAccounts.value = []; paymentPayeeProfiles.value = []
   paymentOptionError.value = ''; paymentOptionsLoaded.value = false
   const claimID = selected.value?.id
   if (!claimID || !can('expense.payment.record')) { paymentOptionsLoaded.value = true; return }
   await loadPaymentOptions(claimID)
-  if (selected.value?.id !== claimID) return
+  if (ticket !== detailSequence || selected.value?.id !== claimID) return
   paymentAccounts.value = paymentOptions.value.source_accounts
   paymentPayeeProfiles.value = paymentOptions.value.payee_profiles || []
   paymentOptionError.value = paymentOptionsError.value
@@ -2592,8 +2750,15 @@ async function previewApprovalInvoice(invoiceID) {
 // 参数：无。
 // 返回值：无；缺失或未完成状态按服务端原样展示。
 async function loadArchives() {
-  try { archives.value = await api.request(`/claims/${selected.value.id}/archives`) }
-  catch (cause) { showError(cause) }
+  const ticket = detailSequence
+  const claimID = selected.value?.id
+  if (!claimID) return
+  try {
+    const result = await api.request(`/claims/${claimID}/archives`)
+    if (ticket === detailSequence && selected.value?.id === claimID) archives.value = result
+  } catch (cause) {
+    if (ticket === detailSequence && selected.value?.id === claimID) showError(cause)
+  }
 }
 
 // 用途：按原单据触发归档重试，不重新登记付款。
@@ -2861,7 +3026,7 @@ async function createDraft() {
     title: draft.value.title || '未命名报销', org_id: draft.value.org_id,
     route_type: draft.value.route_type, finance_entity_id: draft.value.finance_entity_id,
     payee_profile_id: draft.value.payee_profile_id, currency: 'CNY', items: [] })
-  if (result) { await openClaim(result.id, true); if (!draft.value.items.length) addItem() }
+  if (result) { await openClaim(result.id, { force: true }); if (!draft.value.items.length) addItem() }
 
 }
 
@@ -2876,15 +3041,45 @@ async function logout() {
 
 watch(draft,invalidateClaimPreview,{deep:true})
 watch(() => selected.value?.id,()=>{previewEnabled.value=false;invalidateClaimPreview()})
-watch(() => route.params.section, async () => {
+watch([workspace, claimView, () => route.query.project_id, () => route.query.status], async (
+  [current, view, projectID, status], [previous, previousView, previousProjectID, previousStatus],
+) => {
   page.value = 1
-  // 状态页签属于当前入口：从「我的报销单」带过来的草稿筛选不能进入审批轨迹。
-  if (!Object.hasOwn(statusTabs.value, listFilters.value.status)) listFilters.value.status = ''
+  archiveProjectsPage.value = 1
+  if (previous === 'archives' && (current !== previous || projectID !== previousProjectID)) {
+    ++archiveProjectsSequence
+    archiveProjects.value = null
+    archiveProjectsLoading.value = false
+    archiveProjectsError.value = ''
+  }
+  if (section.value === 'claims' && status !== previousStatus) {
+    listFilters.value.status = typeof status === 'string' ? status : ''
+  }
+  if (view !== previousView) {
+    // 视图变化后只展示新范围返回的单据，等待期间不沿用上一页列表。
+    rows.value = []
+    total.value = 0
+  }
+  if (current !== previous || view !== previousView) {
+    invalidateClaimOpening()
+    // 进入审批视图时丢弃仅适用于草稿的状态；其他筛选继续沿用。
+    const statuses = listFilters.value.status.split(',').map(value => value.trim())
+    if (!statuses.every(value => Object.hasOwn(statusTabs.value, value))) {
+      listFilters.value.status = ''
+    }
+  }
   await load()
-  await nextTick()
-  heading.value?.focus()
+  if (current !== previous) {
+    await nextTick()
+    heading.value?.focus()
+  }
 })
-watch(() => [route.query.claim_id, route.query.task_id], ([id], [previousID]) => {
+watch([workspace, () => route.query.claim_id, () => route.query.task_id], (
+  [current, id], [previous, previousID],
+) => {
+  const clearsAliasDetail = section.value === 'claims' && workspaceSection(previous) === 'claims'
+    && !id && previousID
+  if (current !== previous && !clearsAliasDetail) return
   if (section.value === 'approvals') {
     if (id !== previousID) {
       ++approvalRouteSequence
@@ -2894,9 +3089,12 @@ watch(() => [route.query.claim_id, route.query.task_id], ([id], [previousID]) =>
     } else void openApprovalNotificationRoute()
     return
   }
-  if (id && section.value === 'claims' && selected.value?.id !== String(id)) void openClaim(String(id))
+  if (!['claims', 'payments', 'archives'].includes(section.value) || id === previousID) return
+  if (typeof id === 'string' && id && id === selected.value?.id) return
+  invalidateClaimOpening()
+  if (typeof id === 'string' && id && section.value === 'claims') void openClaim(id)
+  else if (!id && previousID) clearClaimDetail()
 })
-watch(()=>route.query.project_id,()=>{page.value=1;void load()})
 watch(approvalStatus, () => { page.value = 1; void load() })
 watch(paymentStatus, () => { page.value = 1; void load() })
 watch(policyKind, () => {
@@ -2918,13 +3116,23 @@ onBeforeRouteLeave(async () => {
   }
   return await discardDraft()
 })
-onBeforeRouteUpdate((to, from) => {
-  const changed = to.params.section !== from.params.section
-    || to.query.task_id !== from.query.task_id || to.query.claim_id !== from.query.claim_id
-  if (!changed || (!saving.value && !runner.pending())) return true
-  if (to.params.section === 'claims' && to.query.claim_id === selected.value?.id) return true
-  showError(new Error('当前操作仍在处理，请先核对结果再切换提醒。'))
-  return false
+onBeforeRouteUpdate(async (to, from) => {
+  const changedWorkspace = to.params.section !== from.params.section || to.query.view !== from.query.view
+  const changedClaim = to.query.claim_id !== from.query.claim_id
+  const changedTask = to.query.task_id !== from.query.task_id
+  if (!changedWorkspace && !changedClaim && !changedTask) return true
+  if (!changedWorkspace && !changedTask && to.query.claim_id
+    && to.query.claim_id === selected.value?.id) return true
+  if (saving.value || runner.pending()) {
+    showError(new Error('当前操作仍在处理，请先核对结果再切换提醒。'))
+    return false
+  }
+  const sameLogicalSection = workspaceSection(String(to.params.section))
+    === workspaceSection(String(from.params.section))
+  if (sameLogicalSection && changedClaim && !to.query.claim_id) {
+    return await discardDraft()
+  }
+  return true
 })
 onMounted(() => {
   // 刷新页面后先恢复最近任务坐标，用户可以继续查询而不用重新上传或重跑。
@@ -2933,7 +3141,7 @@ onMounted(() => {
   addItem(); void load(); window.addEventListener('beforeunload', protectPending)
 })
 onBeforeUnmount(() => {
-  ++approvalSequence; ++approvalRouteSequence
+  ++approvalSequence; ++approvalRouteSequence; ++archiveProjectsSequence
   ++previewSequence;++documentSequence;++detailSequence;++projectSequence;++paymentOptionsSequence;++paymentHistorySequence;++parsePollSequence;++exportPollSequence
   clearTimeout(previewTimer)
 
@@ -2975,7 +3183,7 @@ onBeforeUnmount(() => {
         </h1>
         <p>
           {{ section === 'invoices' && selectedInvoice ? '对照原件核对票面信息，其他操作按需展开。'
-            : sectionDescriptions[workspace] || '按当前主体与数据范围读取；金额以人民币元展示。' }}
+            : sectionDescriptions[navigationWorkspace] || '按当前主体与数据范围读取；金额以人民币元展示。' }}
         </p>
       </div>
       <div class="expense-head__actions">
@@ -3001,7 +3209,7 @@ onBeforeUnmount(() => {
           返回台账
         </button>
         <button type="button"
-          v-if="['dashboard', 'claims'].includes(workspace) && can('expense.claim.create')"
+          v-if="(section === 'dashboard' || (section === 'claims' && claimView === 'mine')) && can('expense.claim.create')"
           class="expense-button primary"
           @click="startNewClaim"
         >
@@ -3544,6 +3752,11 @@ onBeforeUnmount(() => {
         </fieldset>
       </section>
       <section v-if="section === 'payments'" class="expense-panel">
+        <dl v-if="!loading && !listError" class="expense-page-summary" aria-label="付款本页统计">
+          <div><dt>当前页待付款</dt><dd>{{ paymentPageSummary.waiting }} 单</dd></div>
+          <div><dt>当前页待付金额</dt><dd>{{ paymentPageSummary.amount }}</dd></div>
+          <div><dt>当前页已付款</dt><dd>{{ paymentPageSummary.paid }} 单</dd></div>
+        </dl>
         <label>
           单据状态
           <select v-model="paymentStatus">
@@ -3814,7 +4027,13 @@ onBeforeUnmount(() => {
         <p v-if="workspace === 'invoice-abnormal'" class="expense-alert">
           集中处理未确认、查验不一致及待关闭风险；进入详情查看真实来源和处理记录。
         </p>
-        <div v-if="section === 'claims'" class="expense-tabs" role="group" aria-label="报销状态">
+        <div v-if="section === 'claims'" class="expense-tabs" role="group" aria-label="我的单据视图">
+          <button type="button" class="expense-button" :aria-pressed="claimView === 'mine'"
+            @click="switchClaimView('mine')">我的单据</button>
+          <button type="button" class="expense-button" :aria-pressed="claimView === 'submitted'"
+            @click="switchClaimView('submitted')">我发起的审批</button>
+        </div>
+        <div v-if="section === 'claims'" class="expense-status-tabs" role="group" aria-label="报销状态">
           <button type="button" v-for="(label,key) in statusTabs" :key="key" class="expense-button" :aria-pressed="listFilters.status===key"
             @click="listFilters.status=key;applyFilters()">{{ label }}</button>
         </div>
@@ -3932,23 +4151,35 @@ onBeforeUnmount(() => {
           <span class="expense-card-extra">按实际封存日期筛选；同一单据多个档案版本不重复累计金额</span>
         </header>
         <!-- 归档聚合失败显示原因与重试，不再整块消失。 -->
-        <ErrorState v-if="archiveProjectsError" :error="archiveProjectsError" title="项目归档包加载失败" @retry="load" />
-        <div v-else-if="archiveProjects" class="expense-table">
-          <table class="expense-table-body">
-            <thead><tr><th scope="col">项目</th><th scope="col">报销单数</th><th class="expense-num" scope="col">当前净额</th><th scope="col">最近封存</th><th scope="col">操作</th></tr></thead>
-            <tbody>
-              <tr v-for="project in archiveProjects.items" :key="project.project_id">
-                <td>{{ project.project_id }}</td>
-                <td>{{ project.claim_count }}</td>
-                <td class="expense-num">{{ formatMinor(project.amount_minor) }} 元</td>
-                <td>{{ formatBusinessDateTime(project.last_archived_at) }}</td>
-                <td><button type="button" class="expense-button" @click="openArchiveProject(project.project_id)">查看项目档案</button></td>
-              </tr>
-              <tr v-if="!archiveProjects.items.length"><td colspan="5">当前范围没有已封存项目档案。</td></tr>
-            </tbody>
-          </table>
-        </div>
-        <p v-else class="expense-meta">当前范围没有已封存项目档案。</p>
+        <ErrorState v-if="archiveProjectsError" :error="archiveProjectsError" title="项目归档包加载失败"
+          @retry="loadArchiveProjects()" />
+        <template v-else-if="archiveProjects">
+          <dl v-if="!archiveProjectsLoading" class="expense-page-summary" aria-label="项目归档包本页统计">
+            <div><dt>本页项目</dt><dd>{{ archivePageSummary.projects }} 个</dd></div>
+            <div><dt>本页各项目单据数合计</dt><dd>{{ archivePageSummary.claims }}</dd></div>
+            <div><dt>本页归档净额</dt><dd>{{ archivePageSummary.amount }}</dd></div>
+          </dl>
+          <div class="expense-table">
+            <table class="expense-table-body">
+              <thead><tr><th scope="col">项目</th><th scope="col">报销单数</th><th class="expense-num" scope="col">当前净额</th><th scope="col">最近封存</th><th scope="col">操作</th></tr></thead>
+              <tbody>
+                <tr v-for="project in archiveProjects.items" :key="project.project_id">
+                  <td>{{ project.project_id }}</td>
+                  <td>{{ project.claim_count }}</td>
+                  <td class="expense-num">{{ formatMinor(project.amount_minor) }} 元</td>
+                  <td>{{ formatBusinessDateTime(project.last_archived_at) }}</td>
+                  <td><button type="button" class="expense-button" @click="openArchiveProject(project.project_id)">查看项目档案</button></td>
+                </tr>
+                <tr v-if="!archiveProjects.items.length"><td colspan="5">当前范围没有已封存项目档案。</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <footer class="expense-panel__foot">
+            <PaginationBar label="项目归档分页" :page="archiveProjectsPage" :total="archiveProjects.total"
+              :page-size="archiveProjectsPageSize" :loading="archiveProjectsLoading"
+              @change="loadArchiveProjects" />
+          </footer>
+        </template>
       </section>
       <section v-if="section !== 'dashboard' && !['invoice-upload','analytics','recovery','messages'].includes(workspace)
         && !(section === 'claims' && (selected || claimFormOpen))
@@ -4046,7 +4277,7 @@ onBeforeUnmount(() => {
                   >
                     查看版本
                   </button>
-                  <button type="button" v-else class="expense-button" @click="openClaim(row.id)">
+                  <button type="button" v-else class="expense-button" @click="openClaim(row.id, { fromList: true })">
                     查看详情
                   </button>
                 </td>
@@ -4059,8 +4290,8 @@ onBeforeUnmount(() => {
             :disabled="!selectedClaimIDs.length || saving || !!pending" @click="exportSelectedClaims">导出所选 {{ selectedClaimIDs.length }} 张</button>
           <PaginationBar label="报销列表分页" :page="page" :total="total" :page-size="pageSize"
             :page-size-options="[10, 20, 50, 100]" :loading="loading"
-            @change="nextPage => { page = nextPage; load() }"
-            @change-page-size="nextSize => { pageSize = nextSize; applyFilters() }" />
+            @change="changeListPage"
+            @change-page-size="nextSize => changeListPage(1, nextSize)" />
         </footer>
       </section>
       <div v-if="approvalTask && section === 'approvals'" class="expense-split">

@@ -63,14 +63,23 @@ function draftOptionsFixture(orgID = 'org', routeType = 'TECHNICAL') {
 
 // 用途：挂载真实报销页面setup，仅替换路由、认证和HTTP外部边界。
 // 参数：permissions/request 为外部边界，section 为入口，roles 为角色，profile 为当前账号资料。
+//       routeOptions 提供初始深链参数，可让路由替身同步页面地址。
 // 返回值：真实Vue响应式状态和卸载方法，不冒充浏览器DOM验收。
-async function mountPage(permissions, request, section = 'dashboard', roles = [], profile = {}) {
+async function mountPage(permissions, request, section = 'dashboard', roles = [], profile = {}, routeOptions = {}) {
   const previousWindow = globalThis.window
   globalThis.window = { addEventListener() {}, removeEventListener() {} }
-  const route = Vue.reactive({ params: { section }, query: {} })
+  const route = Vue.reactive({ params: { section }, query: routeOptions.query || {} })
   const routerCalls = { push: [], replace: [] }
   const shellProps = {}
-  const router = { push(...args) { routerCalls.push.push(args) }, replace(...args) { routerCalls.replace.push(args) } }
+  let routeUpdateGuard
+  const router = Object.fromEntries(['push', 'replace'].map(method => [method, async (...args) => {
+    routerCalls[method].push(args)
+    if (routeOptions.sync) {
+      const next = { params: args[0].params || {}, query: args[0].query || {} }
+      if (routeOptions.guard && await routeUpdateGuard(next, route) === false) return
+      Object.assign(route, next)
+    }
+  }]))
   const { descriptor } = parse(readFileSync(new URL('./ReimbursementView.vue', import.meta.url), 'utf8'))
   const script = compileScript(descriptor, { id: 'expense-view-test' })
   const confirmCalls = []
@@ -86,7 +95,8 @@ async function mountPage(permissions, request, section = 'dashboard', roles = []
     AnimatedNumber: { props: ['value'], setup: (props) => () => Vue.h('span', String(props.value)) },
     computed: Vue.computed, nextTick: Vue.nextTick, onBeforeUnmount: Vue.onBeforeUnmount,
     onMounted: Vue.onMounted, ref: Vue.ref, watch: Vue.watch, useRoute: () => route, useRouter: () => router,
-    onBeforeRouteLeave() {}, onBeforeRouteUpdate: () => {}, PaginationBar: PaginationBarStub, InvoiceCandidateCards,
+    onBeforeRouteLeave() {}, onBeforeRouteUpdate: (guard) => { routeUpdateGuard = guard },
+    PaginationBar: PaginationBarStub, InvoiceCandidateCards,
     useNotificationBadge: () => Vue.ref(0),
     useLoginUsername: (session) => Vue.computed(() => loginUsername(session.value)),
     ConfirmDialog: panelStub, useConfirmDialog: useConfirmDialogStub,
@@ -127,7 +137,7 @@ async function mountPage(permissions, request, section = 'dashboard', roles = []
       setup: (props, { slots }) => () => Vue.h('a', {}, slots.default?.()) })
     return renderToString(app)
   }
-  return { state, route, routerCalls, html, shellProps, confirm: confirmController,
+  return { state, route, router, routerCalls, html, shellProps, confirm: confirmController,
     unmount: () => { app.unmount(); globalThis.window = previousWindow } }
 }
 
@@ -353,6 +363,298 @@ test('从我的报销单带着草稿筛选进入我发起的审批时，不带�
     const query = new URLSearchParams(calls.at(-1).split('?')[1])
     assert.equal(query.get('mine'), 'true')
     assert.equal(query.get('status'), 'IN_APPROVAL,RETURNED,APPROVED_PENDING_PAYMENT,PAID,VOID')
+  } finally { fixture.unmount() }
+})
+
+test('同页切换我的单据和我发起的审批，保留共同筛选并只读取新视图一次', async () => {
+  const calls = []
+  const fixture = await mountPage(['expense.claim.read'], async path => {
+    calls.push(new URL(path, 'http://fixture.invalid').searchParams)
+    return { items: [], total: 0 }
+  }, 'claims', [], {}, { query: { project_id: 'project-a', q: '项目差旅', claim_type: 'TRAVEL' }, sync: true })
+  try {
+    const initial = await fixture.html()
+    assert.match(initial, /aria-pressed="true">我的单据<\/button>/)
+    assert.match(initial, /aria-pressed="false">我发起的审批<\/button>/)
+    fixture.state.page.value = 4
+    fixture.state.pageSize.value = 50
+    fixture.state.listFilters.value.status = 'DRAFT'
+    fixture.state.listFilters.value.date_from = '2026-11-01'
+    await fixture.state.switchClaimView('submitted')
+    await new Promise((resolve) => setImmediate(resolve))
+    assert.equal(fixture.route.params.section, 'claims')
+    assert.deepEqual(fixture.route.query, {
+      project_id: 'project-a', q: '项目差旅', claim_type: 'TRAVEL', view: 'submitted',
+    })
+    assert.equal(calls.length, 2)
+    assert.deepEqual(Object.fromEntries(calls.at(-1)), {
+      page: '1', page_size: '50', q: '项目差旅', claim_type: 'TRAVEL', date_from: '2026-11-01',
+      project_id: 'project-a', mine: 'true', status: 'IN_APPROVAL,RETURNED,APPROVED_PENDING_PAYMENT,PAID,VOID',
+    })
+    const submitted = await fixture.html()
+    assert.match(submitted, /aria-pressed="true">我发起的审批<\/button>/)
+
+    await fixture.state.switchClaimView('mine')
+    await new Promise((resolve) => setImmediate(resolve))
+    assert.equal(calls.length, 3)
+    assert.equal(calls.at(-1).has('mine'), false)
+    assert.equal(calls.at(-1).get('project_id'), 'project-a')
+    assert.equal(Object.hasOwn(fixture.route.query, 'view'), false)
+  } finally { fixture.unmount() }
+})
+
+test('旧提交入口和新地址均保留显式已付款筛选并打开单据深链', async () => {
+  for (const [section, view] of [['submitted', {}], ['claims', { view: 'submitted' }]]) {
+    const calls = []
+    const query = { ...view, claim_id: 'claim-1', project_id: 'project-a', status: 'PAID' }
+    const fixture = await mountPage(['expense.claim.read'], async path => {
+      calls.push(path)
+      if (path === '/claims/claim-1') return { id: 'claim-1', status: 'PAID', version: 1, items: [] }
+      return { items: [], total: 0 }
+    }, section, [], {}, { query, sync: true })
+    try {
+      assert.deepEqual(calls, ['/claims?page=1&page_size=20&status=PAID&project_id=project-a&mine=true',
+        '/claims/claim-1'])
+      assert.equal(fixture.state.selected.value?.id, 'claim-1')
+      await fixture.state.backToList()
+      assert.deepEqual(fixture.route.query, { ...view, project_id: 'project-a', status: 'PAID' })
+      assert.match(await fixture.html(), /aria-pressed="true">我发起的审批<\/button>/)
+    } finally { fixture.unmount() }
+  }
+})
+
+test('进入旧审批深链时，多状态筛选沿用后端的空格容忍规则', async () => {
+  const calls = []
+  const fixture = await mountPage(['expense.claim.read'], async path => {
+    calls.push(path)
+    return { items: [], total: 0 }
+  }, 'claims', [], {}, { sync: true })
+  try {
+    await fixture.router.push({ params: { section: 'submitted' }, query: { status: 'PAID, RETURNED' } })
+    await new Promise(resolve => setImmediate(resolve))
+    const query = new URL(calls.at(-1), 'http://fixture.invalid').searchParams
+    assert.equal(query.get('status'), 'PAID,RETURNED')
+  } finally { fixture.unmount() }
+})
+
+test('等待我发起的审批结果时，不显示上一视图的单据', async () => {
+  let resolveSubmitted
+  const submittedPage = new Promise(resolve => { resolveSubmitted = resolve })
+  const fixture = await mountPage(['expense.claim.read'], async path => {
+    if (path.includes('mine=true')) return submittedPage
+    return { items: [{ id: 'visible-other', title: '此前可见的其他单据', status: 'DRAFT' }], total: 1 }
+  }, 'claims', [], {}, { sync: true })
+  try {
+    assert.match(await fixture.html(), /此前可见的其他单据/)
+    await fixture.state.switchClaimView('submitted')
+    assert.doesNotMatch(await fixture.html(), /此前可见的其他单据/)
+  } finally {
+    resolveSubmitted({ items: [], total: 0 })
+    fixture.unmount()
+  }
+})
+
+test('切换视图或栏目后，上一视图延迟的详情结果和失败均失效', async () => {
+  for (const target of ['submitted', 'dashboard']) {
+    for (const rejected of [false, true]) {
+      let settleDetail
+      const detail = new Promise((resolve, reject) => {
+        settleDetail = () => rejected ? reject(new Error('旧详情读取失败'))
+          : resolve({ id: 'old', status: 'PAID', version: 1, items: [] })
+      })
+      const fixture = await mountPage(['expense.claim.read'], async path =>
+        path === '/claims/old' ? detail : { items: [], total: 0 }, 'claims', [], {}, { sync: true })
+      try {
+        const opening = fixture.state.openClaim('old')
+        await new Promise(resolve => setImmediate(resolve))
+        if (target === 'submitted') await fixture.state.switchClaimView('submitted')
+        else await fixture.state.navigate(target)
+        settleDetail()
+        await opening
+        assert.equal(fixture.state.selected.value, null)
+        assert.equal(fixture.state.error.value, '')
+        assert.equal(fixture.route.query.claim_id, undefined)
+        assert.deepEqual(fixture.routerCalls.replace, [])
+      } finally { fixture.unmount() }
+    }
+  }
+})
+
+test('旧深链详情还在等待时切换列表视图，随后只显示新视图列表', async () => {
+  let resolveDetail
+  const detail = new Promise(resolve => { resolveDetail = resolve })
+  const calls = []
+  const fixture = await mountPage(['expense.claim.read'], async path => {
+    calls.push(path)
+    return path === '/claims/old' ? detail : { items: [], total: 0 }
+  }, 'submitted', [], {}, { sync: true, query: { claim_id: 'old', project_id: 'p1' } })
+  try {
+    await fixture.state.switchClaimView('mine')
+    resolveDetail({ id: 'old', status: 'PAID', version: 1, items: [] })
+    await new Promise(resolve => setImmediate(resolve))
+    assert.equal(fixture.state.selected.value, null)
+    assert.deepEqual(fixture.route.query, { project_id: 'p1' })
+    assert.equal(calls.filter(path => path === '/claims/old').length, 1)
+  } finally { fixture.unmount() }
+})
+
+test('从已打开的旧审批深链点击我的单据，清除详情并保留草稿确认', async () => {
+  const fixture = await mountPage(['expense.claim.read'], async path => {
+    if (path === '/claims/claim-1') return { id: 'claim-1', title: '原草稿', status: 'DRAFT',
+      currency: 'CNY', version: 1, items: [] }
+    return { items: [], total: 0 }
+  }, 'submitted', [], {}, { sync: true, guard: true, query: { claim_id: 'claim-1' } })
+  try {
+    fixture.state.draft.value.title = '未保存标题'
+    await fixture.state.navigate('claims')
+    assert.equal(fixture.route.params.section, 'claims')
+    assert.equal(fixture.state.selected.value, null)
+    assert.equal(fixture.confirm.calls.length, 1)
+    assert.match(await fixture.html(), /我的单据视图/)
+  } finally { fixture.unmount() }
+})
+
+test('canonical 审批视图与旧入口均不显示新建报销，切换我的单据后恢复', async () => {
+  const fixture = await mountPage(['expense.claim.read', 'expense.claim.create'],
+    async path => path === '/claim-options' ? draftOptionsFixture() : { items: [], total: 0 },
+    'claims', [], {}, { sync: true, query: { view: 'submitted' } })
+  try {
+    assert.doesNotMatch(await fixture.html(), /新建报销/)
+    await fixture.state.switchClaimView('mine')
+    assert.match(await fixture.html(), /新建报销/)
+  } finally { fixture.unmount() }
+})
+
+test('栏目切换使已经开始读取归档附件的临时详情失效', async () => {
+  let rejectArchives
+  const archives = new Promise((resolve, reject) => { rejectArchives = reject })
+  const fixture = await mountPage(['expense.claim.read', 'expense.archive.read'], async path => {
+    if (path === '/claims/old') return { id: 'old', status: 'PAID', version: 1, items: [] }
+    if (path === '/claims/old/archives') return archives
+    return { items: [], total: 0 }
+  }, 'archives', [], {}, { sync: true })
+  try {
+    const opening = fixture.state.openClaim('old')
+    await new Promise(resolve => setImmediate(resolve))
+    assert.equal(fixture.state.selected.value?.id, 'old')
+    await fixture.state.navigate('dashboard')
+    rejectArchives(new Error('旧归档附件读取失败'))
+    await opening
+    assert.equal(fixture.state.selected.value, null)
+    assert.equal(fixture.state.error.value, '')
+    assert.equal(fixture.route.query.claim_id, undefined)
+  } finally { fixture.unmount() }
+})
+
+test('后退移除单据坐标前保护未保存草稿或结果未知的命令', async () => {
+  const fixture = await mountPage(['expense.claim.read'], async (path, options) => {
+    if (options?.method === 'PATCH') throw Object.assign(new Error('请求结果未知'), { outcomeUnknown: true })
+    if (path === '/claims/claim-1') return { id: 'claim-1', title: '原草稿', status: 'DRAFT',
+      currency: 'CNY', version: 1, items: [] }
+    return { items: [], total: 0 }
+  }, 'claims', [], {}, { sync: true, guard: true, query: { claim_id: 'claim-1', project_id: 'p1' } })
+  try {
+    const list = { params: { section: 'claims' }, query: { project_id: 'p1' } }
+    fixture.state.draft.value.title = '未保存标题'
+    fixture.confirm.state.answer = false
+    await fixture.router.push(list)
+    assert.equal(fixture.route.query.claim_id, 'claim-1')
+    assert.equal(fixture.state.draft.value.title, '未保存标题')
+    assert.equal(fixture.confirm.calls.length, 1)
+    fixture.confirm.state.answer = true
+    await fixture.router.push(list)
+    await Vue.nextTick()
+    assert.equal(fixture.state.selected.value, null)
+    assert.equal(fixture.state.claimFormOpen.value, false)
+    assert.deepEqual(fixture.route.query, { project_id: 'p1' })
+    assert.match(await fixture.html(), /我的单据视图/)
+
+    await fixture.state.openClaim('claim-1')
+    await Vue.nextTick()
+    await fixture.state.mutate('claim.update', '/claims/claim-1', {}, 'PATCH')
+    assert.ok(fixture.state.pending.value)
+    await fixture.router.push(list)
+    assert.equal(fixture.route.query.claim_id, 'claim-1')
+    assert.equal(fixture.state.selected.value?.id, 'claim-1')
+  } finally { fixture.unmount() }
+})
+
+test('付款本页统计只计算可见待付金额，缺少金额或请求失败时不伪造金额', async () => {
+  let items = [
+    { id: 'waiting-1', status: 'APPROVED_PENDING_PAYMENT', payable_minor: '9007199254740993' },
+    { id: 'waiting-2', status: 'APPROVED_PENDING_PAYMENT', payable_minor: '8' },
+    { id: 'paid', status: 'PAID', payable_minor: '201' },
+  ]
+  const fixture = await mountPage(['expense.payment.read'], async () => {
+    if (!items) throw new Error('付款列表读取失败')
+    return { items, total: 100 }
+  }, 'payments')
+  try {
+    fixture.state.paymentStatus.value = ''
+    await new Promise((resolve) => setImmediate(resolve))
+    const html = await fixture.html()
+    assert.match(html, /当前页待付款<\/dt><dd>2 单/)
+    assert.match(html, /当前页已付款<\/dt><dd>1 单/)
+    assert.match(html, /当前页待付金额<\/dt><dd>90071992547410\.01 元/)
+    items = [{ id: 'waiting-3', status: 'APPROVED_PENDING_PAYMENT' }]
+    await fixture.state.load()
+    assert.match(await fixture.html(), /当前页待付金额<\/dt><dd>未提供/)
+    items = null
+    await fixture.state.load()
+    assert.doesNotMatch(await fixture.html(), /当前页待付金额/)
+  } finally { fixture.unmount() }
+})
+
+test('付款全部状态不继承我的单据状态，服务端请求保留其他筛选', async () => {
+  const calls = []
+  const fixture = await mountPage(['expense.claim.read', 'expense.payment.read'], async path => {
+    calls.push(path)
+    return { items: [], total: 0 }
+  }, 'claims', [], {}, { sync: true, query: { status: 'PAID', q: '项目差旅' } })
+  try {
+    await fixture.state.navigate('payments')
+    await new Promise(resolve => setImmediate(resolve))
+    assert.equal(new URL(calls.at(-1), 'http://fixture.invalid').searchParams.get('status'),
+      'APPROVED_PENDING_PAYMENT')
+    fixture.state.paymentStatus.value = ''
+    await new Promise(resolve => setImmediate(resolve))
+    const query = new URL(calls.at(-1), 'http://fixture.invalid').searchParams
+    assert.equal(query.has('status'), false)
+    assert.equal(query.get('q'), '项目差旅')
+  } finally { fixture.unmount() }
+})
+
+test('归档统计随项目聚合接口分页，不从报销明细或服务端总条数计算', async () => {
+  const calls = []
+  const fixture = await mountPage(['expense.archive.read'], async path => {
+    calls.push(path)
+    if (!path.startsWith('/archive-projects?')) return { items: [], total: 1 }
+    const page = new URL(path, 'http://fixture.invalid').searchParams.get('page')
+    const items = page === '1' ? [
+      { project_id: 'project-a', claim_count: 3, amount_minor: '320' },
+      { project_id: 'project-b', claim_count: 4, amount_minor: '-19' },
+    ] : [{ project_id: 'project-c', claim_count: 2, amount_minor: '99' }]
+    return { items, total: 40 }
+  }, 'archives')
+  try {
+    let html = await fixture.html()
+    assert.match(html, /本页项目<\/dt><dd>2 个/)
+    assert.match(html, /本页各项目单据数合计<\/dt><dd>7 张/)
+    assert.match(html, /本页归档净额<\/dt><dd>3\.01 元/)
+    assert.match(html, /data-pager="项目归档分页"[^>]*>第 1 页，共 40 条/)
+    assert.match(html, /data-pager="报销列表分页"[^>]*>第 1 页，共 1 条/)
+    await fixture.state.loadArchiveProjects(2)
+    html = await fixture.html()
+    assert.match(html, /本页项目<\/dt><dd>1 个/)
+    assert.match(html, /本页各项目单据数合计<\/dt><dd>2 张/)
+    assert.match(html, /本页归档净额<\/dt><dd>0\.99 元/)
+    assert.match(html, /data-pager="项目归档分页"[^>]*>第 2 页，共 40 条/)
+    assert.match(html, /data-pager="报销列表分页"[^>]*>第 1 页，共 1 条/)
+    assert.equal(calls.filter(path => path.startsWith('/claims?')).length, 1)
+    await fixture.state.changeListPage(1, 10)
+    assert.match(calls.at(-1), /^\/claims\?page=1&page_size=10/)
+    assert.equal(calls.filter(path => path.startsWith('/archive-projects?')).length, 2)
+    assert.match(await fixture.html(), /本页归档净额<\/dt><dd>0\.99 元/)
   } finally { fixture.unmount() }
 })
 
