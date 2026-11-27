@@ -99,8 +99,10 @@ export function workspaceQuery(workspace, filters, page, size, project) {
   if (workspace==='invoice-abnormal') query.set('exception_only','true')
   if (workspace==='submitted') {
     query.set('mine','true')
-    // 页签选中时沿用上面的单值筛选；「全部」由入口固有范围补齐，避免草稿混入审批轨迹。
-    if (!query.has('status')) query.set('status', submittedClaimStatuses.join(','))
+    // 兼容旧深链的多状态筛选，同时维持审批入口的已提交范围。
+    const statuses = (query.get('status') || '').split(',')
+      .map(status => status.trim()).filter(status => submittedClaimStatuses.includes(status))
+    query.set('status', (statuses.length ? statuses : submittedClaimStatuses).join(','))
   }
   return query.toString()
 }
