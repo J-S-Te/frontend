@@ -342,14 +342,15 @@ watch(() => [props.item?.id, props.item?.penetration_work_package || null], ([it
               :loading="usernameSearchLoading" @search="searchEngineerUsername"
               :empty-text="usernameSearchError ? '用户名查询暂不可用，请按姓名或资质编号搜索' : '没有匹配的有效渗透测试人员'" />
           </div>
-          <label><span>授权书编号 *</span><input v-model.trim="plan.authDocNo"  maxlength="128"/></label>
-          <label><span>授权生效 *</span><input v-model="plan.authStart" type="datetime-local" /></label>
-          <label><span>授权截止 *</span><input v-model="plan.authEnd" type="datetime-local" /></label>
-          <label class="wide"><span>授权范围 *</span><textarea v-model.trim="plan.authScope" rows="2" placeholder="多个边界使用逗号分隔" maxlength="5000"></textarea></label>
-          <label class="wide"><span>测试范围 *</span><textarea v-model.trim="plan.testScope" rows="2" placeholder="必须是授权范围的子集" maxlength="5000"></textarea></label>
-          <label><span>测试时间窗 *</span><input v-model.trim="plan.testWindow" placeholder="例如 00:00-06:00"  maxlength="128"/></label>
-          <label><span>应急联系人 *</span><input v-model.trim="plan.emergencyContact" placeholder="姓名 + 电话"  maxlength="128"/></label>
-          <label class="wide"><span>回滚方案 *</span><textarea v-model.trim="plan.rollbackPlan" rows="2" maxlength="5000"></textarea></label>
+          <p class="pen-note wide">以下信息可留空保存，请在开始测试前补齐。</p>
+          <label><span>授权书编号</span><input v-model.trim="plan.authDocNo" maxlength="128" /></label>
+          <label><span>授权生效</span><input v-model="plan.authStart" type="datetime-local" /></label>
+          <label><span>授权截止</span><input v-model="plan.authEnd" type="datetime-local" /></label>
+          <label class="wide"><span>授权范围</span><textarea v-model.trim="plan.authScope" rows="2" placeholder="多个边界使用逗号分隔" maxlength="5000"></textarea></label>
+          <label class="wide"><span>测试范围</span><textarea v-model.trim="plan.testScope" rows="2" placeholder="须在授权范围内" maxlength="5000"></textarea></label>
+          <label><span>测试时间窗</span><input v-model.trim="plan.testWindow" placeholder="例如 00:00-06:00" maxlength="128" /></label>
+          <label><span>应急联系人</span><input v-model.trim="plan.emergencyContact" placeholder="姓名 + 电话" maxlength="128" /></label>
+          <label class="wide"><span>回滚方案</span><textarea v-model.trim="plan.rollbackPlan" rows="2" maxlength="5000"></textarea></label>
           <button class="pm-button primary" type="button" :disabled="busy || draftConflict" @click="submitPlan">保存专项计划</button>
         </div>
         <dl v-else class="pen-summary details">
