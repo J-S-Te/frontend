@@ -238,6 +238,49 @@
   outline-color: var(--ui-control-error);
 }
 
+/* 已有边框的外壳负责绘制边界。只接管直接子控件，兼容顶栏和 Teleport 浮层。 */
+:root body :is(
+  .console-search-field, .console-select-field,
+  .contract-search-field, .contract-global-search,
+  .pm-picker-search, .pm-search-input, .pm-search-select-search,
+  .settings-tab-search, .da-dict-search, .license-app-search
+) {
+  & > :is(input, select):not([type="checkbox"]):not([type="radio"]):not([type="file"]):not(
+    [type="hidden"], [type="range"],
+    [type="color"], [type="button"], [type="submit"], [type="reset"]
+  ) {
+    align-self: stretch;
+    min-width: 0;
+    min-height: 0;
+    padding: 0;
+    border: 0;
+    background-color: transparent;
+
+    &:is(:focus, :disabled, [readonly]) {
+      outline: none;
+      background-color: transparent;
+      box-shadow: none;
+    }
+  }
+
+  &:has(> :is(input, select):focus-visible) {
+    outline: 2px solid var(--ui-focus-color);
+    outline-offset: 2px;
+    box-shadow: none;
+  }
+
+  &:has(> :is(input, select):is([aria-invalid="true"], :user-invalid)) {
+    border-color: var(--ui-control-error);
+    outline-color: var(--ui-control-error);
+  }
+
+  &:has(> input[readonly]) { background-color: var(--ui-card-soft); }
+  &:has(> :is(input, select):disabled) {
+    cursor: not-allowed;
+    background-color: var(--ui-control-disabled);
+  }
+}
+
 /* 开关不改变已启用/待保存/忙状态，只平滑现有轨道与滑块。 */
 :root body :is(.console-switch, .pm-switch, .da-switch, .contract-import-switch,
   .crm-approval-switch-track, .pm-kpi-switch-track, .da-native-card-switch-track,

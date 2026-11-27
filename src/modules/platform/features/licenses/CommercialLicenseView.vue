@@ -1005,9 +1005,19 @@ onBeforeUnmount(() => {
 .license-app-filter span { color: var(--license-muted); font-size: var(--fs-xs); }
 .license-app-filter.active { border-color: var(--primary); background: var(--surface-muted); color: var(--primary); }
 .license-app-filter.active span { color: var(--primary); }
-.license-app-search { display: flex; align-items: center; gap: 6px; min-width: 220px; padding: 0 10px; border: 1px solid var(--license-border); border-radius: var(--radius-sm); background: var(--surface-card); }
+.license-app-search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 220px;
+  min-height: 34px;
+  padding: 0 10px;
+  border: 1px solid var(--license-border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-card);
+}
 .license-app-search svg { width: 14px; height: 14px; color: var(--license-muted); }
-.license-app-search input { width: 100%; min-height: 30px; border: 0; background: transparent; color: var(--license-body); font-size: var(--fs-xs); outline: 0; }
+.license-app-search input { width: 100%; border: 0; background: transparent; color: var(--license-body); font-size: var(--fs-xs); outline: 0; }
 .license-app-table-wrap { overflow: auto; border: 1px solid var(--license-border); border-radius: var(--radius-lg); }
 .license-app-table { width: 100%; border-collapse: collapse; background: var(--surface-card); font-size: var(--fs-xs); }
 .license-app-table th, .license-app-table td { padding: 10px 12px; border-bottom: 1px solid var(--license-border); text-align: left; vertical-align: top; }
