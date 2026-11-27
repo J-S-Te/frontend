@@ -7,6 +7,7 @@ import { createRequestScope } from '../../platform/shared/composables/requestSco
 import { formatUserError } from '../../shared/utils/userError.js'
 import { subsystemAccessMessage } from '../../shared/authz/sessionCompatibility.js'
 import { authorizationScopeKey } from '../../shared/authz/authorizationSnapshot.js'
+import { reconcileWorkflowServiceItems } from '../composables/useProjectWorkflowSync.js'
 
 // 沿用 presaleStability.test.mjs 的做法：从真实 SFC 提取项目计划/现场执行/报告链路函数，
 // 在注入的上下文中执行，验证接线后的行为而非复述实现。
@@ -42,6 +43,7 @@ function workspaceContext({ listProjectsSnapshot = async () => ({ items: [], tot
   const toasts = []
   const context = {
     ref, createRequestScope, formatUserError, subsystemAccessMessage, authorizationScopeKey,
+    reconcileWorkflowServiceItems,
     window: { clearTimeout: () => {}, setTimeout: () => 0 },
     toastTimer: 0,
     toastMessage: ref(''), toastType: ref('success'),
@@ -96,6 +98,37 @@ test('拆解确认写入成功但刷新失败：提示已保存与读取失败�
   assert.equal(w.context.toastType.value, 'warning')
   assert.equal(w.context.saving.value, false, 'finally 必须释放进行中标志')
   assert.equal(workspaceLoads, 1, '刷新链仍要尝试拉取最新数据')
+})
+
+test('写后先更新项目与服务项，辅助查询变慢或失败也保留已回读的新状态', async () => {
+  const w = workspaceContext()
+  Object.assign(w.context, functions('./ProjectManagementView.vue',
+    ['loadWorkspace', 'refreshAfterWrite'], w.context))
+  const auxiliary = deferred()
+  const previous = { id: 'SI-1', project_id: 'PJ-1', status: '待分配', version: 6 }
+  const current = { ...previous, status: '待实施', version: 7 }
+  w.context.workspaceReady.value = true
+  w.context.projects.value = [{ id: 'PJ-1', status: '待分配' }]
+  w.context.serviceItems.value = [previous, { id: 'SI-2', status: '待确认', selected: false }]
+  w.context.listProjectsSnapshot = async () => ({ items: [{ id: 'PJ-1', status: '待实施' }] })
+  w.context.listServiceItemsSnapshot = async () => ({
+    items: [current, { id: 'SI-2', status: '待确认' }],
+  })
+  w.context.listRules = () => auxiliary.promise
+
+  const refreshing = w.context.refreshAfterWrite()
+  try {
+    await until(() => w.context.serviceItems.value[0].version === 7)
+    assert.equal(w.context.projects.value[0].status, '待实施')
+    assert.equal(w.context.serviceItems.value[0].status, '待实施')
+    assert.equal(w.context.serviceItems.value[1].selected, false)
+  } finally {
+    auxiliary.reject(new Error('辅助规则查询失败'))
+    await refreshing
+  }
+  assert.equal(w.context.serviceItems.value[0].version, 7)
+  assert.match(w.context.refreshWarning.value, /已保存/)
+  assert.equal(w.context.workspaceReady.value, true)
 })
 
 test('报告更正申请写入失败：保留草稿原因并按操作失败提示，不触发刷新链', async () => {

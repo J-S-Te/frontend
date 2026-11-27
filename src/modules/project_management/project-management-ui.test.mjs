@@ -463,8 +463,7 @@ test('所有业务节点只展示当前归属项目并在回退后清除原节�
   assert.match(source, /serviceItemPreparationConfirmed\(item, latestWorkflowEvent\(item\)\) === false/)
   assert.match(source, /implementationPlanReady, isAllocationPending, projectAllowsWorkflowNode,\s*serviceItemPreparationConfirmed,\s*\} from '@\/modules\/project_management\/workflowNode'/)
   assert.match(workflowNodeSource, /export function implementationPlanReady\(item\)/)
-  assert.match(workflowNodeSource, /Boolean\(item\.team_lead_id && item\.project_manager_id && \(item\.engineer_ids \|\| \[\]\)\.length\)/)
-  assert.match(workflowNodeSource, /item\.conflict_status === 'PASSED'/)
+  assert.match(workflowNodeSource, /function implementationPlanReady\(item\)[^}]*allocationState\(item\)\.complete/)
   assert.match(source, /projectAllowsNode\(item, 'planning'\) && implementationPlanReady\(item\)/)
   const focusedItems = source.slice(source.indexOf('const workflowServiceItems = computed('),
     source.indexOf('const projectByID = computed('))
@@ -1672,7 +1671,8 @@ test('过期设备展示派生无效状态且检测类别使用受控域', () =>
   assert.match(source, /const categoryOptions = computed\(\(\) => activeDetectionCategoryOptions\.value/)
   assert.match(source, /<SearchableSelect v-model="row\.category"[^>]*:options="activeDetectionCategoryOptions"/)
   assert.doesNotMatch(source, /<input v-model\.trim="row\.category" required placeholder="检测类别"/)
-  assert.match(source, /categoryRows,[\s\S]*listDetectionCategories\(\)/)
+  assert.match(source, /const auxiliaryRows = Promise\.all\(\[[^\]]*listDetectionCategories\(\)/)
+  assert.match(source, /detectionCategories\.value = categoryRows/)
 })
 
 test('在途监控使用服务端快照、自动刷新、真分页和节点下钻', () => {

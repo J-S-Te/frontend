@@ -7,6 +7,7 @@ import { normalizeStatusTone } from '../shared/theme/statusCatalog.js'
 import { businessWallClockToInstant, formatBusinessDateTime, instantToBusinessWallClock } from '../shared/utils/businessTime.js'
 import { escapeCsvCell } from '../platform/iam/utils/csvExport.js'
 import { REPORT_STAGE_LABELS } from '../shared/utils/reportStage.js'
+import { allocationState, implementationPlanReady, serviceItemPreparationConfirmed } from './workflowNode.js'
 
 // 用途：以项目和系统名称标识服务项，统一工作台的主展示口径。
 // 参数：item 为服务项快照；project 为对应的已授权项目快照。
@@ -88,15 +89,17 @@ export function newFieldOperationID(prefix) {
 export const statusToneMap = {
   // 需要人关注，但业务未失败
   待拆解确认: 'warning', 待确认: 'warning', 待复核: 'warning', 待处理: 'warning', 待评审: 'warning', PENDING: 'warning',
+  待特殊方法复核: 'warning',
   整改中: 'warning', RECTIFYING: 'warning', 未生效: 'warning', NOT_YET_EFFECTIVE: 'warning',
   '已撤销，待重新制定': 'warning', 待重新制定: 'warning',
   // 已启动 / 推进中
   已分配: 'processing', 已审核: 'processing', 已签发: 'processing', 计划已发布: 'processing', REVIEWED: 'processing', ISSUED: 'processing',
   待实施: 'processing', 实施准备中: 'processing', 编制中: 'processing', 报告编制: 'processing', 准备中: 'processing', COMPILING: 'processing',
-  实施中: 'processing',
+  实施中: 'processing', 准备完成: 'processing',
   // 异常 / 失败
   异常处理中: 'danger', 已终止: 'danger', 已驳回: 'danger', REJECTED: 'danger', MISSING: 'danger', EXPIRED: 'danger',
   无效: 'danger', CONFLICT: 'danger', 能力冲突: 'danger', 排期冲突: 'danger', 阻断: 'danger', TERMINATE: 'danger',
+  特殊方法复核未通过: 'danger',
   // 正向完成
   现场实施完成: 'success', 已完成: 'success', 已归档: 'success', ARCHIVED: 'success',
   已通过: 'success', APPROVED: 'success', PASSED: 'success', 校验通过: 'success', 启用: 'success', 有效: 'success', ACTIVE: 'success', 在公司: 'success',
@@ -137,12 +140,21 @@ export function serviceItemReportStage(item) {
   return { label: reportStageLabel[phase], tone: statusTone(phase), rank: serviceItemReportRank[phase] }
 }
 
-// 用途：统一队列与摘要的服务项主状态和报告阶段徽章。
+// 用途：统一服务项的当前办理步骤与报告阶段徽章。
 // 参数：item 为当前服务项快照，不接受项目聚合状态代替服务项状态。
 // 返回值：可直接渲染的徽章；报告阶段仅在现场完成后显示，未知值明确回显。
 export function serviceItemStatusBadges(item) {
   const status = String(item?.status ?? '').trim()
-  const badges = [{ key: 'status', label: status || '状态未提供', tone: statusTone(status) }]
+  let label = status || '状态未提供'
+  if (status === '待分配') {
+    const allocation = allocationState(item)
+    if (!allocation.complete) label = allocation.label
+    else if (implementationPlanReady(item)) label = '待制定计划'
+    else label = item.tech_review_status === 'REJECTED' ? '特殊方法复核未通过' : '待特殊方法复核'
+  } else if (status === '实施准备中' && serviceItemPreparationConfirmed(item) === true) {
+    label = '准备完成'
+  }
+  const badges = [{ key: 'status', label, tone: statusTone(label) }]
   if (status === '现场实施完成') {
     const stage = serviceItemReportStage(item)
     badges.push({ key: 'report', label: `报告${stage.label}`, tone: stage.tone })
@@ -151,7 +163,7 @@ export function serviceItemStatusBadges(item) {
 }
 
 // 用途：按真实主状态展示交付进度，进入某阶段不代表该阶段已经完成。
-// 参数：item 为当前服务项；待分配阶段额外核对团队与执行人员是否齐备。
+// 参数：item 为当前服务项，含分配、能力校验、复核及实施准备确认字段。
 // 返回值：七步只读进度；未知或终止状态不推断完成，无服务项时返回空数组。
 export function serviceItemOperationSteps(item) {
   if (!item) return []
@@ -160,15 +172,16 @@ export function serviceItemOperationSteps(item) {
   let current = -1
   if (rank === 0) current = 0
   else if (rank === 1) {
-    const assigned = item.project_manager_id && item.engineer_ids?.length
-    current = !item.team_lead_id ? 1 : assigned ? 3 : 2
-  } else if (rank === 2 || rank === 3) current = 4
-  else if (rank === 4 || rank === 5) current = 5
+    current = !item.team_lead_id ? 1 : allocationState(item).complete ? 3 : 2
+  } else if (rank === 2 || rank === 3) {
+    current = rank === 3 && serviceItemPreparationConfirmed(item) === true ? 5 : 4
+  } else if (rank === 4 || rank === 5) current = 5
   else if (rank === 6) current = 7
 
+  const waitingForReview = rank === 1 && current === 3 && !implementationPlanReady(item)
   return ['拆解确认', '分配至团队', '指派人员', '制定实施计划',
     '实施准备', '现场实施', '完成确认'].map((label, index) => ({
-    label, state: index < current ? 'done' : index === current ? 'doing' : 'idle',
+    label, state: index < current ? 'done' : index === current && !waitingForReview ? 'doing' : 'idle',
   }))
 }
 
