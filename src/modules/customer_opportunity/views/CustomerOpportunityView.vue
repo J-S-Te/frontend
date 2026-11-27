@@ -473,6 +473,7 @@ const teamDirectoryError = ref('')
 const teamDirectoryLoadSequence = ref(0)
 const teamCandidate = reactive({ user_id: '', role: 'TECHNICAL_SUPPORT' })
 const opportunityTeam = ref([])
+const opportunityMoreRef = ref(null)
 const opportunityTeamExpanded = ref(false)
 const visibleOpportunityTeam = computed(() =>
   opportunityTeamExpanded.value ? opportunityTeam.value : opportunityTeam.value.slice(0, 3),
@@ -2933,13 +2934,29 @@ function closeApprovalRuleDrawer() {
   ruleConfigTriggerRef.value?.focus?.()
 }
 
+// 用途：关闭商机详情的更多操作菜单，键盘退出时将焦点还给触发器。
+// 参数：restoreFocus 表示关闭后是否恢复菜单触发器的焦点。
+// 返回值：菜单原先打开并已关闭时为 true。
+function closeOpportunityMoreMenu(restoreFocus = false) {
+  const menu = opportunityMoreRef.value
+  if (!menu?.open) return false
+  menu.open = false
+  if (restoreFocus) menu.querySelector('summary')?.focus()
+  return true
+}
+
+// 用途：点击菜单外部时关闭页面上的操作菜单。
+// 参数：event 为页面收到的指针按下事件。
+// 返回值：无。
 function handleRuleConfigPointer(event) {
   if (showRuleConfigMenu.value && ruleConfigRef.value && !ruleConfigRef.value.contains(event.target)) {
     showRuleConfigMenu.value = false
   }
+  const opportunityMenu = opportunityMoreRef.value
+  if (opportunityMenu?.open && !opportunityMenu.contains(event.target)) closeOpportunityMoreMenu()
 }
 
-// 用途：使用 Esc 关闭当前抽屉或规则配置菜单。
+// 用途：使用 Esc 关闭当前抽屉或操作菜单。
 // 参数：event 为页面捕获到的键盘事件。
 // 返回值：无。
 function handleRuleConfigKeydown(event) {
@@ -2947,6 +2964,10 @@ function handleRuleConfigKeydown(event) {
   showRuleConfigMenu.value = false
   if (opportunityTermsOpen.value) {
     closeOpportunityTermsDrawer()
+    return
+  }
+  if (closeOpportunityMoreMenu(true)) {
+    event.preventDefault()
     return
   }
   if (showRuleDrawer.value) closeApprovalRuleDrawer()
@@ -4248,11 +4269,21 @@ onMounted(async () => {
   <div class="crm-opportunity-workspace">
     <div class="crm-opportunity-main">
   <div class="crm-opportunity-tabs" role="tablist" aria-label="商机详情分区">
-    <button type="button" role="tab" :aria-selected="opportunityDetailTab === 'overview'" :class="{ active: opportunityDetailTab === 'overview' }" @click="opportunityDetailTab = 'overview'">概览</button>
-    <button type="button" role="tab" :aria-selected="opportunityDetailTab === 'presale'" :class="{ active: opportunityDetailTab === 'presale' }" @click="opportunityDetailTab = 'presale'">售前任务 <span class="crm-opportunity-tab-count">{{ opportunityPresaleCount }}</span></button>
-    <button type="button" role="tab" :aria-selected="opportunityDetailTab === 'activity'" :class="{ active: opportunityDetailTab === 'activity' }" @click="opportunityDetailTab = 'activity'">跟进与阶段 <span class="crm-opportunity-tab-count">{{ opportunityActivityCount }}</span></button>
+    <button id="opportunity-tab-overview" type="button" role="tab"
+      :aria-controls="opportunityDetailTab === 'overview' ? 'opportunity-panel-overview' : undefined"
+      :aria-selected="opportunityDetailTab === 'overview'" :class="{ active: opportunityDetailTab === 'overview' }"
+      @click="opportunityDetailTab = 'overview'">概览</button>
+    <button id="opportunity-tab-presale" type="button" role="tab"
+      :aria-controls="opportunityDetailTab === 'presale' ? 'opportunity-panel-presale' : undefined"
+      :aria-selected="opportunityDetailTab === 'presale'" :class="{ active: opportunityDetailTab === 'presale' }"
+      @click="opportunityDetailTab = 'presale'">售前任务 <span class="crm-opportunity-tab-count">{{ opportunityPresaleCount }}</span></button>
+    <button id="opportunity-tab-activity" type="button" role="tab"
+      :aria-controls="opportunityDetailTab === 'activity' ? 'opportunity-panel-activity' : undefined"
+      :aria-selected="opportunityDetailTab === 'activity'" :class="{ active: opportunityDetailTab === 'activity' }"
+      @click="opportunityDetailTab = 'activity'">跟进与阶段 <span class="crm-opportunity-tab-count">{{ opportunityActivityCount }}</span></button>
   </div>
-  <section v-if="opportunityDetailTab === 'overview'" class="crm-opportunity-tab-panel" role="tabpanel" aria-label="商机概览">
+  <section v-if="opportunityDetailTab === 'overview'" id="opportunity-panel-overview"
+    class="crm-opportunity-tab-panel" role="tabpanel" aria-labelledby="opportunity-tab-overview">
     <div class="crm-opportunity-overview-grid">
       <section class="crm-detail-card crm-opportunity-facts-card">
         <div class="crm-opportunity-card-head">
@@ -4280,7 +4311,8 @@ onMounted(async () => {
       </section>
     </div>
   </section>
-  <section v-else-if="opportunityDetailTab === 'presale'" class="crm-opportunity-tab-panel" role="tabpanel" aria-label="关联售前任务">
+  <section v-else-if="opportunityDetailTab === 'presale'" id="opportunity-panel-presale"
+    class="crm-opportunity-tab-panel" role="tabpanel" aria-labelledby="opportunity-tab-presale">
     <section class="crm-detail-card crm-opportunity-presale" aria-labelledby="opportunity-presale-heading">
       <div class="crm-panel-heading">
         <div><h3 id="opportunity-presale-heading">关联售前任务</h3><p class="crm-note">售前状态独立流转，不会自动修改商机阶段。</p></div>
@@ -4316,7 +4348,8 @@ onMounted(async () => {
       </ol>
     </section>
   </section>
-  <section v-else class="crm-opportunity-tab-panel" role="tabpanel" aria-label="跟进与阶段历史">
+  <section v-else id="opportunity-panel-activity" class="crm-opportunity-tab-panel"
+    role="tabpanel" aria-labelledby="opportunity-tab-activity">
     <div class="crm-opportunity-activity-grid">
       <section class="crm-detail-card crm-opportunity-activity-card">
         <div class="crm-opportunity-card-head"><h3>跟进记录</h3><span class="crm-opportunity-tab-count">{{ followups.length }}</span></div>
@@ -4470,13 +4503,13 @@ onMounted(async () => {
     </div>
     <div class="crm-opportunity-action-buttons">
       <button type="button" @click="selectedOpportunity = null">关闭</button>
-      <details class="crm-opportunity-more">
+      <details v-if="selectedOpportunity.opp_status !== 'VOID'" ref="opportunityMoreRef" class="crm-opportunity-more">
         <summary>更多操作</summary>
-        <div class="crm-opportunity-more-menu">
-          <button v-if="selectedOpportunity.opp_status !== 'VOID'" type="button" @click="openOwnerEditor">变更负责人</button>
-          <button v-if="selectedOpportunity.opp_status !== 'VOID' && canManageOpportunityTeam && opportunityTeamDirectoryAvailable" type="button" @click="openTeamEditor">维护团队</button>
-          <button v-if="selectedOpportunity.opp_status !== 'VOID' && selectedOpportunity.terminal_pending_type && selectedOpportunity.terminal_pending_type !== 'NONE'" type="button" @click="terminalDialog = true">补全终态待办</button>
-          <button v-if="selectedOpportunity.opp_status !== 'VOID'" type="button" class="danger" @click="changeOpportunityStatus('void')">作废</button>
+        <div class="crm-opportunity-more-menu" @click="closeOpportunityMoreMenu()">
+          <button type="button" @click="openOwnerEditor">变更负责人</button>
+          <button v-if="canManageOpportunityTeam && opportunityTeamDirectoryAvailable" type="button" @click="openTeamEditor">维护团队</button>
+          <button v-if="selectedOpportunity.terminal_pending_type && selectedOpportunity.terminal_pending_type !== 'NONE'" type="button" @click="terminalDialog = true">补全终态待办</button>
+          <button type="button" class="danger" @click="changeOpportunityStatus('void')">作废</button>
         </div>
       </details>
       <button v-if="selectedOpportunity.opp_status !== 'VOID'" type="button" class="primary" @click="followupDialog = true"><ConsoleIcon name="plus" />添加跟进</button>

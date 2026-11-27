@@ -353,6 +353,46 @@ test('商机详情看板先展示核心指标，再按概览/售前/跟进分区
   assert.match(style, /\.crm-opportunity-overview-grid \{[^}]*grid-template-columns: minmax\(0, 1\.35fr\)/)
 })
 
+test('商机更多操作在外部点击和 Escape 时关闭，仅 Escape 恢复焦点', () => {
+  const inside = {}
+  let focused = 0
+  const menu = {
+    open: true,
+    contains: (target) => target === inside,
+    querySelector: (selector) => selector === 'summary' ? { focus: () => { focused++ } } : null,
+  }
+  const handlers = ['closeOpportunityMoreMenu', 'handleRuleConfigPointer', 'handleRuleConfigKeydown']
+    .map((name) => view.match(new RegExp(`^function ${name}\\([^\\n]*\\) \\{[\\s\\S]*?^\\}`, 'm'))?.[0])
+    .filter(Boolean)
+  const createHandlers = new Function(
+    'opportunityMoreRef', 'showRuleConfigMenu', 'ruleConfigRef', 'opportunityTermsOpen', 'showRuleDrawer',
+    `${handlers.join('\n')}\nreturn { handleRuleConfigPointer, handleRuleConfigKeydown }`,
+  )
+  const { handleRuleConfigPointer, handleRuleConfigKeydown } = createHandlers(
+    { value: menu }, { value: false }, { value: null }, { value: false }, { value: false },
+  )
+
+  handleRuleConfigPointer({ target: inside })
+  assert.equal(menu.open, true)
+  handleRuleConfigPointer({ target: {} })
+  assert.equal(menu.open, false)
+  assert.equal(focused, 0)
+
+  menu.open = true
+  handleRuleConfigKeydown({ key: 'Escape', preventDefault() {} })
+  assert.equal(menu.open, false)
+  assert.equal(focused, 1)
+})
+
+test('商机详情隐藏空的操作菜单，并为激活的页签关联内容面板', () => {
+  assert.match(view, /<details v-if="selectedOpportunity\.opp_status !== 'VOID'"[^>]*class="crm-opportunity-more"/)
+  assert.match(view, /class="crm-opportunity-more-menu" @click="closeOpportunityMoreMenu\(\)"/)
+  for (const tab of ['overview', 'presale', 'activity']) {
+    assert.match(view, new RegExp(`<button id="opportunity-tab-${tab}"[^>]*role="tab"[^>]*:aria-controls="opportunityDetailTab === '${tab}' \\? 'opportunity-panel-${tab}' : undefined"`))
+    assert.match(view, new RegExp(`id="opportunity-panel-${tab}"[^>]*role="tabpanel"[^>]*aria-labelledby="opportunity-tab-${tab}"`))
+  }
+})
+
 test('商机关键资料栏不再承载任期宽表，任期明细进入抽屉', () => {
   assert.match(view, /class="crm-opportunity-side-rail"/)
   assert.match(view, /class="[^"]*crm-opportunity-terms-entry/)
