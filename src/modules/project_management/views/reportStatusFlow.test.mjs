@@ -22,7 +22,7 @@ function reportHarness(status, permissions = ['project.report.prepare']) {
     saving: Vue.ref(false), operationForm: Vue.ref({}),
     permissionSet: Vue.ref(new Set(permissions)), activeSection: Vue.ref('reports'),
     session: Vue.ref({ user_id: 'manager' }),
-    reportItems: Vue.ref([item]), projectByID: Vue.ref(new Map()),
+    reportDetailItems: Vue.ref([item]), projectByID: Vue.ref(new Map()),
     // 报告中文词表已迁到 projectDisplay.js，这里以真实导入值注入，不再从视图切片求值。
     reportStatusLabel,
     serviceItemReportStage, serviceItemReportSteps,

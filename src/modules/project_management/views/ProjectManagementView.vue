@@ -1199,6 +1199,11 @@ const reportItems = computed(() => serviceItems.value.filter((item) => {
   if (item.report_status === 'ARCHIVED') return false
   return ['现场实施完成', '报告编制', '已完成'].includes(projectStatus) && (item.status === '现场实施完成' || (item.report_status && item.report_status !== 'NONE'))
 }))
+// 已归档的服务项仅供底部明细只读追溯，即使同项目的其他服务项仍处在较早阶段。
+const reportDetailItems = computed(() => [
+  ...reportItems.value,
+  ...serviceItems.value.filter((item) => item.report_status === 'ARCHIVED'),
+])
 const personnelLoading = ref(false)
 const personnelError = ref('')
 const capabilityPersonnel = ref([])
@@ -1564,7 +1569,7 @@ const activeNodeItems = computed(() => {
     reports: reportItems.value,
     implementation: implementationItems.value,
   }[activeSection.value] || serviceItems.value
-  // 服务项队列只承载仍需处理的工作；归档报告留在项目/归档目录中，不再回到操作台。
+  // 服务项队列只承载仍需处理的工作，归档报告仅供明细追溯。
   return items.filter((item) => item.report_status !== 'ARCHIVED')
 })
 const completedProjectCount = computed(() => projects.value.filter((project) => project.status === projectStatusCompleted).length)
@@ -1872,8 +1877,11 @@ const operationRows = computed(() => ({
   methods: methodItems.value.map((s) => ({ id: s.id, name: `${s.id} · ${s.category}`, detail: `${s.site} / ${s.system || '—'}`, owner: personLabel(s.project_manager_id), state: reportTechReviewLabel(s.tech_review_status), progress: s.tech_review_status === 'PENDING' ? 50 : 0, due: formatBusinessDate(s.planned_end) || '待排期', review: s.tech_review_status, comment: s.tech_review_comment, reviewedAt: s.tech_reviewed_at })),
   exceptions: pendingDeviations.value.map((e) => ({ id: e.id, name: `${e.payload?.deviation_id} · ${e.service_item_id}`, detail: e.payload?.description || '现场偏离', owner: eventApplicantLabel(e), state: '待评审', progress: 0, due: formatDateTime(e.created_at) })),
   standards: [],
-  reports: reportItems.value.map((item) => { const project = projectByID.value.get(item.project_id); return { id: item.id, name: `${item.id} · ${item.site}`, detail: `${project?.customer || item.project_id} / 报告${reportStatusLabel[item.report_status] || item.report_status}`, owner: personLabel(item.project_manager_id, project?.manager || '待指派'), state: reportStatusLabel[item.report_status] || item.report_status, progress: (reportStatusRank[item.report_status] || 0) * 20, due: item.report_updated_at ? formatBusinessDate(item.report_updated_at) || '待排期' : formatBusinessDate(item.planned_end) || '待排期', report_status: item.report_status } }),
+  reports: reportDetailItems.value.map((item) => { const project = projectByID.value.get(item.project_id); return { id: item.id, name: `${item.id} · ${item.site}`, detail: `${project?.customer || item.project_id} / 报告${reportStatusLabel[item.report_status] || item.report_status}`, owner: personLabel(item.project_manager_id, project?.manager || '待指派'), state: reportStatusLabel[item.report_status] || item.report_status, progress: (reportStatusRank[item.report_status] || 0) * 20, due: item.report_updated_at ? formatBusinessDate(item.report_updated_at) || '待排期' : formatBusinessDate(item.planned_end) || '待排期', report_status: item.report_status } }),
 }[activeSection.value] || []))
+const operationPendingCount = computed(() => activeSection.value === 'reports'
+  ? reportItems.value.length
+  : operationRows.value.length)
 
 // 用途：按真实服务项补充事项行的项目与系统展示，保留原事项身份。
 // 参数：row 为当前操作台已有的事项行，异常事项通过原事件关联服务项。
@@ -2102,6 +2110,14 @@ function openOperationDetail(row) {
   else if (['monitoring'].includes(section)) record = projects.value.find((project) => project.id === row.id) || null
   operationDetail.value = { section, row: { ...row }, record }
 }
+// 报告详情随当前可见快照刷新。切换栏目或失去记录访问权限时收起抽屉。
+watch([activeSection, reportDetailItems], ([section]) => {
+  const detail = operationDetail.value
+  if (detail?.section !== 'reports') return
+  const row = section === 'reports' && operationRows.value.find((item) => item.id === detail.row.id)
+  if (row) openOperationDetail(row)
+  else operationDetail.value = null
+})
 const operationDetailFields = computed(() => {
   const detail = operationDetail.value
   if (!detail) return []
@@ -2299,6 +2315,7 @@ function clearProjectAuthorizationData() {
   reportStageListScope.invalidate()
   reportStageProjects.value = []
   selectedServiceItemIDs.value = []
+  operationDetail.value = null
   fieldEvidenceScope.invalidate()
   fieldEvidenceSnapshot.value = null
   navigation.value = { sections: [], default_section: 'projects', roles: [] }
@@ -5125,7 +5142,7 @@ onBeforeUnmount(() => {
         </template>
 
         <template v-else>
-          <section class="pm-operational-stats"><article><span>{{ activeSection === 'allocation' ? '待分配服务项' : '待处理' }}</span><strong>{{ operationRows.length }}</strong><small>{{ activeSection === 'allocation' ? '仅显示未完成分配或能力校验的服务项' : '来自当前工作区' }}</small></article><article><span>服务项总数</span><strong>{{ serviceItems.length }}</strong><small>以最新流程状态为准</small></article><article><span>已完成项目</span><strong>{{ completedProjectCount }}</strong><small>当前租户累计</small></article></section>
+          <section class="pm-operational-stats"><article><span>{{ activeSection === 'allocation' ? '待分配服务项' : '待处理' }}</span><strong>{{ operationPendingCount }}</strong><small>{{ activeSection === 'allocation' ? '仅显示未完成分配或能力校验的服务项' : '来自当前工作区' }}</small></article><article><span>服务项总数</span><strong>{{ serviceItems.length }}</strong><small>以最新流程状态为准</small></article><article><span>已完成项目</span><strong>{{ completedProjectCount }}</strong><small>当前租户累计</small></article></section>
           <section v-if="['allocation', 'inbox', 'planning', 'preparation', 'assignments', 'methods', 'exceptions', 'reports'].includes(activeSection)" class="pm-panel pm-operation-panel">
             <header><div><p class="pm-panel-kicker">现场操作</p><h2>服务项操作台</h2></div><span class="pm-operation-panel-hint">选择服务项后在右侧处理当前阶段</span></header>
             <div class="pm-operation-workspace">
