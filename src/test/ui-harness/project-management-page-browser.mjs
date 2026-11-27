@@ -486,7 +486,8 @@ function projectFixture(pathname, search, {
         id, version, project_id: personnelPlanProjectID, site: '实施计划验证点位', category: '等保测评',
         system: id, special: '否', test_mode: 'STANDARD', conflict_status: 'PASSED',
         team_lead_id: 'u-lead-1', project_manager_id: 'u-pm-1', engineer_ids: [engineer],
-        status: personnelPlans.has(id) ? '待实施' : '待分配', implementation_plan: personnelPlans.get(id),
+        status: personnelPlans.has(id) ? '待实施' : '待分配',
+        implementation_plan: personnelPlans.get(id) || { site_plan: `历史现场计划 ${id}` },
       }))
       return { items, total: items.length, page: 1, page_size: items.length, truncated: false }
     }
@@ -652,7 +653,7 @@ async function exercisePenetrationPersonnel(page) {
   await search.press('Escape')
 }
 
-// 用途：在真实计划表单中验证同项目两个服务项的默认名单、反选、加回和独立发布。
+// 用途：验证计划发布区的位置、现场计划和同项目两个服务项独立的人员名单。
 // 参数：page 为使用本机路由夹具的浏览器页面，published 为接口实际收到的各项名单。
 // 返回值：页面及两次请求均符合预期时兑现，任一断言失败时拒绝。
 async function exerciseIndependentPersonnel(page, published) {
@@ -662,6 +663,20 @@ async function exerciseIndependentPersonnel(page, published) {
   const publish = page.getByRole('button', { name: '发布实施计划', exact: true })
 
   await card('SI-PLAN-A').click()
+  const rail = page.getByRole('complementary', { name: '发布检查与阶段动作' })
+  await rail.getByRole('button', { name: '发布实施计划', exact: true }).waitFor({ timeout: 3000 })
+  assert.equal(await rail.getByText('待制定计划', { exact: true }).count(), 1)
+  assert.equal(await rail.getByText('未填写', { exact: true }).count(), 2)
+  const queueBounds = await page.locator('.pm-operation-queue').boundingBox()
+  const formBounds = await options.boundingBox()
+  const railBounds = await rail.boundingBox()
+  assert.ok(queueBounds && formBounds && railBounds, '计划队列、表单与发布区均应可见')
+  if (page.viewportSize().width >= 1440) {
+    assert.ok(queueBounds.x + queueBounds.width <= formBounds.x, '宽屏计划表单应位于队列右侧')
+    assert.ok(formBounds.x + formBounds.width <= railBounds.x, '宽屏发布区应位于计划表单右侧')
+  } else {
+    assert.ok(railBounds.y > formBounds.y, '窄屏发布区应依序显示在计划表单下方')
+  }
   for (const name of ['李伟', '张磊', '陈静']) assert.equal(await person(name).isChecked(), true)
   assert.equal(await person('赵磊').count(), 0)
   await person('陈静').uncheck()
@@ -688,8 +703,10 @@ async function exerciseIndependentPersonnel(page, published) {
     }
     await page.getByLabel('计划开始').fill('2026-11-27T09:00')
     await page.getByLabel('计划结束').fill('2026-11-27T18:00')
+    await rail.getByText('2026-11-27 09:00', { exact: true }).waitFor({ timeout: 3000 })
     await publish.click()
     await card(item.id).waitFor({ state: 'hidden' })
+    assert.equal(published.get(item.id)?.site_plan, `历史现场计划 ${item.id}`)
     assert.deepEqual(published.get(item.id)?.personnel.map((row) => row.resource_id), item.expected)
   }
   assert.equal(published.size, 2)
