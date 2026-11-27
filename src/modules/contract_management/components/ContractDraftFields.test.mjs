@@ -15,16 +15,16 @@ const filename = 'ContractDraftFields.vue'
 const { descriptor } = parse(readFileSync(new URL('./ContractDraftFields.vue', import.meta.url), 'utf8'))
 
 // 用途：编译真实字段子组件并用受控属性渲染，观察拆分后的 DOM 与事件契约。
-// 参数：overrides 覆盖默认展示状态。
+// 参数：overrides 覆盖默认展示状态，templateValues 模拟已保存或预填的模板替换值。
 // 返回值：SSR HTML、编译后的组件选项与可写入的表单对象。
-async function fieldsHarness(overrides = {}) {
+async function fieldsHarness(overrides = {}, templateValues = {}) {
   const form = Vue.reactive({
     opportunity_id: '', opportunity_name: '', customer_id: '', title: '合成合同', contract_type: '直签',
     amount: '100.00', currency: 'CNY', customer_name: '合成客户', customer_address: '',
     customer_contact: '', customer_phone: '', start_date: '', end_date: '',
     payment_terms: [{ installment_no: 1, due_date: '2026-12-01', amount: '100.00' }],
     service_items: [{ service_type: '等保测评', name: '', site: '合成现场', batch: '第一批次', category: '等保测评', requirement: '', test_mode: 'STANDARD', systems: [{ name: '合成系统', level: '二级' }] }],
-    template_id: 'template-a', template_values: { party: '甲方' },
+    template_id: 'template-a', template_values: { party: '甲方', ...templateValues },
   })
   const props = Vue.reactive({
     newContract: form,
@@ -132,6 +132,51 @@ test('关联CRM后单位名称只读采用权威来源，未关联的模板合�
   const readonly = linked.html.match(/<label><span>单位名称<\/span>(<input[^>]*>)/)?.[1]
   assert.match(readonly, / readonly/)
   assert.match(readonly, /aria-readonly="true"/)
+})
+
+test('模板签署日期使用日期控件，模板系统等级支持服务项枚举以外的字典值', async () => {
+  const fields = [
+    { name: 'sign_date', label: '签订日期' },
+    { name: 'system_level', label: '系统等级' },
+    { name: 'party', label: '甲方名称' },
+  ]
+  const { html } = await fieldsHarness({
+    selectedContractTemplate: { id: 'template-a', fields },
+    editableContractTemplateFields: fields,
+    templateSystemLevelOptions: ['一级', '集团级'],
+  }, { sign_date: '2026-11-27', system_level: '旧字典等级' })
+  const [serviceFields, templateFields] = html.split('class="contract-generated-form"')
+
+  assert.match(templateFields, /<input[^>]*type="date"[^>]*required[^>]*value="2026-11-27"/)
+  assert.match(templateFields, /<option value="集团级">集团级<\/option>/)
+  assert.match(templateFields, /<option value="旧字典等级">旧字典等级<\/option>/)
+  assert.match(templateFields, /value="甲方"/)
+  assert.match(serviceFields, /<option value="二级">二级<\/option>/)
+  assert.doesNotMatch(serviceFields, /集团级|旧字典等级/)
+})
+
+test('既有签署日期文本保持原值和锁定属性，新空字段仍可使用日期控件', async () => {
+  const fields = [
+    { name: 'locked_date', label: '签署日期', default: '2026年11月27日', locked: true },
+    { name: 'old_date', label: '合同签订日期' },
+    { name: 'new_date', label: '补充协议签署日期' },
+  ]
+  const stored = { locked_date: '2026年11月27日', old_date: '2026/11/27' }
+  const { html, form } = await fieldsHarness({
+    selectedContractTemplate: { id: 'template-a', fields },
+    editableContractTemplateFields: fields,
+  }, stored)
+  const templateFields = html.split('class="contract-generated-form"')[1]
+
+  const locked = templateFields.match(/<input[^>]*value="2026年11月27日"[^>]*>/)?.[0]
+  assert.ok(locked)
+  assert.match(locked, /\breadonly\b/)
+  assert.doesNotMatch(locked, /type="date"/)
+  const legacy = templateFields.match(/<input[^>]*value="2026\/11\/27"[^>]*>/)?.[0]
+  assert.ok(legacy)
+  assert.doesNotMatch(legacy, /type="date"|\breadonly\b/)
+  assert.match(templateFields, /<span>补充协议签署日期<\/span><input[^>]*type="date"[^>]*required/)
+  assert.deepEqual(form.template_values, { party: '甲方', ...stored })
 })
 
 test('外部合同模式按既有能力显示文件类型限制与检测类别错误重试入口', async () => {

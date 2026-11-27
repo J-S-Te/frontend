@@ -30,16 +30,31 @@ test('contract and customer text inputs carry explicit length limits', () => {
     ['newContract.customer_address', 500],
     ['newContract.customer_contact', 128],
     ['newContract.customer_phone', 64],
-    ['newContract.template_values[field.name]', 2000],
     ['approvalComment', 2000],
   ]) {
     const tag = source.match(new RegExp(`<input[^>]*v-model="${field.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}"[^>]*>`))?.[0] || source.match(new RegExp(`<textarea[^>]*v-model="${field.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}"[^>]*>`))?.[0]
     assert.ok(tag, `missing input for ${field}`)
     assert.match(tag, new RegExp(`maxlength="${limit}"`), `${field} missing maxlength=${limit}`)
   }
+  const templateInputs = [...draftFieldsSource.matchAll(
+    /<input[^>]*v-model="newContract\.template_values\[field\.name\]"[^>]*>/g,
+  )].map((match) => match[0])
+  const templateTextInputs = templateInputs.filter((tag) => !/type="date"/.test(tag))
+  assert.ok(templateTextInputs.length > 0)
+  assert.ok(templateTextInputs.every((tag) => /maxlength="2000"/.test(tag)))
+  assert.ok(templateInputs.some((tag) => /type="date"/.test(tag)))
+  assert.match(draftFieldsSource, /<select[^>]*v-model="newContract\.template_values\[field\.name\]"/)
   assert.match(source, /max="90071992547409\.91"/)
   assert.match(source, /pattern="\[A-Za-z\]\{3\}"/)
   assert.match(source, /maxlength="20" pattern="\[0-9\]\{1,15\}/)
+})
+
+test('合同草稿为服务项系统等级保留领域枚举，仅模板字段接收完整字典选项', () => {
+  assert.match(viewSource, /useDictionaryOptions\('CONTRACT_SYSTEM_LEVEL'/)
+  assert.match(viewSource, /const templateSystemLevelOptions = computed\(\(\) => systemLevelItems\.value\.map/)
+  assert.match(viewSource, /templateSystemLevelOptions\.value\.filter\(\(value\) => contractSystemLevels\.includes\(value\)\)/)
+  assert.match(viewSource, /:system-level-options="systemLevelOptions"/)
+  assert.match(viewSource, /:template-system-level-options="templateSystemLevelOptions"/)
 })
 
 test('all free-text contract inputs have a length or numeric bound', () => {

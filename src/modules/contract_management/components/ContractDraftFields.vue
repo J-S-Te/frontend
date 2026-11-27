@@ -13,6 +13,33 @@ import ConsoleIcon from '@/modules/platform/shared/components/ConsoleIcon.vue'
 import LocalContractSourcePicker from '@/modules/contract_management/components/LocalContractSourcePicker.vue'
 import { isContractAmountField, isSystemContractNumberField } from '@/modules/contract_management/utils/systemTemplateFields'
 
+// 用途：用 DOCX 字段名称与标签确认受支持的模板控件语义。
+// 参数：field 为当前合同模板的字段定义。
+// 返回值：去除空白的字段标识；系统维护的合同金额保留原只读展示。
+function templateFieldKey(field) {
+  if (isContractAmountField(field)) return ''
+  return [field?.name, field?.label].map((part) => String(part ?? '').replace(/\s+/g, '')).join(' ')
+}
+
+// 用途：为签署日期选择日期控件，保留已有文件使用的其他日期格式。
+// 参数：field 为模板字段，value 为当前替换值，缺失时核对模板默认值。
+// 返回值：新日期字段或有效的 YYYY-MM-DD 日期使用日期控件时为真。
+function usesTemplateDatePicker(field, value) {
+  if (!/签订日期|签署日期/.test(templateFieldKey(field))) return false
+  const existingValue = value ?? field?.default ?? ''
+  if (existingValue === '') return true
+  if (!/^(?!0000)\d{4}-\d{2}-\d{2}$/.test(existingValue)) return false
+  const date = new Date(existingValue + 'T00:00:00Z')
+  return Number.isFinite(date.getTime()) && date.toISOString().slice(0, 10) === existingValue
+}
+
+// 用途：识别写入合同正文的系统等级模板字段。
+// 参数：field 为当前合同模板的字段定义。
+// 返回值：需要显示平台字典下拉时为真。
+function isTemplateSystemLevelField(field) {
+  return templateFieldKey(field).includes('系统等级')
+}
+
 /**
  * @typedef {Object} ContractDraftServiceItem
  * @property {string} [source_id] 既有服务项来源身份（编辑态保留）
@@ -75,6 +102,7 @@ defineProps({
   availableContractTypeOptions: { type: Array, default: () => [] },
   serviceTypeOptions: { type: Array, default: () => [] },
   systemLevelOptions: { type: Array, default: () => [] },
+  templateSystemLevelOptions: { type: Array, default: () => [] },
   currentUserLabel: { type: String, default: '' },
   externalContractFile: { type: Object, default: null },
   externalContractFileError: { type: String, default: '' },
@@ -168,7 +196,39 @@ defineEmits([
   <div v-if="selectedContractTemplate" class="contract-generated-form">
     <div class="contract-section-title"><div><h3>填写模板字段</h3><p>{{ selectedContractTemplate.original_filename }} · 姓名、账号、邮箱等当前用户已有信息会自动填入空白字段</p></div><button class="contract-button secondary small" type="button" :disabled="templatePreviewing" @click="$emit('preview-template')">{{ templatePreviewing ? '正在生成预览…' : '预览合同' }}</button></div>
     <p v-if="selectedContractTemplate.fields?.some(isSystemContractNumberField)" class="contract-info-banner">正文合同编号由系统在审批通过后自动生成，不允许手工填写。</p>
-    <div class="contract-template-field-grid"><label v-for="field in editableContractTemplateFields" :key="field.name" :title="field.locked && !isAdmin ? '此项已由管理员预设' : undefined"><span>{{ field.label }}</span><input v-model="newContract.template_values[field.name]" required maxlength="2000" autocomplete="off" :readonly="isContractAmountField(field) || (field.locked && !isAdmin)" :class="{ 'is-admin-configured': field.locked && !isAdmin }" :title="field.locked && !isAdmin ? '此项已由管理员预设' : undefined" :placeholder="field.default ? `默认：${field.default}` : `请输入${field.label}`" /><small v-if="isContractAmountField(field)">自动使用上方合同金额；金额大写由服务端生成。</small><small v-else-if="field.locked && !isAdmin">此项已由管理员预设</small></label></div>
+    <div class="contract-template-field-grid">
+      <label v-for="field in editableContractTemplateFields" :key="field.name"
+        :title="field.locked && !isAdmin ? '此项已由管理员预设' : undefined">
+        <span>{{ field.label }}</span>
+        <input v-if="usesTemplateDatePicker(field, newContract.template_values[field.name])"
+          v-model="newContract.template_values[field.name]"
+          type="date" required min="0001-01-01" max="9999-12-31"
+          :readonly="field.locked && !isAdmin"
+          :class="{ 'is-admin-configured': field.locked && !isAdmin }"
+        />
+        <select v-else-if="isTemplateSystemLevelField(field)"
+          v-model="newContract.template_values[field.name]" required
+          :disabled="field.locked && !isAdmin"
+          :class="{ 'is-admin-configured': field.locked && !isAdmin }"
+        >
+          <option value="" disabled>请选择{{ field.label }}</option>
+          <option v-if="newContract.template_values[field.name]
+            && !templateSystemLevelOptions.includes(newContract.template_values[field.name])"
+            :value="newContract.template_values[field.name]"
+          >{{ newContract.template_values[field.name] }}</option>
+          <option v-for="level in templateSystemLevelOptions" :key="level" :value="level">{{ level }}</option>
+        </select>
+        <input v-else v-model="newContract.template_values[field.name]"
+          required maxlength="2000" autocomplete="off"
+          :readonly="isContractAmountField(field) || (field.locked && !isAdmin)"
+          :class="{ 'is-admin-configured': field.locked && !isAdmin }"
+          :title="field.locked && !isAdmin ? '此项已由管理员预设' : undefined"
+          :placeholder="field.default ? `默认：${field.default}` : `请输入${field.label}`"
+        />
+        <small v-if="isContractAmountField(field)">自动使用上方合同金额；金额大写由服务端生成。</small>
+        <small v-else-if="field.locked && !isAdmin">此项已由管理员预设</small>
+      </label>
+    </div>
     <p v-if="templatePreviewError" class="contract-template-preview-error" role="alert">{{ templatePreviewError }}</p>
   </div>
   <p v-else-if="contractCreationMode === 'template'" class="contract-info-banner"><ConsoleIcon name="info" />请先选择合同模板，再填写合同、服务项和系统信息。</p>
