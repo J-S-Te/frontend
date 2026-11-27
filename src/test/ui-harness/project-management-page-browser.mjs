@@ -2,6 +2,7 @@
 // 用真实 ProjectManagementView + 真实模块 CSS，路由与所有后端请求替换为隔离替身；
 // 不连接业务服务、不写业务数据。按 1440/1024/768/390 多档视口与浅/深色输出截图，
 // 结果写入 .ai/qa/pm-prototype-restyle-20261112/screenshots/results.json。
+import assert from 'node:assert/strict'
 import { build } from 'esbuild'
 import { createHash } from 'node:crypto'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
@@ -29,6 +30,7 @@ const cases = [
   { key: 'allocation', section: 'allocation' },
   { key: 'inbox', section: 'inbox' },
   { key: 'planning', section: 'planning' },
+  { key: 'planning-independent-personnel', section: 'planning' },
   { key: 'penetration-personnel', section: 'implementation' },
   { key: 'preparation', section: 'preparation' },
   { key: 'qualifications', section: 'qualifications' },
@@ -99,6 +101,11 @@ const NOW = '2026-11-12T10:30:00+08:00'
 const fieldReturnItemID = 'SI-0823-01'
 const fieldReturnProjectID = 'PJ-2026-0823'
 const fieldReturnReason = '现场条件变化，需重新核验设备'
+const personnelPlanProjectID = 'PJ-2026-0855'
+const personnelPlanCases = [
+  { id: 'SI-PLAN-A', version: 7, engineer: 'u-eng-1', expected: ['u-lead-1', 'u-eng-1'] },
+  { id: 'SI-PLAN-B', version: 3, engineer: 'u-eng-2', expected: ['u-pm-1', 'u-eng-2'] },
+]
 const PEOPLE = {
   'u-lead-1': '李伟', 'u-lead-2': '周敏', 'u-pm-1': '张磊', 'u-pm-2': '王明', 'u-pm-3': '李娜',
   'u-eng-1': '陈静', 'u-eng-2': '赵磊', 'u-eng-3': '孙悦', 'u-eng-4': '刘洋', 'u-eng-5': '吴倩',
@@ -423,7 +430,7 @@ function jsonResponse(value) {
 // 用途：为项目页面夹具提供隔离的 API 数据。
 // 参数：pathname 和 search 为请求路径及筛选，其余参数标记独立夹具场景。
 // 返回值：匹配的模拟响应，未覆盖的只读路径返回空集合。
-function projectFixture(pathname, search, { longDecomposition, fieldReturned, penetrationPersonnel }) {
+function projectFixture(pathname, search, { longDecomposition, fieldReturned, penetrationPersonnel, personnelPlans }) {
   const path = pathname.slice('/project_management/api/v1'.length)
   if (path === '/auth/me') {
     if (!penetrationPersonnel) return session
@@ -450,6 +457,15 @@ function projectFixture(pathname, search, { longDecomposition, fieldReturned, pe
     return { items: rows, total: rows.length, page: 1, page_size: rows.length, truncated: false }
   }
   if (path === '/service-items') {
+    if (personnelPlans) {
+      const items = personnelPlanCases.map(({ id, version, engineer }) => ({
+        id, version, project_id: personnelPlanProjectID, site: '实施计划验证点位', category: '等保测评',
+        system: id, special: '否', test_mode: 'STANDARD', conflict_status: 'PASSED',
+        team_lead_id: 'u-lead-1', project_manager_id: 'u-pm-1', engineer_ids: [engineer],
+        status: personnelPlans.has(id) ? '待实施' : '待分配', implementation_plan: personnelPlans.get(id),
+      }))
+      return { items, total: items.length, page: 1, page_size: items.length, truncated: false }
+    }
     const items = longDecomposition ? longDecompositionItems : serviceItems.map((item) => {
       if (item.id !== fieldReturnItemID) return item
       if (penetrationPersonnel) return {
@@ -612,6 +628,49 @@ async function exercisePenetrationPersonnel(page) {
   await search.press('Escape')
 }
 
+// 用途：在真实计划表单中验证同项目两个服务项的默认名单、反选、加回和独立发布。
+// 参数：page 为使用本机路由夹具的浏览器页面，published 为接口实际收到的各项名单。
+// 返回值：页面及两次请求均符合预期时兑现，任一断言失败时拒绝。
+async function exerciseIndependentPersonnel(page, published) {
+  const card = (id) => page.locator('.pm-picker-card').filter({ hasText: id })
+  const options = page.getByRole('group', { name: '选择本服务项实施人员（至少一人）' })
+  const person = (name) => options.getByRole('checkbox', { name })
+  const publish = page.getByRole('button', { name: '发布实施计划', exact: true })
+
+  await card('SI-PLAN-A').click()
+  for (const name of ['李伟', '张磊', '陈静']) assert.equal(await person(name).isChecked(), true)
+  assert.equal(await person('赵磊').count(), 0)
+  await person('陈静').uncheck()
+  await person('张磊').uncheck()
+  await person('李伟').uncheck()
+  assert.equal(await publish.isDisabled(), true)
+  await person('李伟').check()
+
+  await card('SI-PLAN-B').click()
+  for (const name of ['李伟', '张磊', '赵磊']) assert.equal(await person(name).isChecked(), true)
+  assert.equal(await person('陈静').count(), 0)
+  await person('李伟').uncheck()
+
+  await card('SI-PLAN-A').click()
+  assert.equal(await person('陈静').isChecked(), false)
+  assert.equal(await person('张磊').isChecked(), false)
+  await person('陈静').check()
+
+  for (const item of personnelPlanCases) {
+    if (item.id === 'SI-PLAN-B') {
+      await card(item.id).click()
+      assert.equal(await person('李伟').isChecked(), false)
+      assert.equal(await person('赵磊').isChecked(), true)
+    }
+    await page.getByLabel('计划开始').fill('2026-11-27T09:00')
+    await page.getByLabel('计划结束').fill('2026-11-27T18:00')
+    await publish.click()
+    await card(item.id).waitFor({ state: 'hidden' })
+    assert.deepEqual(published.get(item.id)?.personnel.map((row) => row.resource_id), item.expected)
+  }
+  assert.equal(published.size, 2)
+  assert.deepEqual(published.get('SI-PLAN-A').personnel.map((row) => row.resource_id), ['u-lead-1', 'u-eng-1'])
+}
 try {
   for (const width of widthList) {
     for (const theme of themes) {
@@ -620,6 +679,7 @@ try {
         const errors = []
         const longDecomposition = item.key === 'decomposition-long-text'
         const fieldReturnCase = item.key === 'implementation-field-return'
+        const personnelPlans = item.key === 'planning-independent-personnel' ? new Map() : null
         const penetrationPersonnel = item.key === 'penetration-personnel'
         let fieldReturned = false
         let fieldReturnCalls = 0
@@ -644,8 +704,19 @@ try {
             fieldReturned = true
             return route.fulfill(jsonResponse({ status: '实施准备中' }))
           }
+          if (personnelPlans && route.request().method() === 'POST'
+            && url.pathname.endsWith('/implementation-plan')) {
+            const planCase = personnelPlanCases.find(({ id }) => url.pathname === `/project_management/api/v1/service-items/${id}/implementation-plan`)
+            const payload = route.request().postDataJSON()
+            if (!planCase || payload.expected_version !== planCase.version || personnelPlans.has(planCase.id)) {
+              errors.push('实施计划发布目标、版本或请求次数不正确')
+              return route.abort()
+            }
+            personnelPlans.set(planCase.id, payload)
+            return route.fulfill(jsonResponse({ status: '待实施' }))
+          }
           const data = url.pathname.startsWith('/project_management/api/v1')
-            ? projectFixture(url.pathname, url.searchParams, { longDecomposition, fieldReturned, penetrationPersonnel })
+            ? projectFixture(url.pathname, url.searchParams, { longDecomposition, fieldReturned, penetrationPersonnel, personnelPlans })
             : platformFixture(url.pathname, url.searchParams)
           return route.fulfill(jsonResponse(data))
         })
@@ -699,6 +770,7 @@ try {
           if (fieldReturnCalls !== 1) errors.push('确认退回应当只发出一次业务请求')
         }
         if (penetrationPersonnel) await exercisePenetrationPersonnel(page)
+        if (personnelPlans) await exerciseIndependentPersonnel(page, personnelPlans)
         const metrics = await page.evaluate(() => ({
           scrollWidth: document.documentElement.scrollWidth,
           clientWidth: document.documentElement.clientWidth,
