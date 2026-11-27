@@ -2315,8 +2315,7 @@ async function loadWorkspace({ reportError = true, background = false } = {}) {
   ruleConfigurationCatalogError.value = ''
   let loaded = false
   try {
-    // 项目、服务项和规则共同构成当前工作区快照；三者全部成功后才一次性替换页面状态，
-    // 防止新旧数据混用。接口层仍分别执行会话与资源权限校验。
+    // 项目和服务项作为一组替换，避免项目门禁与服务项队列使用不同批次的快照。
     // 列表接口省略 page_size 时只返回 20 行，工作区必须显式走 all=1 快照；
     // 超过服务端 500 行上限时 truncated 为 true，用户据此提示缩小筛选范围。
     let sessionData
@@ -2338,15 +2337,25 @@ async function loadWorkspace({ reportError = true, background = false } = {}) {
       workspaceReady.value = true
       return
     }
-    const [projectSnapshot, itemSnapshot, ruleRows, capabilityRows, navigationData, categoryRows,
-    ] = await Promise.all([
-      listProjectsSnapshot(), listServiceItemsSnapshot(), listRules(), listCapabilities(),
-      getProjectNavigation(), listDetectionCategories(),
-    ])
+    const workflowRows = Promise.all([listProjectsSnapshot(), listServiceItemsSnapshot()])
+    const auxiliaryRows = Promise.all([
+      listRules(), listCapabilities(), getProjectNavigation(), listDetectionCategories(),
+    ]).then(rows => ({ rows }), error => ({ error }))
+    const [projectSnapshot, itemSnapshot] = await workflowRows
     if (!workspaceScope.isCurrent(ticket)) return
     projects.value = projectSnapshot.items
-    serviceItems.value = itemSnapshot.items.map((item) => ({ ...item, selected: ['待确认', '待复核'].includes(item.status) }))
+    if (background) serviceItems.value = reconcileWorkflowServiceItems(serviceItems.value, itemSnapshot.items)
+    else serviceItems.value = itemSnapshot.items.map(item => ({
+      ...item, selected: ['待确认', '待复核'].includes(item.status),
+    }))
     workspaceTruncated.value = Boolean(projectSnapshot.truncated || itemSnapshot.truncated)
+    lastUpdatedAt.value = new Date()
+
+    // 辅助数据仍并行加载。即使规则或资质读取失败，也保留已授权的新流程快照。
+    const auxiliary = await auxiliaryRows
+    if (!workspaceScope.isCurrent(ticket)) return
+    if ('error' in auxiliary) throw auxiliary.error
+    const [ruleRows, capabilityRows, navigationData, categoryRows] = auxiliary.rows
     rules.value = ruleRows.map(decorateRule)
     capabilities.value = capabilityRows
     session.value = sessionData
@@ -2366,7 +2375,6 @@ async function loadWorkspace({ reportError = true, background = false } = {}) {
       }
       await router.replace({ name: 'project_management', params: { section: navigationData.default_section || navigationData.sections[0] || 'dashboard' } })
     }
-    lastUpdatedAt.value = new Date()
     workspaceReady.value = true
     workspaceAuthorizationPending.value = false
     const extrasLoaded = await loadSectionExtras()
@@ -2396,7 +2404,7 @@ async function loadWorkspace({ reportError = true, background = false } = {}) {
 
 // 任务 B：计划/现场/报告的写操作 HTTP 2xx 即已保存。随后的工作区刷新失败只提示
 // “已保存，但最新数据读取失败”，不误报为操作失败、不回退任何已提交结果，也不自动重发写请求；
-// 页面保留旧快照，由用户手动刷新核对。
+// 已回读的项目和服务项继续使用新快照；失败的部分留给手动刷新核对。
 async function refreshAfterWrite() {
   try {
     await loadWorkspace({ reportError: false, background: true })
@@ -4654,7 +4662,18 @@ onBeforeUnmount(() => {
             </section>
             <article v-if="detailTab === 'items'" class="pm-table-panel">
               <div class="pm-table-scroll"><table class="pm-table pm-detail-items"><thead><tr><th scope="col">服务项</th><th scope="col">类别 / 体系</th><th scope="col">技术要求</th><th scope="col">状态</th><th scope="col">报告 / 计划</th><th scope="col">操作</th></tr></thead><tbody>
-                <tr v-for="item in detailItems" :key="item.id"><td class="mono" data-label="服务项"><b>{{ item.id }}</b><span class="pm-cell-sub">{{ item.site }} · {{ item.batch }}</span></td><td data-label="类别 / 体系">{{ item.category }}<span v-if="item.system" class="pm-cell-sub">{{ item.system }}</span></td><td data-label="技术要求">{{ specialMethodLabel[item.special_method] || item.special || '—' }}</td><td data-label="状态"><span class="pm-badge" :class="statusTone(item.status)">{{ item.status }}</span><span v-if="isEmbeddedPenetrationItem(item)" class="pm-cell-sub">{{ penetrationPackageLabel(item) }}</span></td><td data-label="报告 / 计划"><span>{{ item.report_status ? (reportStatusLabel[item.report_status] || item.report_status) : '—' }}</span><span class="pm-cell-sub">{{ item.planned_start ? formatBusinessDate(item.planned_start) + ' ~ ' + formatBusinessDate(item.planned_end) : '待排期' }}</span></td><td data-label="操作"><button class="pm-link" type="button" @click="navigate('implementation')">看板</button>
+                <tr v-for="item in detailItems" :key="item.id">
+                  <td class="mono" data-label="服务项"><b>{{ item.id }}</b><span class="pm-cell-sub">{{ item.site }} · {{ item.batch }}</span></td>
+                  <td data-label="类别 / 体系">{{ item.category }}<span v-if="item.system" class="pm-cell-sub">{{ item.system }}</span></td>
+                  <td data-label="技术要求">{{ specialMethodLabel[item.special_method] || item.special || '—' }}</td>
+                  <td data-label="状态">
+                    <template v-for="badge in serviceItemStatusBadges(item)" :key="badge.key">
+                      <span v-if="badge.key === 'status'" class="pm-badge" :class="badge.tone">{{ badge.label }}</span>
+                    </template>
+                    <span v-if="isEmbeddedPenetrationItem(item)" class="pm-cell-sub">{{ penetrationPackageLabel(item) }}</span>
+                  </td>
+                  <td data-label="报告 / 计划"><span>{{ item.report_status ? (reportStatusLabel[item.report_status] || item.report_status) : '—' }}</span><span class="pm-cell-sub">{{ item.planned_start ? formatBusinessDate(item.planned_start) + ' ~ ' + formatBusinessDate(item.planned_end) : '待排期' }}</span></td>
+                  <td data-label="操作"><button class="pm-link" type="button" @click="navigate('implementation')">看板</button>
                   <template v-if="item.status === '待分配' && projectAllowsNode(item, 'allocation')">
                     <button v-if="canRevokeExecution && item.project_manager_id" class="pm-link"
                       type="button" :disabled="saving"

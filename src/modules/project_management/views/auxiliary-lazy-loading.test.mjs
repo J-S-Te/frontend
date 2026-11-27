@@ -42,8 +42,9 @@ test('工作区首屏不再预读设备目录、人员姓名与 SLA 明细', () 
   assert.doesNotMatch(body, /listSlaOverdue\(/, '核心快照加载不得预读 SLA 明细')
   // 现场证据判定属于完成动作的前置条件，仍随工作区刷新重取（不在本次按需化范围）。
   assert.match(body, /refreshSelectedFieldEvidence\(\)/)
-  // 核心原子快照仍然同批成功后再整体替换。
-  assert.match(body, /listProjectsSnapshot\(\), listServiceItemsSnapshot\(\), listRules\(\)/)
+  // 项目与服务项同批替换，规则读取独立于流程快照。
+  assert.match(body, /Promise\.all\(\[listProjectsSnapshot\(\), listServiceItemsSnapshot\(\)\]\)/)
+  assert.match(body, /const auxiliaryRows = Promise\.all\(\[\s*listRules\(\)/)
   assert.match(body, /projects\.value = projectSnapshot\.items/)
   assert.match(body, /rules\.value = ruleRows\.map\(decorateRule\)/)
 })

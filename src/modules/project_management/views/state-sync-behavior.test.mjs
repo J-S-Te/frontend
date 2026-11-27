@@ -7,6 +7,7 @@ import { createRequestScope } from '../../platform/shared/composables/requestSco
 import { formatUserError } from '../../shared/utils/userError.js'
 import { subsystemAccessMessage } from '../../shared/authz/sessionCompatibility.js'
 import { authorizationScopeKey } from '../../shared/authz/authorizationSnapshot.js'
+import { reconcileWorkflowServiceItems } from '../composables/useProjectWorkflowSync.js'
 
 function functions(names, context) {
   const source = readFileSync(new URL('./ProjectManagementView.vue', import.meta.url), 'utf8')
@@ -28,6 +29,7 @@ function deferred() {
 function context(snapshot) {
   return {
     ref, createRequestScope, formatUserError, subsystemAccessMessage, authorizationScopeKey,
+    reconcileWorkflowServiceItems,
     window: { clearTimeout: () => {}, setTimeout: () => 0 }, toastTimer: 0,
     toastMessage: ref(''), toastType: ref('success'),
     loading: ref(false), refreshing: ref(false), refreshWarning: ref(''), loadError: ref(''), ruleConfigurationCatalogError: ref(''),

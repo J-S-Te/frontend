@@ -45,12 +45,12 @@ export function isAllocationPending(item, executionAllowed = true, teamAllowed =
   return executionAllowed && !allocationState(item).complete
 }
 
-// 与后端 CheckImplementationPlanPrecondition 保持同一业务门槛；团队负责人是形成
-// 完整责任链的必要前置，不能只凭“待分配”状态提前出现在实施计划。
+// 用途：按责任链、能力校验和特殊方法复核判断服务项是否可制定实施计划。
+// 参数：item 为当前已授权的服务项快照。
+// 返回值：服务项在计划发布前且满足实施计划前置条件时为真。
 export function implementationPlanReady(item) {
-  return item?.status === '待分配'
-    && Boolean(item.team_lead_id && item.project_manager_id && (item.engineer_ids || []).length)
-    && item.conflict_status === 'PASSED'
+  return String(item?.status ?? '').trim() === '待分配'
+    && allocationState(item).complete
     && (item.special !== '是' || item.tech_review_status === 'APPROVED')
 }
 
