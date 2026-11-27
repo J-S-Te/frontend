@@ -89,30 +89,37 @@ function updateMenuPosition() {
   menuStyle.value = searchableSelectMenuStyle(layout, readSearchableSelectTheme(root.value), props.menuZIndex)
   menuPositioned.value = true
 }
-function show() {
+// 用途：打开下拉菜单，等待浮层完成定位并显示后再将焦点移入搜索框。
+// 参数：无。
+// 返回值：Promise 在菜单定位和焦点处理完成后兑现。
+async function show() {
   if (props.disabled) return
   menuPositioned.value = false
   open.value = true
   activeIndex.value = filteredOptions.value.length ? 0 : -1
-  nextTick(() => {
-    updateMenuPosition()
-    searchInput.value?.focus({ preventScroll: true })
-  })
+  await nextTick()
+  updateMenuPosition()
+  await nextTick()
+  if (menuPositioned.value) searchInput.value?.focus({ preventScroll: true })
 }
 // 用途：关闭面板并清除本次搜索状态。
-// 参数：无。
+// 参数：returnFocus 表示选中选项或按 Esc 后是否将焦点还给触发按钮。
 // 返回值：无；本地模式清空输入时同步通知补充搜索的调用方。
-function hide() {
+function hide(returnFocus = false) {
   open.value = false
   menuPositioned.value = false
   if (!props.remote && keyword.value) emit('search', '')
   keyword.value = ''
   activeIndex.value = -1
+  if (returnFocus) trigger.value?.focus({ preventScroll: true })
 }
 function toggle() {
   if (open.value) hide()
   else show()
 }
+// 用途：提交当前选项；单选关闭菜单后把焦点还给触发按钮。
+// 参数：option 为用户选中的选项。
+// 返回值：无；通过组件事件通知调用方当前选择。
 function choose(option) {
   if (option?.disabled) return
   const value = optionValue(option)
@@ -127,7 +134,7 @@ function choose(option) {
   }
   emit('update:modelValue', value)
   emit('change', value)
-  hide()
+  hide(true)
 }
 function remove(value) {
   if (props.disabled || !props.multiple) return
@@ -135,9 +142,13 @@ function remove(value) {
   emit('update:modelValue', result)
   emit('change', result)
 }
+// 用途：处理下拉菜单的打开、选项导航、键盘选择和关闭。
+// 参数：event 为触发按钮或下拉菜单收到的键盘事件。
+// 返回值：无；菜单关闭时按需还原焦点。
 function onKeydown(event) {
-  if (event.key === 'Escape') {
-    hide()
+  if (event.key === 'Escape' && open.value) {
+    event.preventDefault()
+    hide(true)
     return
   }
   if (!open.value && ['ArrowDown', 'ArrowUp', 'Enter', ' '].includes(event.key)) {
@@ -150,7 +161,7 @@ function onKeydown(event) {
     event.preventDefault()
     const delta = event.key === 'ArrowDown' ? 1 : -1
     activeIndex.value = (activeIndex.value + delta + filteredOptions.value.length) % filteredOptions.value.length
-  } else if (event.key === 'Enter') {
+  } else if (event.key === 'Enter' && event.target === searchInput.value) {
     event.preventDefault()
     const option = filteredOptions.value[activeIndex.value]
     if (option) choose(option)
@@ -213,6 +224,7 @@ onBeforeUnmount(() => {
         :class="`placement-${placement}`"
         :style="menuStyle"
         :data-positioned="menuPositioned"
+        :inert="!menuPositioned"
         @click.stop
         @keydown="onKeydown"
       >
@@ -270,9 +282,23 @@ onBeforeUnmount(() => {
 .pm-search-select.open .pm-search-select-trigger i { transform: rotate(225deg) translate(-2px, -2px); }
 .pm-search-select.disabled { opacity: .62; }
 .pm-search-select-menu { position: fixed; z-index: var(--pm-z-dropdown); display: grid; grid-template-rows: auto minmax(0, 1fr); gap: 7px; overflow: hidden; padding: 8px; border: 1px solid var(--pm-line); border-radius: var(--pm-r-md); background: var(--pm-card); box-shadow: var(--pm-shadow-pop); transform-origin: top center; --pm-select-primary: var(--pm-primary, #1f5eff); --pm-select-muted: var(--pm-muted, #64748b); }
-.pm-search-select-menu[data-positioned="false"] { visibility: hidden; }
+/* 定位前保留可测量的高度，inert 隔离交互，浮层坐标与显隐即时生效。 */
+.pm-search-select-menu { transition-property: none; }
+.pm-search-select-menu[data-positioned="false"] { opacity: 0; }
 .pm-search-select-menu.placement-top { transform-origin: bottom center; }
-.pm-search-select-search { width: 100%; min-width: 0; min-height: 38px; display: grid; grid-template-columns: 16px minmax(0, 1fr); align-items: center; gap: 8px; padding: 0 10px; border: 1px solid var(--pm-line); border-radius: var(--pm-r-sm); background: var(--pm-sunken); }
+.pm-search-select-search {
+  width: 100%;
+  min-width: 0;
+  min-height: 38px;
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px;
+  border: 1px solid var(--pm-line, var(--ui-line));
+  border-radius: var(--pm-r-sm, var(--ui-radius-control));
+  background: var(--pm-sunken, var(--ui-card-soft));
+}
 .pm-search-select-search-icon { position: relative; display: block; width: 14px; height: 14px; min-width: 14px; max-width: 14px; min-height: 14px; max-height: 14px; border: 2px solid currentColor; border-radius: 50%; color: var(--pm-faint); }
 .pm-search-select-search-icon::after { position: absolute; right: -5px; bottom: -3px; width: 6px; height: 2px; border-radius: 2px; background: currentColor; content: ''; transform: rotate(45deg); transform-origin: left center; }
 .pm-search-select-search input { width: 100%; min-width: 0; height: 36px; min-height: 0; padding: 0; border: 0; outline: 0; background: transparent; color: inherit; font: inherit; }

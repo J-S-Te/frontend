@@ -991,8 +991,8 @@
   background: var(--surface-card);
 }
 
-:root[data-theme="dark"] .console-page--platform .console-search-field,
-:root[data-theme="dark"] .console-page--platform .console-select-field {
+/* 共享复合字段的禁用与只读状态优先于深色默认底色。 */
+:root[data-theme="dark"] .console-page--platform :where(.console-search-field, .console-select-field) {
   background: var(--surface-input);
 }
 

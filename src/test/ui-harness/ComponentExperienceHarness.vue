@@ -8,6 +8,9 @@ import StatusBadge from '@/modules/shared/components/StatusBadge.vue'
 import LoadingState from '@/modules/shared/components/LoadingState.vue'
 import EmptyState from '@/modules/shared/components/EmptyState.vue'
 import OperationToast from '@/modules/shared/components/OperationToast.vue'
+import ConsoleIcon from '@/modules/shared/components/ConsoleIcon.vue'
+import SearchableSelect from '@/modules/project_management/components/SearchableSelect.vue'
+import ServiceItemPicker from '@/modules/project_management/components/ServiceItemPicker.vue'
 
 // 隔离夹具只使用真实组件和模块样式，全部内容为合成数据，无 API/登录/业务写入。
 const modules = [
@@ -39,11 +42,16 @@ const drawer = ref('')
 const toast = ref('')
 const results = ref([])
 const edited = ref('')
+const settingsQuery = ref('')
+const projectSelection = ref('')
 const checks = ref('')
 const tabs = [
   { value: 'overview', label: '概览', controls: 'overview-panel' },
   { value: 'disabled', label: '不可用', disabled: true },
   { value: 'records', label: '业务记录', controls: 'records-panel' },
+]
+const projectOptions = [
+  { value: 'alpha', label: '甲项目' }, { value: 'beta', label: '乙项目' },
 ]
 
 watch(theme, mode => { document.documentElement.dataset.theme = mode }, { immediate: true })
@@ -107,7 +115,13 @@ function resetTab() {
       <span v-for="[name, pass] in results" :key="name">{{ pass ? '通过' : '失败' }}：{{ name }}</span>
     </output>
   </header>
-  <div id="module-fixture" :class="[current[2], 'fixture-page']">
+  <div id="module-fixture" :class="[current[2], 'fixture-page', { 'console-page--platform': moduleKey === 'platform' }]">
+    <header v-if="moduleKey === 'contract'" class="contract-topbar">
+      <label class="contract-global-search is-scope-disabled">
+        <ConsoleIcon name="search" />
+        <input type="search" aria-label="搜索仅限合同台账" disabled />
+      </label>
+    </header>
     <main :class="[current[3], 'fixture-content']">
       <nav class="fixture-nav" :class="navClass" aria-label="导航示例"><section>
         <button id="nav-current" type="button" :class="[navItemClass, 'active']" aria-current="page">业务台账</button>
@@ -118,6 +132,36 @@ function resetTab() {
         <p>导航、控制、展示、反馈使用同一规范，保留原模块布局与交互。</p>
         <SegmentedTabs v-model="selected" :items="tabs" aria-label="业务内容页签" />
         <p :id="selected === 'records' ? 'records-panel' : 'overview-panel'">当前内容：{{ selected }}</p>
+        <div v-if="moduleKey === 'platform'" class="console-filter-bar">
+          <label class="console-search-field">
+            <ConsoleIcon name="search" />
+            <input type="search" aria-label="搜索操作记录" />
+          </label>
+          <label class="console-select-field">
+            <select aria-label="应用"><option>所有应用</option><option>项目管理</option></select>
+          </label>
+          <label class="console-select-field">
+            <select aria-label="环境" disabled><option>所有环境</option></select>
+          </label>
+        </div>
+        <div v-if="moduleKey === 'platform'" class="settings-tab-toolbar">
+          <label class="settings-tab-search">
+            <ConsoleIcon name="search" />
+            <input v-model="settingsQuery" type="search" aria-label="搜索设置模块" />
+            <button v-if="settingsQuery" type="button" class="settings-tab-search-clear"
+              aria-label="清空搜索" @click="settingsQuery = ''">×</button>
+          </label>
+        </div>
+        <div v-if="moduleKey === 'contract'" class="contract-filter-bar">
+          <label class="contract-search-field">
+            <ConsoleIcon name="search" />
+            <input type="search" aria-label="搜索合同台账" />
+          </label>
+        </div>
+        <template v-if="moduleKey === 'project'">
+          <ServiceItemPicker />
+          <SearchableSelect v-model="projectSelection" :options="projectOptions" aria-label="选择合成项目" />
+        </template>
         <div class="fixture-fields">
           <label>独立筛选<input id="filter" placeholder="搜索名称或编号" /></label>
           <label>校验错误<input id="invalid" value="待修正" aria-invalid="true" /></label>
